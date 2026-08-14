@@ -11,6 +11,7 @@
     "typecheck": "pnpm -r typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
+    "dashboard": "pnpm --filter @shop-health/dashboard dev",
     "shop-health": "pnpm --filter @shop-health/cli start",
     "worker": "pnpm --filter @shop-health/worker start",
     "db:generate": "drizzle-kit generate --config packages/db/drizzle.config.ts",

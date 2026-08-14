@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .next/
+.next-*/
 coverage/
 .env
 .env.*
@@ -10,6 +11,10 @@ coverage/
 Thumbs.db
 playwright-report/
 test-results/
+.playwright-cli/
+*.tsbuildinfo
+output/playwright/*
+!output/playwright/dashboard-phase1-final-1440x900.png
 database-dumps/
 backups/
 *.dump

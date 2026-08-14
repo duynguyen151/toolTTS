@@ -1,0 +1,54 @@
+import { Bars3Icon } from "@heroicons/react/24/outline";
+
+import { SearchField } from "../ui/search-field";
+import { NavigationList } from "./navigation";
+import { ProductMark } from "./sidebar";
+
+function MobileNavigation() {
+  return (
+    <details className="mobile-nav">
+      <summary aria-label="Open navigation">
+        <Bars3Icon aria-hidden="true" />
+      </summary>
+      <div className="mobile-nav__panel">
+        <ProductMark />
+        <div className="mobile-nav__search">
+          <SearchField
+            label="Search shops and profiles"
+            name="mobile-dashboard-search"
+            placeholder="Search shops or profiles"
+          />
+        </div>
+        <NavigationList />
+      </div>
+    </details>
+  );
+}
+
+export function TopBar() {
+  return (
+    <header className="topbar">
+      <MobileNavigation />
+      <div className="topbar__title">
+        <p>Operations</p>
+        <strong>Dashboard</strong>
+      </div>
+      <div className="topbar__search">
+        <SearchField
+          label="Search shops and profiles"
+          name="dashboard-search"
+          placeholder="Search shops or profiles"
+        />
+      </div>
+      <div className="operator-context" aria-label="Current workspace">
+        <span className="operator-context__avatar" aria-hidden="true">
+          OP
+        </span>
+        <span className="operator-context__copy">
+          <strong>Operator</strong>
+          <small>Read-only</small>
+        </span>
+      </div>
+    </header>
+  );
+}

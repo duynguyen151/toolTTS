@@ -71,6 +71,12 @@ importers:
       '@shop-health/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@shop-health/seller-center':
+        specifier: workspace:*
+        version: link:../../packages/seller-center
+      '@shop-health/sync':
+        specifier: workspace:*
+        version: link:../../packages/sync
       next:
         specifier: ^16.3.1
         version: 16.3.1(@types/node@24.13.3)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)

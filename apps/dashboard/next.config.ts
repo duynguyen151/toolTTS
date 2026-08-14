@@ -10,7 +10,11 @@ if (process.env.DATABASE_URL === undefined && existsSync(workspaceEnv)) {
 
 const nextConfig: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
-  transpilePackages: ["@shop-health/db"],
+  transpilePackages: [
+    "@shop-health/db",
+    "@shop-health/seller-center",
+    "@shop-health/sync",
+  ],
   webpack(config) {
     config.resolve.extensionAlias = {
       ...config.resolve.extensionAlias,

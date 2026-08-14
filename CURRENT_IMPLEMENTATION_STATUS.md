@@ -11,7 +11,70 @@ C:\DUY - DoWorks\Tool_TTS
 
 - Git branch: `master`
 - Baseline commit: `273573b baseline: V1 decision capture foundation`
+- Stable Seller Center extraction commit: `49cad57 feat: lock down live seller data coverage`
 - No Git remote or push is configured for this wave.
+
+## Verified LIVE extraction milestone
+
+Profile `957` reached:
+
+```text
+OVERALL LIVE DATA = PASS
+```
+
+### Orders
+
+- Source rows: `9`
+- Unique order IDs: `9`
+- Persisted rows: `9`
+- Pagination: `COMPLETE`
+- Proven source history window: rolling 12 months
+- `lifetimeHistoryComplete=false`
+- Status coverage: complete; unknown statuses: `0`
+- Shipping coverage: complete
+- Reverse/refund state: captured
+- Refund amount: `NOT_AVAILABLE_FROM_SOURCE` and therefore remains `null`
+
+Verified status mapping/counts:
+
+```text
+101/1   -> AWAITING_SHIPMENT: 2
+101/2   -> AWAITING_SHIPMENT: 3
+102/310 -> DELIVERED: 3
+104/0   -> CANCELED: 1
+UNKNOWN: 0
+```
+
+### Finance
+
+- Required V1 Finance scope: complete
+- Official Finance On Hold: `$310.16`
+- Waiting for package delivery: `$177.33`
+- Delivered awaiting settlement: `$132.83`
+- Reconciliation: `$177.33 + $132.83 = $310.16` (`PASS`)
+- On Hold detail: `8/8`
+- Finance to Orders linkage: `8/8`
+- Payouts source total: `0`
+- Statements: `OPTIONAL`, deferred
+- Invoices and Earnings Analytics: `OPTIONAL` for current V1
+
+Repeat sync is idempotent and does not create duplicate orders or Finance rows.
+The production-code and persisted-data PII/security scans returned `0` findings.
+Independent reviewer verdict: `APPROVE`.
+
+### Completeness semantics
+
+- `COMPLETE` means complete within the proven V1 source window. It never means
+  complete lifetime Seller Center history.
+- `FULL_PERSISTED_HISTORY` must not be represented as `FULL_SELLER_CENTER_HISTORY`.
+- Official Finance On Hold is the Seller Center Finance value. Operational or
+  order-derived exposure is a separate metric and must not replace or be merged
+  with the official value.
+- Fields unavailable from an authoritative source remain explicitly unavailable
+  or `null`; they must never be fabricated, estimated, or converted to zero.
+- Seller Center extraction at commit `49cad57` is a stable subsystem. Dashboard,
+  AI, and BA waves must consume its boundaries and must not refactor extraction
+  unless a concrete integration failure demonstrates that a change is required.
 
 ## Current architecture
 
@@ -119,12 +182,35 @@ failure code. No live provider smoke test is required without an API key.
 
 ## Seller Center boundary
 
-- AdsPower was intentionally not used for this decision-workflow wave.
-- Final diagnostics found the local AdsPower API reachable; no profile was opened or manipulated.
+- AdsPower profile `957` was used for verified LIVE Seller Center extraction.
+- Orders and required Finance data are collected from proven structured Seller
+  Center sources, normalized, and persisted through the existing package seams.
 - No replacement scraper, login flow, or alternate live data source was added.
 - No Seller Center request is made by the review/decision/execution path.
-- Live Seller Center validation: `NOT RUN - AdsPower intentionally disabled`.
 - Holiday Mode remains DRY_RUN only.
+
+Secrets and browser internals are implementation-private. Public status, read
+models, logs, documentation, and future UI contracts must not expose cookies,
+session/browser storage, authorization data, API keys, CDP endpoints, or proxy
+credentials.
+
+## Stable application boundaries for future UI
+
+Future Dashboard presentation should reuse these existing application/package
+boundaries rather than importing browser internals or rebuilding business logic:
+
+| Capability | Stable boundary |
+| --- | --- |
+| AdsPower profile status/open | `AdsPowerClient.active`, `AdsPowerClient.open`, and `SellerDataSource.health`; expose only sanitized availability/status results |
+| LIVE sync/update data | `runShopSync` and `SyncResult`; CLI JSON contract `sync-result.v1` |
+| Orders read model | `listOrders`; CLI JSON contract `order-list.v1` |
+| Finance/On Hold read model | `getFinanceSummary`, `listOnHoldSettlements`; CLI JSON contracts `finance-summary.v1` and `finance-on-hold.v1` |
+| Sync result/failure state | `listSyncRuns`, `ShopSyncState`, and CLI JSON contracts `sync-history.v1` / `shop-status.v1` |
+| Coverage state | `SyncResult.sourceCoverage`: `SELLER_CENTER`, `ROLLING_12_MONTHS`, `completeWithinWindow`, and `lifetimeHistoryComplete=false` |
+
+The UI may adapt these application results into presentation DTOs, but it must
+not receive or expose `AdsPowerBrowserConnection.cdpEndpoint` or other secret
+connection material.
 
 ## Deferred scope
 
@@ -136,31 +222,41 @@ Mastra, LangChain, or fine-tuning.
 Future dashboard code should consume the stable decision presentation schemas
 and must not reimplement deterministic rules or workflow persistence.
 
-## Known live-data gaps
+## Known limitations and deferred items
 
-- Seller Center status mappings other than confirmed code `101`.
-- Refund and settlement-row mappings.
-- Carrier variants.
-- Pagination/export request mapping and full-history backfill.
-- Holiday Mode live route/state/write discovery.
-- Proof of complete historical coverage.
-
-`sync backfill` remains disabled with `BACKFILL_UNRESOLVED`.
+- The proven Orders source window is rolling 12 months; lifetime history is not
+  available or proven, so `lifetimeHistoryComplete` remains `false`.
+- Refund/reverse state is captured, but refund amount is not available from the
+  proven source and remains `null`.
+- Payouts currently has an authoritative source total of zero.
+- Statements, Invoices, and Earnings Analytics are optional/deferred for V1.
+- `sync backfill` remains disabled with `BACKFILL_UNRESOLVED`; it must not claim
+  lifetime Seller Center coverage.
+- Holiday Mode live route/state/write remains outside this extraction milestone;
+  all execution behavior remains DRY_RUN.
 
 ## Verification
 
-Final local verification on 2026-08-14:
+Final extraction verification on 2026-08-14:
 
 ```text
 pnpm typecheck: PASS
-pnpm test: PASS (135/135)
-pnpm build: PASS, including plain Node CLI postbuild smoke
+pnpm test: PASS (204/204)
+pnpm build: PASS
 pnpm exec drizzle-kit check --config packages/db/drizzle.config.ts: PASS
-pnpm db:migrate: PASS
-pnpm db:seed:demo: PASS twice, idempotent
-pnpm shop-health doctor --json: Node OK, PostgreSQL OK, AdsPower API OK,
-  baseline AI SKIP because TOOL_AI_API_KEY is missing
 ```
+
+Exact verification commands:
+
+```powershell
+pnpm typecheck
+node --env-file=.env node_modules/vitest/vitest.mjs run
+pnpm build
+pnpm exec drizzle-kit check --config packages/db/drizzle.config.ts
+```
+
+The explicit Node test command loads ignored local test-database configuration
+so the PostgreSQL integration tests run instead of being skipped.
 
 Independent built-CLI PostgreSQL E2E passed:
 

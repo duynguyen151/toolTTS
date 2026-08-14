@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AiDecisionInputSchema,
   BaDecisionInputSchema,
   BaDecisionSchema,
   CaptureBaDecisionInputSchema,
+  CreateDecisionCaseInputSchema,
   DecisionCaseInputSchema,
+  DryRunExecutionSchema,
+  RecordBaDecisionForCaseInputSchema,
+  RecordDryRunExecutionInputSchema,
   mapRiskResultToRuleDecision,
 } from "./decisions.js";
 
@@ -130,5 +135,151 @@ describe("decision contracts", () => {
     ["INSUFFICIENT_DATA", "INSUFFICIENT_DATA"],
   ] as const)("maps risk result %s to product decision %s", (riskResult, expected) => {
     expect(mapRiskResultToRuleDecision(riskResult)).toBe(expected);
+  });
+
+  it("accepts explicit LIVE and sanitized DEMO decision case requests", () => {
+    const live = CreateDecisionCaseInputSchema.parse({
+      ...validCase,
+      requestId: "00000000-0000-4000-8000-000000000020",
+      caseOrigin: "LIVE",
+    });
+    const demo = CreateDecisionCaseInputSchema.parse({
+      ...validCase,
+      requestId: "00000000-0000-4000-8000-000000000021",
+      caseOrigin: "DEMO_SANITIZED",
+      sourceSyncRunId: null,
+    });
+
+    expect(live.caseOrigin).toBe("LIVE");
+    expect(demo.caseOrigin).toBe("DEMO_SANITIZED");
+  });
+
+  it.each([
+    ["non-UUID request", { requestId: "retry-1", caseOrigin: "LIVE" }],
+    [
+      "DEMO source run",
+      {
+        requestId: "00000000-0000-4000-8000-000000000022",
+        caseOrigin: "DEMO_SANITIZED",
+        sourceSyncRunId: "00000000-0000-4000-8000-000000000023",
+      },
+    ],
+  ])("rejects a decision case with %s", (_label, overrides) => {
+    expect(
+      CreateDecisionCaseInputSchema.safeParse({
+        ...validCase,
+        ...overrides,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts a complete available AI decision", () => {
+    const result = AiDecisionInputSchema.parse({
+      requestId: "00000000-0000-4000-8000-000000000030",
+      decisionCaseId: "00000000-0000-4000-8000-000000000031",
+      status: "AVAILABLE",
+      provider: "openai",
+      model: "gpt-5-mini",
+      promptVersion: "shop-health.v1",
+      policyVersion: "ai-policy.v1",
+      recommendation: "WATCH",
+      confidence: 0.7,
+      reasonCodes: ["DATA_INCOMPLETE"],
+      reason: "  Delivery history is incomplete.  ",
+      humanReviewRequired: true,
+      failureCode: null,
+    });
+
+    expect(result.reason).toBe("Delivery history is incomplete.");
+    expect(result.failureCode).toBeNull();
+  });
+
+  it("accepts an unavailable AI decision only in its fail-closed shape", () => {
+    const result = AiDecisionInputSchema.parse({
+      requestId: "00000000-0000-4000-8000-000000000032",
+      decisionCaseId: "00000000-0000-4000-8000-000000000033",
+      status: "UNAVAILABLE",
+      provider: "openai",
+      model: "gpt-5-mini",
+      promptVersion: "shop-health.v1",
+      policyVersion: "ai-policy.v1",
+      recommendation: null,
+      confidence: null,
+      reasonCodes: null,
+      reason: null,
+      humanReviewRequired: true,
+      failureCode: "PROVIDER_UNAVAILABLE",
+    });
+
+    expect(result.status).toBe("UNAVAILABLE");
+    expect(result.humanReviewRequired).toBe(true);
+  });
+
+  it.each([
+    ["available failure code", { status: "AVAILABLE", failureCode: "TIMEOUT" }],
+    ["available missing recommendation", { status: "AVAILABLE", recommendation: null }],
+    ["unavailable recommendation", { status: "UNAVAILABLE", recommendation: "WATCH" }],
+    ["unavailable confidence", { status: "UNAVAILABLE", confidence: 0.5 }],
+    ["unavailable reason codes", { status: "UNAVAILABLE", reasonCodes: ["OTHER"] }],
+    ["unavailable reason", { status: "UNAVAILABLE", reason: "Maybe watch" }],
+    ["unavailable without review", { status: "UNAVAILABLE", humanReviewRequired: false }],
+    ["unavailable blank failure", { status: "UNAVAILABLE", failureCode: "   " }],
+  ])("rejects inconsistent AI state: %s", (_label, overrides) => {
+    const base = {
+      requestId: "00000000-0000-4000-8000-000000000034",
+      decisionCaseId: "00000000-0000-4000-8000-000000000035",
+      status: "AVAILABLE",
+      provider: "openai",
+      model: "gpt-5-mini",
+      promptVersion: "shop-health.v1",
+      policyVersion: "ai-policy.v1",
+      recommendation: "WATCH",
+      confidence: 0.7,
+      reasonCodes: ["DATA_INCOMPLETE"],
+      reason: "Delivery history is incomplete.",
+      humanReviewRequired: true,
+      failureCode: null,
+    };
+
+    expect(AiDecisionInputSchema.safeParse({ ...base, ...overrides }).success).toBe(false);
+  });
+
+  it("requires UUID request IDs for separate BA recording", () => {
+    expect(
+      RecordBaDecisionForCaseInputSchema.safeParse({
+        requestId: "ba-retry",
+        decisionCaseId: "00000000-0000-4000-8000-000000000040",
+        baDecision: {
+          decision: "PAUSE",
+          reasonCodes: ["HIGH_ABSOLUTE_EXPOSURE"],
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts only the safe dry-run execution literals", () => {
+    const input = {
+      requestId: "00000000-0000-4000-8000-000000000050",
+      decisionCaseId: "00000000-0000-4000-8000-000000000051",
+      baDecisionId: "00000000-0000-4000-8000-000000000052",
+      requestedAction: "HOLIDAY_MODE_ON",
+      executionMode: "DRY_RUN",
+    } as const;
+
+    expect(RecordDryRunExecutionInputSchema.parse(input)).toEqual(input);
+    expect(
+      DryRunExecutionSchema.parse({
+        ...input,
+        executionStatus: "SIMULATED",
+        sellerCenterCalled: false,
+      }).sellerCenterCalled,
+    ).toBe(false);
+    expect(
+      RecordDryRunExecutionInputSchema.safeParse({ ...input, executionMode: "LIVE" }).success,
+    ).toBe(false);
+    expect(
+      DryRunExecutionSchema.safeParse({ ...input, executionStatus: "SUCCEEDED", sellerCenterCalled: true })
+        .success,
+    ).toBe(false);
   });
 });

@@ -19,15 +19,20 @@ import { SellerCenterError } from "../errors.js";
 import {
   OrderCountResponseSchema,
   OrderListResponseSchema,
-  StatementOrderListResponseSchema,
   StatementStatResponseSchema,
 } from "../extractors/schemas.js";
-import { normalizeFinancialSnapshot } from "../normalizers/finance.js";
+import {
+  normalizeFinancialSnapshot,
+  normalizeSettlementRecord,
+} from "../normalizers/finance.js";
 import { normalizeOrder } from "../normalizers/orders.js";
 import { stableHash } from "../normalizers/shared.js";
+import { collectFinanceStatementPages } from "./finance-pagination.js";
+import { assertOnHoldReconciled } from "./finance-reconciliation.js";
 
 const SELLER_ORIGIN = "https://seller-us.tiktok.com";
 const ORDER_ROUTE = `${SELLER_ORIGIN}/order`;
+const FINANCE_ON_HOLD_ROUTE = `${SELLER_ORIGIN}/finance/bills?tab=overview&subTab=on-hold`;
 const ORDER_LIST_PATH = "/api/fulfillment/na/order/list";
 const ORDER_COUNT_PATH = "/api/fulfillment/na/order/search_count";
 const STATEMENT_STAT_PATH = "/api/v1/pay/statement/stat/info";
@@ -49,7 +54,6 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
   private readonly adsPower: AdsPowerClient;
   private readonly logger: Logger | undefined;
   private readonly responseTimeoutMs: number;
-  private readonly browsers = new Map<string, Browser>();
 
   constructor(options: SellerCenterDataSourceOptions = {}) {
     this.adsPower = options.adsPowerClient ?? new AdsPowerClient(options);
@@ -74,7 +78,7 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
   async probe(config: ShopSourceConfig): Promise<SourceFingerprint> {
     const shop = ShopSourceConfigSchema.parse(config);
     return this.withPage(shop, async (page) => {
-      const responseResult = captureJsonResponse(page, ORDER_COUNT_PATH, this.responseTimeoutMs);
+      const responseResult = captureJsonResponse(page, ORDER_COUNT_PATH, "POST", this.responseTimeoutMs);
       await navigateToOrders(page, this.responseTimeoutMs);
       await assertHealthyPage(page);
       const captured = await responseResult;
@@ -87,7 +91,13 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
   async *collectOrders(input: SyncRequest): AsyncIterable<NormalizedOrderBatch> {
     const request = SyncRequestSchema.parse(input);
     const batch = await this.withPage(request.shop, async (page) => {
-      const responseResult = captureJsonResponse(page, ORDER_LIST_PATH, this.responseTimeoutMs);
+      const responseResult = captureJsonResponseWithRequest(
+        page,
+        ORDER_LIST_PATH,
+        "POST",
+        this.responseTimeoutMs,
+        isActualOrderListResponse,
+      );
       await navigateToOrders(page, this.responseTimeoutMs);
       await assertHealthyPage(page);
       const captured = await responseResult;
@@ -96,17 +106,18 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
       if (response.code !== 0) {
         throw new SellerCenterError("LAYOUT_CHANGED", `Order list returned source code ${response.code}`);
       }
-      if (response.data.has_more === true || response.data.search_next_has_more === true) {
-        throw new SellerCenterError(
-          "LAYOUT_CHANGED",
-          "Order pagination is present but its request mapping is unresolved; refusing a partial sync",
-        );
-      }
+      assertCompleteAllOrdersResponse(response.data);
       const observedAt = new Date();
       return NormalizedOrderBatchSchema.parse({
         orders: response.data.main_orders.map((order) => normalizeOrder(order, request.shop.shopId, observedAt)),
-        checkpoint: response.data.next_cursor_token ?? response.data.search_next_cursor ?? null,
-        complete: !(response.data.has_more ?? response.data.search_next_has_more ?? false),
+        checkpoint: null,
+        complete: true,
+        sourceWindow: {
+          source: "SELLER_CENTER",
+          kind: "ROLLING_MONTHS",
+          months: 12,
+          lifetimeHistory: false,
+        },
       });
     });
     yield batch;
@@ -115,46 +126,41 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
   async *collectFinancials(input: SyncRequest): AsyncIterable<NormalizedFinancialBatch> {
     const request = SyncRequestSchema.parse(input);
     const batch = await this.withPage(request.shop, async (page) => {
-      const statResult = captureJsonResponse(page, STATEMENT_STAT_PATH, this.responseTimeoutMs);
-      const listResult = captureJsonResponse(page, STATEMENT_LIST_PATH, this.responseTimeoutMs);
+      const statResult = captureJsonResponseWithRequest(
+        page,
+        STATEMENT_STAT_PATH,
+        "GET",
+        this.responseTimeoutMs,
+        isOnHoldStatResponse,
+      );
+      const listResult = captureJsonResponseWithRequest(
+        page,
+        STATEMENT_LIST_PATH,
+        "GET",
+        this.responseTimeoutMs,
+        isOnHoldFinancePageOne,
+      );
       await navigateToFinance(page, this.responseTimeoutMs);
       const statCaptured = await statResult;
       if (!statCaptured.ok) throw statCaptured.error;
       const listCaptured = await listResult;
-      const statRaw = statCaptured.body;
-      const listRaw = listCaptured.ok
-        ? listCaptured.body
-        : { code: 0, data: { search_next_has_more: true } };
-      const stat = StatementStatResponseSchema.parse(statRaw);
-      const list = StatementOrderListResponseSchema.parse(listRaw);
-      if (stat.code !== 0 || list.code !== 0) {
-        throw new SellerCenterError("LAYOUT_CHANGED", "Finance endpoints returned a non-zero source code");
+      if (!listCaptured.ok) throw listCaptured.error;
+      const stat = StatementStatResponseSchema.parse(statCaptured.body);
+      if (stat.code !== 0) {
+        throw new SellerCenterError("LAYOUT_CHANGED", `Finance stat returned source code ${stat.code}`);
       }
-      if (!listCaptured.ok) {
-        this.logger?.warn({
-          shopId: request.shop.shopId,
-          profileId: request.shop.profileId,
-          operation: "collectFinancials",
-          entity: "settlement",
-          failureType: "SOURCE_TIMEOUT",
-        }, "Finance snapshot collected without settlement rows");
-      }
-      const rawRows = list.data.order_records ?? list.data.order_list ?? list.data.orders ?? [];
-      if (rawRows.length > 0) {
-        this.logger?.warn({
-          shopId: request.shop.shopId,
-          profileId: request.shop.profileId,
-          operation: "collectFinancials",
-          entity: "settlement",
-          failureType: "UNRESOLVED_MAPPING",
-          rowCount: rawRows.length,
-        }, "Settlement rows were found but their mapping is intentionally unresolved");
-      }
+      const collected = await collectFinanceStatementPages({
+        capturedPageOneUrl: listCaptured.requestUrl,
+        firstPage: listCaptured.body,
+        fetchPage: (url) => fetchJsonInPage(page, url),
+      });
+      assertOnHoldReconciled(stat, collected.rows);
+      const capturedAt = new Date();
       return NormalizedFinancialBatchSchema.parse({
-        settlements: [],
-        snapshot: normalizeFinancialSnapshot(stat, request.shop.shopId),
+        settlements: collected.rows.map((row) => normalizeSettlementRecord(row, request.shop.shopId)),
+        snapshot: normalizeFinancialSnapshot(stat, request.shop.shopId, capturedAt),
         checkpoint: null,
-        complete: !(list.data.search_next_has_more ?? false),
+        complete: true,
       });
     });
     yield batch;
@@ -162,9 +168,10 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
 
   private async withPage<T>(shop: ShopSourceConfig, operation: (page: Page) => Promise<T>): Promise<T> {
     const connection = await this.adsPower.open(shop.profileId);
+    let browser: Browser | undefined;
     let page: Page | undefined;
     try {
-      const browser = await this.connectedBrowser(shop.profileId, connection.cdpEndpoint);
+      browser = await chromium.connectOverCDP(connection.cdpEndpoint, { timeout: this.responseTimeoutMs });
       const context = browser.contexts()[0];
       if (!context) throw new SellerCenterError("BROWSER_DISCONNECTED", "AdsPower browser has no context");
       page = await context.newPage();
@@ -174,40 +181,51 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
       throw new SellerCenterError("LAYOUT_CHANGED", "Seller Center operation failed", { cause: error });
     } finally {
       await page?.close().catch(() => undefined);
+      // Release the Playwright CDP transport without stopping the AdsPower profile.
+      await browser?.close().catch(() => undefined);
     }
-  }
-
-  private async connectedBrowser(profileId: string, cdpEndpoint: string): Promise<Browser> {
-    const existing = this.browsers.get(profileId);
-    if (existing?.isConnected()) return existing;
-    this.browsers.delete(profileId);
-    const browser = await chromium.connectOverCDP(cdpEndpoint, { timeout: this.responseTimeoutMs });
-    browser.once("disconnected", () => this.browsers.delete(profileId));
-    this.browsers.set(profileId, browser);
-    return browser;
   }
 }
 
-async function waitForJsonResponse(page: Page, path: string, timeoutMs: number): Promise<unknown> {
-  let response: Response;
-  try {
-    response = await page.waitForResponse(
-      (candidate) => new URL(candidate.url()).pathname === path && candidate.status() === 200,
-      { timeout: timeoutMs },
-    );
-  } catch (error) {
-    throw new SellerCenterError("SOURCE_TIMEOUT", `Timed out waiting for ${path}`, { cause: error });
-  }
-  return response.json();
+async function waitForJsonResponse(
+  page: Page,
+  path: string,
+  method: "GET" | "POST",
+  timeoutMs: number,
+): Promise<unknown> {
+  return (await waitForResponse(page, path, method, timeoutMs)).json();
 }
 
 async function captureJsonResponse(
   page: Page,
   path: string,
+  method: "GET" | "POST",
   timeoutMs: number,
 ): Promise<{ ok: true; body: unknown } | { ok: false; error: unknown }> {
   try {
-    return { ok: true, body: await waitForJsonResponse(page, path, timeoutMs) };
+    return { ok: true, body: await waitForJsonResponse(page, path, method, timeoutMs) };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
+async function captureJsonResponseWithRequest(
+  page: Page,
+  path: string,
+  method: "GET" | "POST",
+  timeoutMs: number,
+  matchesResponse?: (response: Response) => boolean,
+): Promise<
+  | { ok: true; body: unknown; requestUrl: string }
+  | { ok: false; error: unknown }
+> {
+  try {
+    const response = await waitForResponse(page, path, method, timeoutMs, matchesResponse);
+    return {
+      ok: true,
+      body: await response.json(),
+      requestUrl: response.request().url(),
+    };
   } catch (error) {
     return { ok: false, error };
   }
@@ -215,6 +233,8 @@ async function captureJsonResponse(
 
 async function navigateToOrders(page: Page, timeoutMs: number): Promise<void> {
   const url = new URL(ORDER_ROUTE);
+  url.searchParams.set("selected_sort", "6");
+  url.searchParams.set("tab", "all");
   url.searchParams.set("shop_health_probe", String(Date.now()));
   await page.goto(url.toString(), { waitUntil: "domcontentloaded", timeout: timeoutMs });
 }
@@ -227,36 +247,97 @@ async function assertHealthyPage(page: Page): Promise<void> {
 }
 
 async function navigateToFinance(page: Page, timeoutMs: number): Promise<void> {
-  await navigateToOrders(page, timeoutMs);
+  await page.goto(FINANCE_ON_HOLD_ROUTE, { waitUntil: "domcontentloaded", timeout: timeoutMs });
   await assertHealthyPage(page);
-  const financeMenu = page.getByText("Finances", { exact: true }).first();
-  if (await financeMenu.count() > 0 && await financeMenu.isVisible()) {
-    await financeMenu.click({ timeout: timeoutMs });
-  }
-  const visibleFinanceLink = page.locator('a[href^="/finance/bills"]:visible').first();
-  if (await visibleFinanceLink.count() > 0) {
-    await visibleFinanceLink.click({ timeout: timeoutMs });
-  } else {
-    const financeLink = page.locator('a[href^="/finance/bills"]').first();
-    if (await financeLink.count() === 0) {
-      throw new SellerCenterError("LAYOUT_CHANGED", "Finance Overview navigation link was not found");
-    }
-    const href = await financeLink.getAttribute("href");
-    if (!href?.startsWith("/finance/bills")) {
-      throw new SellerCenterError("LAYOUT_CHANGED", "Finance Overview navigation target changed");
-    }
-    await page.evaluate((target) => {
-      const anchor = document.querySelector<HTMLAnchorElement>(`a[href^="${target}"]`);
-      anchor?.click();
-    }, href);
-  }
-  await page.waitForURL((url) => url.origin === SELLER_ORIGIN && url.pathname === "/finance/bills", {
-    timeout: timeoutMs,
-  });
   const financeUrl = new URL(page.url());
-  financeUrl.searchParams.set("shop_health_probe", String(Date.now()));
-  await page.goto(financeUrl.toString(), { waitUntil: "domcontentloaded", timeout: timeoutMs });
-  await assertHealthyPage(page);
+  if (
+    financeUrl.origin !== SELLER_ORIGIN
+    || financeUrl.pathname !== "/finance/bills"
+    || financeUrl.searchParams.get("tab") !== "overview"
+    || financeUrl.searchParams.get("subTab") !== "on-hold"
+  ) {
+    throw new SellerCenterError("LAYOUT_CHANGED", "Finance On hold route changed");
+  }
+}
+
+async function waitForResponse(
+  page: Page,
+  path: string,
+  method: "GET" | "POST",
+  timeoutMs: number,
+  matchesResponse?: (response: Response) => boolean,
+): Promise<Response> {
+  try {
+    return await page.waitForResponse(
+      (candidate) => candidate.request().method() === method
+        && new URL(candidate.url()).pathname === path
+        && candidate.status() === 200
+        && (matchesResponse?.(candidate) ?? true),
+      { timeout: timeoutMs },
+    );
+  } catch (error) {
+    throw new SellerCenterError("SOURCE_TIMEOUT", `Timed out waiting for ${path}`, { cause: error });
+  }
+}
+
+function isOnHoldFinancePageOne(response: Response): boolean {
+  const requestUrl = new URL(response.request().url());
+  return requestUrl.searchParams.get("settlement_status") === "1"
+    && requestUrl.searchParams.get("from") === "0"
+    && requestUrl.searchParams.get("size") === "5"
+    && requestUrl.searchParams.get("page_type") === "10"
+    && requestUrl.searchParams.get("pagination_type") === "1";
+}
+
+function isOnHoldStatResponse(response: Response): boolean {
+  return new URL(response.request().url()).searchParams.get("amount_stat_type") === "1";
+}
+
+function isActualOrderListResponse(response: Response): boolean {
+  const request = response.request();
+  if (new URL(request.url()).searchParams.has("is_prefetch")) return false;
+  try {
+    return request.postDataJSON() === null;
+  } catch {
+    return false;
+  }
+}
+
+function assertCompleteAllOrdersResponse(data: {
+  total_count?: number | undefined;
+  main_orders: ReadonlyArray<{ main_order_id: string }>;
+  has_more?: boolean | undefined;
+  search_next_has_more?: boolean | undefined;
+}): void {
+  if (data.total_count === undefined) {
+    throw new SellerCenterError("LAYOUT_CHANGED", "Order total_count is missing; completeness is unproven");
+  }
+  if (data.has_more !== false || data.search_next_has_more !== false) {
+    throw new SellerCenterError(
+      "LAYOUT_CHANGED",
+      data.has_more === true || data.search_next_has_more === true
+        ? "Order pagination is present but its request mapping is unresolved"
+        : "Order pagination termination flags are missing",
+    );
+  }
+  const uniqueOrderIds = new Set(data.main_orders.map((order) => order.main_order_id));
+  if (uniqueOrderIds.size !== data.main_orders.length) {
+    throw new SellerCenterError("LAYOUT_CHANGED", "Order duplicate main_order_id values prevent reconciliation");
+  }
+  if (data.main_orders.length !== data.total_count || uniqueOrderIds.size !== data.total_count) {
+    throw new SellerCenterError(
+      "LAYOUT_CHANGED",
+      `Order reconciliation failed: rows=${data.main_orders.length}, unique=${uniqueOrderIds.size}, total=${data.total_count}`,
+    );
+  }
+}
+
+async function fetchJsonInPage(page: Page, requestUrl: string): Promise<unknown> {
+  return page.evaluate(async (url) => {
+    const response = await fetch(url, { credentials: "include" });
+    if (!response.ok) throw new Error(`Finance page fetch failed with HTTP ${response.status}`);
+    return response.json();
+  }, requestUrl);
 }
 
 async function detectAccessState(page: Page): Promise<SourceHealth["status"]> {

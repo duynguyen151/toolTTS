@@ -20,6 +20,7 @@ function order(
     createdAt: now,
     paidAt: now,
     sourceUpdatedAt: now,
+    readyToShipAt: null,
     latestDeliveryAt: null,
     sourceStatus: status,
     sourceSubStatus: null,

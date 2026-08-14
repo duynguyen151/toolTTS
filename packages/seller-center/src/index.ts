@@ -7,12 +7,27 @@ export {
   SellerCenterBrowserDataSource,
 } from "./source/browser-source.js";
 export type { SellerCenterDataSourceOptions } from "./source/browser-source.js";
-export { normalizeFinancialSnapshot } from "./normalizers/finance.js";
+export { captureSellerCenterNetworkInventory } from "./source/network-inventory.js";
+export type {
+  CaptureSellerCenterNetworkInventoryOptions,
+  NetworkInventoryEntry,
+  NetworkInventoryReport,
+} from "./source/network-inventory.js";
+export {
+  normalizeFinancialSnapshot,
+  normalizeSettlementRecord,
+} from "./normalizers/finance.js";
 export { normalizeOrder } from "./normalizers/orders.js";
 export {
   OrderCountResponseSchema,
   OrderListResponseSchema,
   RawOrderSchema,
+  RawStatementOrderSchema,
   StatementOrderListResponseSchema,
   StatementStatResponseSchema,
+} from "./extractors/schemas.js";
+export type {
+  RawStatementOrder,
+  StatementOrderListResponse,
+  StatementStatResponse,
 } from "./extractors/schemas.js";

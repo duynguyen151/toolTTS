@@ -20,6 +20,7 @@ function order(
     createdAt: new Date("2026-07-09T00:00:00.000Z"),
     paidAt: new Date("2026-07-10T00:00:00.000Z"),
     sourceUpdatedAt: new Date("2026-07-11T00:00:00.000Z"),
+    readyToShipAt: null,
     latestDeliveryAt: null,
     sourceStatus: status,
     sourceSubStatus: null,

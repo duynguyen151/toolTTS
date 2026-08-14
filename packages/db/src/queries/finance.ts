@@ -95,6 +95,9 @@ export interface FinancialSnapshotInput {
   totalBalance: string | null;
   toSettleBalance: string | null;
   onHoldBalance: string | null;
+  officialOnHoldAmount?: string | null;
+  settlementPeriodDays?: number | null;
+  settlementPeriodType?: string | null;
   reserveRatio: number | null;
   reserveDays: number | null;
   reserveLevel: string | null;
@@ -111,6 +114,9 @@ export async function insertFinancialSnapshot(
     .insert(financialSnapshots)
     .values({
       ...snapshot,
+      officialOnHoldAmount: snapshot.officialOnHoldAmount ?? null,
+      settlementPeriodDays: snapshot.settlementPeriodDays ?? null,
+      settlementPeriodType: snapshot.settlementPeriodType ?? null,
       reserveRatio: snapshot.reserveRatio === null ? null : String(snapshot.reserveRatio)
     })
     .onConflictDoNothing({

@@ -9,6 +9,8 @@ import { nullableText, stableHash, timestamp } from "./shared.js";
 
 const CONFIRMED_STATUS_MAP: Readonly<Record<string, CanonicalOrderStatus>> = {
   "101": "AWAITING_SHIPMENT",
+  "102": "DELIVERED",
+  "104": "CANCELED",
 };
 
 export function normalizeOrder(raw: RawOrder, shopId: string, observedAt = new Date()): NormalizedOrder {
@@ -30,6 +32,22 @@ export function normalizeOrder(raw: RawOrder, shopId: string, observedAt = new D
     ?.map((item) => timestamp(item.update_time))
     .filter((item): item is Date => item !== null) ?? [];
   const sourceUpdatedAt = updateTimes.sort((left, right) => right.valueOf() - left.valueOf())[0] ?? null;
+  const readyToShipTimes = raw.fulfillment_module
+    ?.map((item) => timestamp(item.rts_time))
+    .filter((item): item is Date => item !== null) ?? [];
+  const readyToShipAt = singleTimestamp(readyToShipTimes);
+  const reverseSource = raw.reverse_module?.[0];
+  const reverse = reverseSource === undefined
+    ? null
+    : {
+        reverseStatus: String(reverseSource.reverse_status),
+        reverseTabStatus: String(reverseSource.reverse_tab_status),
+        reverseType: String(reverseSource.reverse_type),
+        reverseFrom: String(reverseSource.reverse_from),
+        cancelledTime: reverseSource.cancelled_time,
+        refundTime: reverseSource.refund_time,
+        sellerAutoApproveTime: reverseSource.seller_auto_approve_time,
+      };
   const rawData = {
     mainOrderId: raw.main_order_id,
     tradeOrder: {
@@ -40,12 +58,14 @@ export function normalizeOrder(raw: RawOrder, shopId: string, observedAt = new D
     statusCodes,
     subStatusCodes,
     fulfillmentUpdateTimes: raw.fulfillment_module?.map((item) => item.update_time ?? null) ?? [],
+    fulfillmentReadyToShipTimes: raw.fulfillment_module?.map((item) => item.rts_time ?? null) ?? [],
     price: { grandTotal, currency },
     delivery: {
       trackingNumber: nullableText(delivery?.tracking_no),
       carrier: nullableText(delivery?.logistics_service_info?.logistics_service_name),
       serviceLevel: nullableText(delivery?.logistics_service_info?.logistics_service_level),
     },
+    reverse,
   };
 
   return NormalizedOrderSchema.parse({
@@ -54,6 +74,7 @@ export function normalizeOrder(raw: RawOrder, shopId: string, observedAt = new D
     createdAt: timestamp(raw.trade_order_module.create_time),
     paidAt: timestamp(raw.trade_order_module.payment_time),
     sourceUpdatedAt,
+    readyToShipAt,
     latestDeliveryAt: timestamp(raw.trade_order_module.latest_delivery_time),
     sourceStatus: statusCodes.join(","),
     sourceSubStatus: subStatusCodes.length > 0 ? subStatusCodes.join(",") : null,
@@ -63,14 +84,27 @@ export function normalizeOrder(raw: RawOrder, shopId: string, observedAt = new D
     trackingNumber: rawData.delivery.trackingNumber,
     carrier: rawData.delivery.carrier,
     refundAmount: null,
-    refundStatus: null,
+    refundStatus: reverse === null
+      ? null
+      : JSON.stringify({
+          source: "SELLER_CENTER_REVERSE",
+          reverseStatus: reverse.reverseStatus,
+          reverseTabStatus: reverse.reverseTabStatus,
+          reverseType: reverse.reverseType,
+          reverseFrom: reverse.reverseFrom,
+        }),
     deliveryEligible: ["IN_TRANSIT", "DELIVERED", "COMPLETED"].includes(canonicalStatus) ? true : null,
     firstSeenAt: observedAt,
     lastSeenAt: observedAt,
     sourceHash: stableHash(rawData),
-    sourceSchemaVersion: "seller-center-us-orders.v1",
+    sourceSchemaVersion: "seller-center-us-orders.v2",
     rawData,
   });
+}
+
+function singleTimestamp(values: readonly Date[]): Date | null {
+  const unique = [...new Map(values.map((value) => [value.valueOf(), value])).values()];
+  return unique.length === 1 ? unique[0] ?? null : null;
 }
 
 function canonicalizeStatuses(statusCodes: readonly string[]): CanonicalOrderStatus {

@@ -25,6 +25,7 @@ import {
 } from "@shop-health/domain";
 import type {
   RiskControlDecision,
+  OrderSourceWindow,
   SellerDataSource,
   ShopSourceConfig,
   SyncRequest
@@ -53,6 +54,12 @@ export interface SyncResult {
   readonly rowsWritten: number;
   readonly checkpoint: string | null;
   readonly complete: boolean;
+  readonly sourceCoverage?: {
+    readonly source: "SELLER_CENTER";
+    readonly window: "ROLLING_12_MONTHS";
+    readonly completeWithinWindow: boolean;
+    readonly lifetimeHistoryComplete: false;
+  };
 }
 
 export async function evaluateAndStoreRiskControl(
@@ -122,6 +129,7 @@ export async function runShopSync(input: RunSyncInput): Promise<SyncResult> {
     let rowsWritten = 0;
     let checkpoint = input.checkpoint ?? null;
     let complete = false;
+    let orderSourceWindow: OrderSourceWindow | undefined;
     const request: SyncRequest = {
       shop: sourceConfig(input.shop),
       mode,
@@ -140,6 +148,7 @@ export async function runShopSync(input: RunSyncInput): Promise<SyncResult> {
           rowsWritten += write.rowsWritten;
           checkpoint = batch.checkpoint;
           complete = batch.complete;
+          orderSourceWindow = batch.sourceWindow;
           await updateSyncCheckpoint(input.context.db, run.id, checkpoint === null ? null : { cursor: checkpoint }, rowsRead, rowsWritten);
         }
       } else {
@@ -170,7 +179,25 @@ export async function runShopSync(input: RunSyncInput): Promise<SyncResult> {
       });
       await markShopSynced(input.context.db, input.shop.id, input.kind);
       input.logger?.info({ shopId: input.shop.id, profileId: input.shop.profileId, syncRunId: run.id, operation: `sync.${input.kind}`, entity: input.kind, rowsRead, rowsWritten }, "Shop sync completed");
-      return { status: "SUCCEEDED" as const, syncRunId: run.id, rowsRead, rowsWritten, checkpoint, complete };
+      const sourceCoverage = orderSourceWindow === undefined
+        ? {}
+        : {
+            sourceCoverage: {
+              source: orderSourceWindow.source,
+              window: "ROLLING_12_MONTHS" as const,
+              completeWithinWindow: complete,
+              lifetimeHistoryComplete: false as const,
+            },
+          };
+      return {
+        status: "SUCCEEDED" as const,
+        syncRunId: run.id,
+        rowsRead,
+        rowsWritten,
+        checkpoint,
+        complete,
+        ...sourceCoverage,
+      };
     } catch (error) {
       const failureType = error instanceof SellerCenterError ? error.failureType : "UNEXPECTED_ERROR";
       const message = error instanceof Error ? error.message : "Unknown sync failure";

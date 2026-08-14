@@ -28,6 +28,7 @@ export const NormalizedOrderSchema = z.object({
   createdAt: z.date().nullable(),
   paidAt: z.date().nullable(),
   sourceUpdatedAt: z.date().nullable(),
+  readyToShipAt: z.date().nullable().default(null),
   latestDeliveryAt: z.date().nullable(),
   sourceStatus: z.string().min(1),
   sourceSubStatus: z.string().nullable(),
@@ -48,10 +49,20 @@ export const NormalizedOrderSchema = z.object({
 
 export type NormalizedOrder = z.infer<typeof NormalizedOrderSchema>;
 
+export const OrderSourceWindowSchema = z.object({
+  source: z.literal("SELLER_CENTER"),
+  kind: z.literal("ROLLING_MONTHS"),
+  months: z.literal(12),
+  lifetimeHistory: z.literal(false),
+});
+
+export type OrderSourceWindow = z.infer<typeof OrderSourceWindowSchema>;
+
 export const NormalizedOrderBatchSchema = z.object({
   orders: z.array(NormalizedOrderSchema),
   checkpoint: z.string().nullable(),
   complete: z.boolean(),
+  sourceWindow: OrderSourceWindowSchema,
 });
 
 export type NormalizedOrderBatch = z.infer<

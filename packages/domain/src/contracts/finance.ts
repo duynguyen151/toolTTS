@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   CurrencyCodeSchema,
+  DecimalStringSchema,
   JsonObjectSchema,
   NonNegativeDecimalStringSchema,
 } from "./common.js";
@@ -50,6 +51,9 @@ export const NormalizedFinancialSnapshotSchema = z.object({
   totalBalance: NonNegativeDecimalStringSchema.nullable(),
   toSettleBalance: NonNegativeDecimalStringSchema.nullable(),
   onHoldBalance: NonNegativeDecimalStringSchema.nullable(),
+  officialOnHoldAmount: DecimalStringSchema.nullable().default(null),
+  settlementPeriodDays: z.number().int().nonnegative().nullable().default(null),
+  settlementPeriodType: z.string().min(1).nullable().default(null),
   reserveRatio: z.number().min(0).max(1).nullable(),
   reserveDays: z.number().int().nonnegative().nullable(),
   reserveLevel: z.string().nullable(),

@@ -11,6 +11,7 @@ export interface OrderUpsertInput {
   createdAt: Date | null;
   paidAt: Date | null;
   sourceUpdatedAt: Date | null;
+  readyToShipAt?: Date | null;
   latestDeliveryAt: Date | null;
   sourceStatus: string;
   sourceSubStatus: string | null;
@@ -51,6 +52,7 @@ export async function upsertOrderBatch(
     orderCreatedAt: order.createdAt,
     paidAt: order.paidAt,
     sourceUpdatedAt: order.sourceUpdatedAt,
+    readyToShipAt: order.readyToShipAt ?? null,
     latestDeliveryAt: order.latestDeliveryAt,
     sourceStatus: order.sourceStatus,
     sourceSubStatus: order.sourceSubStatus,
@@ -78,6 +80,7 @@ export async function upsertOrderBatch(
         orderCreatedAt: sql`excluded.order_created_at`,
         paidAt: sql`excluded.paid_at`,
         sourceUpdatedAt: sql`excluded.source_updated_at`,
+        readyToShipAt: sql`excluded.ready_to_ship_at`,
         latestDeliveryAt: sql`excluded.latest_delivery_at`,
         sourceStatus: sql`excluded.source_status`,
         sourceSubStatus: sql`excluded.source_sub_status`,

@@ -196,6 +196,13 @@ export function createDecisionWorkflow(dependencies: {
           metricsSnapshot,
           riskSnapshot,
           financeSnapshot: source.financeSnapshot,
+          coverageSnapshot: {
+            coverageState: source.shop.dataCoverage,
+            persistedMetricsWindow: metricsSnapshot.window,
+            provenSourceWindow: null,
+            completeWithinSourceWindow: null,
+            lifetimeHistoryComplete: null,
+          },
           ruleDecision,
           ruleTriggers: triggers,
           dataCoverage: source.shop.dataCoverage,

@@ -18,21 +18,21 @@ interface DoctorCheck {
 export function getAiDoctorCheck(environment: NodeJS.ProcessEnv): DoctorCheck {
   try {
     const config = readBaselineAiConfig(environment);
-    const identity = `${config.provider}/${config.model}`;
+    const identity = `${config.provider}/${config.registry.defaultModel}`;
     if (!config.enabled) {
       return { name: "baseline-ai", status: "SKIP", detail: `DISABLED: ${identity}` };
     }
-    if (!config.apiKey?.trim()) {
+    if (config.authMode === "CONFIG_MISSING") {
       return {
         name: "baseline-ai",
         status: "SKIP",
-        detail: `UNCONFIGURED: ${identity} (TOOL_AI_API_KEY missing)`,
+        detail: `CONFIG_MISSING: ${identity} (non-loopback requires TOOL_AI_API_KEY)`,
       };
     }
     return {
       name: "baseline-ai",
       status: "OK",
-      detail: `CONFIGURED: ${identity} (provider call not attempted)`,
+      detail: `${config.authMode}: ${identity} (provider call not attempted)`,
     };
   } catch {
     return { name: "baseline-ai", status: "FAIL", detail: "INVALID_CONFIGURATION" };

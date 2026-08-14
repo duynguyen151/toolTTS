@@ -19,6 +19,7 @@ import {
 import type {
   AiFailureCode,
   BaDecisionReasonCode,
+  DecisionCoverageSnapshot,
   DecisionFinanceSnapshot,
   DecisionMetricsSnapshot,
   DecisionRiskSnapshot,
@@ -420,6 +421,7 @@ export const decisionCases = pgTable(
     metricsSnapshot: jsonb("metrics_snapshot").$type<DecisionMetricsSnapshot>().notNull(),
     riskSnapshot: jsonb("risk_snapshot").$type<DecisionRiskSnapshot>().notNull(),
     financeSnapshot: jsonb("finance_snapshot").$type<DecisionFinanceSnapshot>().notNull(),
+    coverageSnapshot: jsonb("coverage_snapshot").$type<DecisionCoverageSnapshot>(),
     ruleDecision: decisionRuleResultEnum("rule_decision").notNull(),
     ruleTriggers: jsonb("rule_triggers").$type<DecisionRuleTrigger[]>().notNull().default(sql`'[]'::jsonb`),
     dataCoverage: decisionDataCoverageEnum("data_coverage").notNull(),
@@ -472,6 +474,10 @@ export const decisionCases = pgTable(
     check(
       "decision_cases_finance_snapshot_object",
       sql`jsonb_typeof(${table.financeSnapshot}) = 'object'`
+    ),
+    check(
+      "decision_cases_coverage_snapshot_object",
+      sql`${table.coverageSnapshot} is null or jsonb_typeof(${table.coverageSnapshot}) = 'object'`
     ),
     check(
       "decision_cases_rule_triggers_array",
@@ -527,12 +533,23 @@ export const aiDecisions = pgTable(
       .references(() => decisionCases.id, { onDelete: "restrict", onUpdate: "cascade" }),
     status: aiDecisionStatusEnum("status").notNull(),
     provider: text("provider").notNull(),
-    model: text("model").notNull(),
+    model: text("model"),
+    requestedModel: text("requested_model"),
+    reportedModel: text("reported_model"),
+    actualModelUsed: text("actual_model_used"),
+    authMode: text("auth_mode").$type<"LOCAL_NO_AUTH" | "BEARER" | "CONFIG_MISSING">(),
+    outputSchemaVersion: text("output_schema_version"),
     promptVersion: text("prompt_version").notNull(),
     policyVersion: text("policy_version").notNull(),
+    aiPolicyVersion: text("ai_policy_version"),
     recommendation: baDecisionEnum("recommendation"),
+    riskLevel: text("risk_level").$type<"LOW" | "MEDIUM" | "HIGH">(),
     confidence: numeric("confidence", { precision: 7, scale: 6 }),
+    ruleOverride: boolean("rule_override"),
     reasonCodes: jsonb("reason_codes").$type<BaDecisionReasonCode[]>(),
+    supportingFactors: jsonb("supporting_factors").$type<string[]>(),
+    riskFactors: jsonb("risk_factors").$type<string[]>(),
+    whatWouldChangeDecision: jsonb("what_would_change_decision").$type<string[]>(),
     reason: text("reason"),
     humanReviewRequired: boolean("human_review_required").notNull(),
     failureCode: text("failure_code").$type<AiFailureCode>(),
@@ -543,15 +560,54 @@ export const aiDecisions = pgTable(
     unique("ai_decisions_case_unique").on(table.decisionCaseId),
     index("ai_decisions_case_created_idx").on(table.decisionCaseId, table.createdAt),
     check("ai_decisions_provider_not_blank", sql`length(btrim(${table.provider})) > 0`),
-    check("ai_decisions_model_not_blank", sql`length(btrim(${table.model})) > 0`),
+    check("ai_decisions_model_not_blank", sql`${table.model} is null or length(btrim(${table.model})) > 0`),
+    check("ai_decisions_requested_model_not_blank", sql`${table.requestedModel} is null or length(btrim(${table.requestedModel})) > 0`),
+    check("ai_decisions_reported_model_not_blank", sql`${table.reportedModel} is null or length(btrim(${table.reportedModel})) > 0`),
+    check("ai_decisions_actual_model_not_blank", sql`${table.actualModelUsed} is null or length(btrim(${table.actualModelUsed})) > 0`),
+    check("ai_decisions_auth_mode_known", sql`${table.authMode} is null or ${table.authMode} in ('LOCAL_NO_AUTH', 'BEARER', 'CONFIG_MISSING')`),
+    check("ai_decisions_risk_level_known", sql`${table.riskLevel} is null or ${table.riskLevel} in ('LOW', 'MEDIUM', 'HIGH')`),
     check("ai_decisions_prompt_version_not_blank", sql`length(btrim(${table.promptVersion})) > 0`),
     check("ai_decisions_policy_version_not_blank", sql`length(btrim(${table.policyVersion})) > 0`),
     check(
       "ai_decisions_failure_code_known",
       sql`${table.failureCode} is null or ${table.failureCode} in (
-        'FEATURE_DISABLED', 'MISSING_API_KEY', 'NOT_CONFIGURED', 'TIMEOUT',
-        'NETWORK_ERROR', 'HTTP_ERROR', 'RATE_LIMITED', 'MALFORMED_RESPONSE',
-        'INVALID_RESPONSE', 'INVALID_OUTPUT', 'PROVIDER_UNAVAILABLE'
+        'FEATURE_DISABLED', 'CONFIG_MISSING', 'TIMEOUT', 'NETWORK_ERROR',
+        'HTTP_ERROR', 'RATE_LIMITED', 'INVALID_RESPONSE', 'PROVIDER_UNAVAILABLE',
+        'MODEL_UNAVAILABLE', 'MODEL_NOT_ALLOWED',
+        'MISSING_API_KEY', 'NOT_CONFIGURED', 'MALFORMED_RESPONSE', 'INVALID_OUTPUT'
+      )`
+    ),
+    check(
+      "ai_decisions_v1_structured_shape",
+      sql`${table.outputSchemaVersion} is null or (
+        ${table.outputSchemaVersion} = 'decision-ai-output.v1'
+        and ${table.requestedModel} is not null
+        and ${table.aiPolicyVersion} is not null
+        and ${table.authMode} is not null
+        and (
+          (${table.status} = 'AVAILABLE'
+            and ${table.model} is not null
+            and ${table.reportedModel} is not null
+            and ${table.actualModelUsed} is not null
+            and ${table.riskLevel} is not null
+            and ${table.ruleOverride} is not null
+            and ${table.supportingFactors} is not null
+            and jsonb_typeof(${table.supportingFactors}) = 'array'
+            and ${table.riskFactors} is not null
+            and jsonb_typeof(${table.riskFactors}) = 'array'
+            and ${table.whatWouldChangeDecision} is not null
+            and jsonb_typeof(${table.whatWouldChangeDecision}) = 'array')
+          or
+          (${table.status} = 'UNAVAILABLE'
+            and ${table.model} is null
+            and ${table.reportedModel} is null
+            and ${table.actualModelUsed} is null
+            and ${table.riskLevel} is null
+            and ${table.ruleOverride} is null
+            and ${table.supportingFactors} is null
+            and ${table.riskFactors} is null
+            and ${table.whatWouldChangeDecision} is null)
+        )
       )`
     ),
     check(

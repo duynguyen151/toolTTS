@@ -6,6 +6,7 @@ import { baDecisions, decisionCases } from "../schema.js";
 import {
   captureBaDecision,
   createDecisionCase,
+  getDecisionAiInput,
   recordAiDecision,
   recordBaDecisionForCase,
   recordDryRunExecution,
@@ -49,8 +50,16 @@ const input: CaptureBaDecisionInput = {
       totalBalance: "2500.0000",
       toSettleBalance: "800.0000",
       onHoldBalance: "1200.0000",
+      officialOnHoldAmount: "1200.0000",
       settlementCount: 40,
       onHoldSettlementCount: 6,
+    },
+    coverageSnapshot: {
+      coverageState: "COMPLETE",
+      persistedMetricsWindow: "FULL_PERSISTED_HISTORY",
+      provenSourceWindow: null,
+      completeWithinSourceWindow: null,
+      lifetimeHistoryComplete: null,
     },
     ruleDecision: "CONTINUE",
     ruleTriggers: [],
@@ -175,6 +184,57 @@ describe("decision workflow persistence boundaries", () => {
         caseOrigin: "LIVE",
       }),
     ).rejects.toBeInstanceOf(ZodError);
+  });
+
+  it("normalizes legacy AI input snapshots without weakening recorded coverage", async () => {
+    const legacyCase = {
+      metricsSnapshot: input.decisionCase.metricsSnapshot,
+      financeSnapshot: {
+        ...input.decisionCase.financeSnapshot,
+        officialOnHoldAmount: undefined,
+      },
+      coverageSnapshot: null,
+      riskSnapshot: input.decisionCase.riskSnapshot,
+      ruleDecision: input.decisionCase.ruleDecision,
+      ruleTriggers: input.decisionCase.ruleTriggers,
+      dataCoverage: "COMPLETE" as const,
+    };
+    const db = {
+      select() {
+        return {
+          from() {
+            return {
+              where() {
+                return {
+                  async limit() {
+                    return [legacyCase];
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+    } as unknown as Database;
+
+    await expect(getDecisionAiInput(db, "00000000-0000-4000-8000-000000000021"))
+      .resolves.toEqual({
+        metricsSnapshot: input.decisionCase.metricsSnapshot,
+        financeSnapshot: {
+          ...input.decisionCase.financeSnapshot,
+          officialOnHoldAmount: null,
+        },
+        coverageSnapshot: {
+          coverageState: "COMPLETE",
+          persistedMetricsWindow: input.decisionCase.metricsSnapshot.window,
+          provenSourceWindow: null,
+          completeWithinSourceWindow: null,
+          lifetimeHistoryComplete: null,
+        },
+        riskSnapshot: input.decisionCase.riskSnapshot,
+        ruleDecision: input.decisionCase.ruleDecision,
+        ruleTriggers: input.decisionCase.ruleTriggers,
+      });
   });
 
   it("validates fail-closed AI persistence before touching the database", async () => {

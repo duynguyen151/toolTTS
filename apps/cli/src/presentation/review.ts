@@ -26,8 +26,13 @@ function reviewSections(view: DecisionReviewView, timeZone: string): string[] {
   if (view.ai.status === "AVAILABLE") {
     aiRows.push(
       ["Recommendation", view.ai.recommendation],
+      ["Risk Level", view.ai.riskLevel ?? "-"],
       ["Confidence", String(view.ai.confidence)],
+      ["Rule Override", view.ai.ruleOverride === null ? "-" : String(view.ai.ruleOverride)],
       ["Reason Codes", view.ai.reasonCodes.join(", ") || "-"],
+      ["Supporting Factors", view.ai.supportingFactors?.join("; ") || "-"],
+      ["Risk Factors", view.ai.riskFactors?.join("; ") || "-"],
+      ["What Would Change Decision", view.ai.whatWouldChangeDecision?.join("; ") || "-"],
       ["Reason", view.ai.reason],
       ["Human Review Required", String(view.ai.humanReviewRequired)],
     );
@@ -40,9 +45,13 @@ function reviewSections(view: DecisionReviewView, timeZone: string): string[] {
   if ("provider" in view.ai) {
     aiRows.push(
       ["Provider", view.ai.provider],
-      ["Model", view.ai.model],
+      ["Requested Model", view.ai.requestedModel ?? "-"],
+      ["Reported Model", view.ai.reportedModel ?? "-"],
+      ["Actual Model", view.ai.actualModelUsed ?? view.ai.model ?? "-"],
+      ["Auth Mode", view.ai.authMode ?? "-"],
       ["Prompt Version", view.ai.promptVersion],
       ["Policy Version", view.ai.policyVersion],
+      ["AI Policy Version", view.ai.aiPolicyVersion ?? "-"],
     );
   }
 

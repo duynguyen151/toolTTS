@@ -29,6 +29,12 @@ importers:
       '@shop-health/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@shop-health/decision-ai':
+        specifier: workspace:*
+        version: link:../../packages/decision-ai
+      '@shop-health/decision-workflow':
+        specifier: workspace:*
+        version: link:../../packages/decision-workflow
       '@shop-health/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -50,6 +56,9 @@ importers:
       pino:
         specifier: ^9.9.0
         version: 9.14.0
+      tsx:
+        specifier: ^4.20.0
+        version: 4.23.12
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -104,6 +113,9 @@ importers:
 
   packages/decision-workflow:
     dependencies:
+      '@shop-health/decision-ai':
+        specifier: workspace:*
+        version: link:../decision-ai
       '@shop-health/domain':
         specifier: workspace:*
         version: link:../domain

@@ -13,12 +13,20 @@ export {
   withTransactionalShopLock
 } from "./locks.js";
 export { migrateDatabase } from "./migrations.js";
+export { seedSanitizedDemoData, type DemoSeedResult } from "./seed-demo.js";
 export {
+  aiDecisionStatusEnum,
+  aiDecisions,
   baDecisionEnum,
   baDecisions,
   canonicalOrderStatusEnum,
   decisionCases,
   decisionDataCoverageEnum,
+  decisionDataOriginEnum,
+  decisionExecutionActionEnum,
+  decisionExecutionModeEnum,
+  decisionExecutionStatusEnum,
+  decisionExecutions,
   decisionRuleResultEnum,
   evaluationStatusEnum,
   financialSnapshots,
@@ -35,8 +43,10 @@ export {
   syncModeEnum,
   syncRuns,
   syncRunStatusEnum,
+  type AiDecisionRow,
   type BaDecisionRow,
   type DecisionCaseRow,
+  type DecisionExecutionRow,
   type FinancialSnapshotRow,
   type KpiSnapshotRow,
   type OrderRow,
@@ -47,10 +57,26 @@ export {
 } from "./schema.js";
 export {
   captureBaDecision,
+  createDecisionCase,
+  getDecisionAiInput,
+  getDecisionReview,
+  getDecisionReviewByRequestId,
+  listDecisionHistory,
+  recordAiDecision,
+  recordBaDecisionForCase,
+  recordDryRunExecution,
+  type AiDecisionInput,
   type BaDecisionInput,
   type CaptureBaDecisionInput,
   type CapturedBaDecision,
+  type CreateDecisionCaseInput,
   type DecisionCaseInput,
+  type DecisionAiInputRecord,
+  type DecisionHistoryPageRecord,
+  type DecisionReviewRecord,
+  type ListDecisionHistoryInput,
+  type RecordBaDecisionForCaseInput,
+  type RecordDryRunExecutionInput,
 } from "./queries/decisions.js";
 export {
   getFinanceSummary,
@@ -110,6 +136,7 @@ export {
   beginSyncRun,
   completeSyncRun,
   failSyncRun,
+  findLatestSuccessfulSyncRun,
   findLatestCheckpoint,
   listSyncRuns,
   updateSyncCheckpoint,

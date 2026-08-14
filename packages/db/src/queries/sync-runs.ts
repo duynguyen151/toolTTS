@@ -131,6 +131,19 @@ export async function listSyncRuns(
     .limit(Math.min(Math.max(limit, 1), 100));
 }
 
+export async function findLatestSuccessfulSyncRun(
+  db: Database,
+  shopId: string,
+): Promise<SyncRunRow | null> {
+  const [run] = await db
+    .select()
+    .from(syncRuns)
+    .where(and(eq(syncRuns.shopId, shopId), eq(syncRuns.status, "SUCCEEDED")))
+    .orderBy(desc(syncRuns.startedAt))
+    .limit(1);
+  return run ?? null;
+}
+
 export async function findLatestCheckpoint(
   db: Database,
   shopId: string,

@@ -1,19 +1,24 @@
 # TikTok Shop Health V1
 
-Backend-first collector and deterministic shop-risk CLI:
+Backend-first collector, deterministic shop-risk engine, and auditable decision CLI:
 
 ```text
-AdsPower -> TikTok Seller Center -> PostgreSQL -> KPI / Risk Rules -> CLI
+Persisted PostgreSQL / sanitized DEMO seed
+  -> KPI / deterministic Rule
+  -> optional baseline AI recommendation
+  -> BA decision
+  -> Holiday Mode DRY_RUN
+  -> decision history
 ```
 
-V1 has no HTTP API, web UI, Redis, BullMQ, Socket.IO, LLM, or automatic Seller Center actions.
+V1 has no HTTP API, web UI, Redis, queue, or automatic Seller Center actions. Baseline AI is optional, fail-closed, and separate from the deterministic domain rule.
 
 ## Requirements
 
 - Node.js 22+
 - pnpm 11+
 - PostgreSQL 16+
-- AdsPower running locally with a dedicated, already authenticated profile
+- AdsPower running locally with a dedicated, already authenticated profile only for live synchronization
 
 ## Setup
 
@@ -21,11 +26,14 @@ V1 has no HTTP API, web UI, Redis, BullMQ, Socket.IO, LLM, or automatic Seller C
 pnpm install
 Copy-Item .env.example .env
 pnpm db:migrate
+pnpm db:seed:demo
 pnpm shop-health doctor
-pnpm shop-health shop add --profile-no 957 --profile-id k1f2ocuk --region US --locale en-US
+pnpm shop-health review start DEMO-001
 ```
 
-`DATABASE_URL` is required for every command except `doctor`. The collector does not persist cookies, tokens, browser storage, buyer names, contact details, or shipping addresses.
+`DATABASE_URL` is required for every command except `doctor`. `db:seed:demo` is deterministic and idempotent. It creates disabled `DEMO_SANITIZED` data only when a live source is unavailable; DEMO origin remains explicit in every Decision Case and history result.
+
+The collector and decision workflow do not persist cookies, tokens, browser storage, buyer names, contact details, shipping addresses, or raw AI provider responses.
 
 ## Core Commands
 
@@ -47,6 +55,12 @@ pnpm shop-health finance on-hold 957
 pnpm shop-health metrics show 957 --period 30d
 pnpm shop-health report 957 --period 30d
 pnpm shop-health risk evaluate 957
+
+pnpm shop-health review start DEMO-001 --json
+pnpm shop-health review show <case-id> --json
+pnpm shop-health review decide <case-id> --decision WATCH --reason-code DATA_INCOMPLETE --json
+pnpm shop-health review execute <case-id> --confirm --json
+pnpm shop-health review history DEMO-001 --limit 20 --json
 
 pnpm worker
 ```
@@ -77,11 +91,11 @@ The actionable rate rule remains Delivery Rate below 70%.
 
 The literal BA defaults are currently minimum sample `0`, resume rate `70%`, resume value below USD 3,500, and one safe cycle. These fields are configurable in the versioned domain policy because minimum sample and hysteresis have not been approved yet.
 
-Holiday Mode execution is intentionally `DRY_RUN`. The CLI separates the
-internal desired state from the BA-facing rule result and always reports
-`Executed Action: NONE`. A warning suggests `REVIEW_SHOP`; it does not claim the
-shop was stopped. The system does not enable or disable Holiday Mode until all
-of these are confirmed:
+Holiday Mode execution is intentionally `DRY_RUN`. Rule, AI, BA, and Execution
+are persisted and displayed as separate records. Only a confirmed BA `PAUSE`
+decision can create a simulated `HOLIDAY_MODE_ON` execution, and every execution
+records `sellerCenterCalled=false`. The system does not enable or disable
+Holiday Mode until all of these are confirmed:
 
 - Seller Center Holiday Mode route, state, and write request.
 - The difference between automation-owned and manually enabled Holiday Mode.
@@ -112,6 +126,9 @@ Implemented and validated by typechecks/tests/schema checks:
 
 - Idempotent PostgreSQL order/snapshot persistence and concurrency locks.
 - KPI, score, recommendation, operational risk evaluation, and CLI output.
+- Immutable Decision Cases with separate AI, BA, and DRY_RUN execution records.
+- Keyset-paginated decision history with explicit `LIVE` / `DEMO_SANITIZED` origin.
+- Optional OpenCode Zen baseline AI with structured output and fail-closed `AI UNAVAILABLE` behavior.
 
 Still unresolved and deliberately not guessed:
 
@@ -124,7 +141,7 @@ Still unresolved and deliberately not guessed:
 
 `sync backfill` is therefore disabled with `BACKFILL_UNRESOLVED`. Order sync also refuses to persist a response that indicates more pages until pagination is implemented, preventing partial data from being presented as complete.
 
-The current machine has no configured `DATABASE_URL`, so migrations and end-to-end PostgreSQL persistence have not yet been exercised against a live database.
+PostgreSQL 16 is configured locally for `shop_health_dev` and `shop_health_test`. Migrations, sanitized DEMO seed, and the CLI decision flow have been exercised against PostgreSQL. Live Seller Center validation was not run in this decision-workflow wave; the review path does not require or call AdsPower.
 
 ## Development Checks
 
@@ -133,7 +150,9 @@ pnpm typecheck
 pnpm test
 pnpm build
 pnpm exec drizzle-kit check --config packages/db/drizzle.config.ts
+pnpm db:migrate
+pnpm db:seed:demo
 pnpm shop-health doctor --json
 ```
 
-PostgreSQL is the source of truth for CLI reports. Seller Center extraction, normalization, persistence, metrics, recommendations, and CLI presentation remain separate modules so a future TikTok Open API data source does not require rewriting KPI or reporting logic.
+PostgreSQL is the source of truth for CLI reports and Decision Cases. Seller Center extraction, normalization, persistence, deterministic rules, baseline AI, workflow orchestration, and CLI presentation remain separate modules. The deferred Dashboard Presentation Wave can consume `decision-review.v1` and `decision-history.v1` without moving business logic into the UI.

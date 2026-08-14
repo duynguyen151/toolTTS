@@ -81,6 +81,7 @@ export interface PersistedDecisionReview {
       }
     | null;
   readonly ba: {
+    readonly id: string;
     readonly decision: BaDecision;
     readonly confidence: number | null;
     readonly reasonCodes: readonly BaDecisionReasonCode[];
@@ -127,7 +128,12 @@ export interface DecisionReviewView {
   };
   readonly rule: PersistedDecisionReview["rule"];
   readonly ai:
-    | Exclude<PersistedDecisionReview["ai"], null> & { readonly createdAt: string }
+    | (Omit<Extract<NonNullable<PersistedDecisionReview["ai"]>, { status: "AVAILABLE" }>, "createdAt"> & {
+        readonly createdAt: string;
+      })
+    | (Omit<Extract<NonNullable<PersistedDecisionReview["ai"]>, { status: "UNAVAILABLE" }>, "createdAt"> & {
+        readonly createdAt: string;
+      })
     | { readonly status: "UNAVAILABLE"; readonly failureCode: "NOT_RECORDED"; readonly humanReviewRequired: true };
   readonly ba:
     | {

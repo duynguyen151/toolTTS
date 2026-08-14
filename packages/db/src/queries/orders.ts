@@ -165,6 +165,7 @@ export interface RiskOrderFactRow {
   currency: string;
   orderCount: number;
   totalValue: string;
+  firstObservedAt: Date;
   lastObservedAt: Date;
 }
 
@@ -182,7 +183,8 @@ export async function getFullPersistedRiskOrderFacts(
       currency: orders.currency,
       orderCount: sql<number>`count(*)::integer`,
       totalValue: sql<string>`sum(${orders.grandTotal})::text`,
-      lastObservedAt: sql<Date>`max(${orders.lastSeenAt})`
+      firstObservedAt: sql`min(${orders.firstSeenAt})`.mapWith(orders.firstSeenAt),
+      lastObservedAt: sql`max(${orders.lastSeenAt})`.mapWith(orders.lastSeenAt)
     })
     .from(orders)
     .where(eq(orders.shopId, shopId))

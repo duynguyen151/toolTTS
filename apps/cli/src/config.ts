@@ -1,3 +1,6 @@
+import { fileURLToPath } from "node:url";
+
+import { config as loadDotenv } from "dotenv";
 import { z } from "zod";
 
 const configSchema = z.object({
@@ -9,6 +12,14 @@ const configSchema = z.object({
 });
 
 export type CliConfig = z.infer<typeof configSchema>;
+
+export function getWorkspaceEnvPath(moduleUrl: string = import.meta.url): string {
+  return fileURLToPath(new URL("../../../.env", moduleUrl));
+}
+
+export function loadWorkspaceEnvironment(): void {
+  loadDotenv({ path: getWorkspaceEnvPath(), quiet: true });
+}
 
 export function loadConfig(): CliConfig {
   return configSchema.parse(process.env);

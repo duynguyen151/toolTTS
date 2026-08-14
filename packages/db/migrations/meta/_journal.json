@@ -43,6 +43,41 @@
       "when": 1786651752583,
       "tag": "0005_fearless_whirlwind",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786691989296,
+      "tag": "0006_vengeful_guardian",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786692423903,
+      "tag": "0007_silent_thena",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786692469763,
+      "tag": "0008_material_ultimatum",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786692666767,
+      "tag": "0009_medical_stick",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786694284212,
+      "tag": "0010_curly_morlocks",
+      "breakpoints": true
     }
   ]
 }

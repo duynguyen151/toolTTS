@@ -17,6 +17,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import type {
+  AiFailureCode,
   BaDecisionReasonCode,
   DecisionFinanceSnapshot,
   DecisionMetricsSnapshot,
@@ -74,6 +75,28 @@ export const baDecisionEnum = pgEnum("ba_decision", [
   "PAUSE"
 ]);
 
+export const decisionDataOriginEnum = pgEnum("decision_data_origin", [
+  "LIVE",
+  "DEMO_SANITIZED"
+]);
+
+export const aiDecisionStatusEnum = pgEnum("ai_decision_status", [
+  "AVAILABLE",
+  "UNAVAILABLE"
+]);
+
+export const decisionExecutionActionEnum = pgEnum("decision_execution_action", [
+  "HOLIDAY_MODE_ON"
+]);
+
+export const decisionExecutionModeEnum = pgEnum("decision_execution_mode", [
+  "DRY_RUN"
+]);
+
+export const decisionExecutionStatusEnum = pgEnum("decision_execution_status", [
+  "SIMULATED"
+]);
+
 export const decisionDataCoverageEnum = pgEnum("decision_data_coverage", [
   "COMPLETE",
   "PARTIAL",
@@ -124,6 +147,7 @@ export const shops = pgTable(
     region: text("region").notNull(),
     locale: text("locale").notNull(),
     currency: text("currency").notNull().default("USD"),
+    dataOrigin: decisionDataOriginEnum("data_origin").notNull().default("LIVE"),
     enabled: boolean("enabled").notNull().default(true),
     syncState: shopSyncStateEnum("sync_state").notNull().default("ACTIVE"),
     pauseReason: text("pause_reason"),
@@ -136,10 +160,15 @@ export const shops = pgTable(
   (table) => [
     uniqueIndex("shops_profile_id_unique").on(table.profileId),
     uniqueIndex("shops_profile_no_unique").on(table.profileNo),
+    unique("shops_id_data_origin_unique").on(table.id, table.dataOrigin),
     index("shops_enabled_idx").on(table.enabled),
     check("shops_profile_id_not_blank", sql`length(btrim(${table.profileId})) > 0`),
     check("shops_profile_no_not_blank", sql`length(btrim(${table.profileNo})) > 0`),
-    check("shops_currency_format", sql`${table.currency} ~ '^[A-Z]{3}$'`)
+    check("shops_currency_format", sql`${table.currency} ~ '^[A-Z]{3}$'`),
+    check(
+      "shops_demo_disabled",
+      sql`${table.dataOrigin} <> 'DEMO_SANITIZED' or (not ${table.enabled} and ${table.syncState} = 'DISABLED')`
+    )
   ]
 );
 
@@ -377,9 +406,11 @@ export const decisionCases = pgTable(
   "decision_cases",
   {
     id: uuid("id").defaultRandom().primaryKey(),
+    requestId: uuid("request_id").notNull().defaultRandom(),
     shopId: uuid("shop_id")
       .notNull()
       .references(() => shops.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    caseOrigin: decisionDataOriginEnum("case_origin").notNull().default("LIVE"),
     observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
     metricsSnapshot: jsonb("metrics_snapshot").$type<DecisionMetricsSnapshot>().notNull(),
     riskSnapshot: jsonb("risk_snapshot").$type<DecisionRiskSnapshot>().notNull(),
@@ -391,8 +422,22 @@ export const decisionCases = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => [
+    uniqueIndex("decision_cases_request_id_unique").on(table.requestId),
     index("decision_cases_shop_observed_idx").on(table.shopId, table.observedAt),
+    index("decision_cases_shop_origin_observed_id_idx").on(
+      table.shopId,
+      table.caseOrigin,
+      table.observedAt,
+      table.id
+    ),
     index("decision_cases_source_sync_run_idx").on(table.sourceSyncRunId),
+    foreignKey({
+      columns: [table.shopId, table.caseOrigin],
+      foreignColumns: [shops.id, shops.dataOrigin],
+      name: "decision_cases_shop_origin_fk"
+    })
+      .onDelete("restrict")
+      .onUpdate("restrict"),
     foreignKey({
       columns: [table.sourceSyncRunId, table.shopId],
       foreignColumns: [syncRuns.id, syncRuns.shopId],
@@ -409,12 +454,27 @@ export const decisionCases = pgTable(
       sql`jsonb_typeof(${table.riskSnapshot}) = 'object'`
     ),
     check(
+      "decision_cases_risk_thresholds_present",
+      sql`${table.riskSnapshot} ?& array[
+          'stopOnHoldValueAt',
+          'stopDeliveryRateBelow',
+          'minimumOrdersForRateRule'
+        ]
+        and jsonb_typeof(${table.riskSnapshot}->'stopOnHoldValueAt') = 'string'
+        and jsonb_typeof(${table.riskSnapshot}->'stopDeliveryRateBelow') = 'number'
+        and jsonb_typeof(${table.riskSnapshot}->'minimumOrdersForRateRule') = 'number'`
+    ),
+    check(
       "decision_cases_finance_snapshot_object",
       sql`jsonb_typeof(${table.financeSnapshot}) = 'object'`
     ),
     check(
       "decision_cases_rule_triggers_array",
       sql`jsonb_typeof(${table.ruleTriggers}) = 'array'`
+    ),
+    check(
+      "decision_cases_demo_has_no_sync_run",
+      sql`${table.caseOrigin} <> 'DEMO_SANITIZED' or ${table.sourceSyncRunId} is null`
     )
   ]
 );
@@ -423,6 +483,7 @@ export const baDecisions = pgTable(
   "ba_decisions",
   {
     id: uuid("id").defaultRandom().primaryKey(),
+    requestId: uuid("request_id").notNull().defaultRandom(),
     decisionCaseId: uuid("decision_case_id")
       .notNull()
       .references(() => decisionCases.id, { onDelete: "restrict", onUpdate: "cascade" }),
@@ -433,6 +494,14 @@ export const baDecisions = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => [
+    uniqueIndex("ba_decisions_request_id_unique").on(table.requestId),
+    unique("ba_decisions_case_unique").on(table.decisionCaseId),
+    unique("ba_decisions_id_case_unique").on(table.id, table.decisionCaseId),
+    unique("ba_decisions_id_case_decision_unique").on(
+      table.id,
+      table.decisionCaseId,
+      table.decision
+    ),
     index("ba_decisions_case_created_idx").on(table.decisionCaseId, table.createdAt),
     check(
       "ba_decisions_confidence_range",
@@ -440,6 +509,107 @@ export const baDecisions = pgTable(
     ),
     check("ba_decisions_reason_codes_array", sql`jsonb_typeof(${table.reasonCodes}) = 'array'`),
     check("ba_decisions_note_not_blank", sql`${table.note} is null or length(btrim(${table.note})) > 0`)
+  ]
+);
+
+export const aiDecisions = pgTable(
+  "ai_decisions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    requestId: uuid("request_id").notNull(),
+    decisionCaseId: uuid("decision_case_id")
+      .notNull()
+      .references(() => decisionCases.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    status: aiDecisionStatusEnum("status").notNull(),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    promptVersion: text("prompt_version").notNull(),
+    policyVersion: text("policy_version").notNull(),
+    recommendation: baDecisionEnum("recommendation"),
+    confidence: numeric("confidence", { precision: 7, scale: 6 }),
+    reasonCodes: jsonb("reason_codes").$type<BaDecisionReasonCode[]>(),
+    reason: text("reason"),
+    humanReviewRequired: boolean("human_review_required").notNull(),
+    failureCode: text("failure_code").$type<AiFailureCode>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("ai_decisions_request_id_unique").on(table.requestId),
+    unique("ai_decisions_case_unique").on(table.decisionCaseId),
+    index("ai_decisions_case_created_idx").on(table.decisionCaseId, table.createdAt),
+    check("ai_decisions_provider_not_blank", sql`length(btrim(${table.provider})) > 0`),
+    check("ai_decisions_model_not_blank", sql`length(btrim(${table.model})) > 0`),
+    check("ai_decisions_prompt_version_not_blank", sql`length(btrim(${table.promptVersion})) > 0`),
+    check("ai_decisions_policy_version_not_blank", sql`length(btrim(${table.policyVersion})) > 0`),
+    check(
+      "ai_decisions_failure_code_known",
+      sql`${table.failureCode} is null or ${table.failureCode} in (
+        'FEATURE_DISABLED', 'MISSING_API_KEY', 'NOT_CONFIGURED', 'TIMEOUT',
+        'NETWORK_ERROR', 'HTTP_ERROR', 'RATE_LIMITED', 'MALFORMED_RESPONSE',
+        'INVALID_RESPONSE', 'INVALID_OUTPUT', 'PROVIDER_UNAVAILABLE'
+      )`
+    ),
+    check(
+      "ai_decisions_available_shape",
+      sql`
+        (${table.status} = 'AVAILABLE'
+          and ${table.recommendation} is not null
+          and ${table.confidence} is not null
+          and ${table.confidence} >= 0 and ${table.confidence} <= 1
+          and ${table.reasonCodes} is not null
+          and jsonb_typeof(${table.reasonCodes}) = 'array'
+          and jsonb_array_length(${table.reasonCodes}) > 0
+          and ${table.reason} is not null and length(btrim(${table.reason})) > 0
+          and ${table.failureCode} is null)
+        or
+        (${table.status} = 'UNAVAILABLE'
+          and ${table.recommendation} is null
+          and ${table.confidence} is null
+          and ${table.reasonCodes} is null
+          and ${table.reason} is null
+          and ${table.humanReviewRequired}
+          and ${table.failureCode} is not null
+          and length(btrim(${table.failureCode})) > 0)
+      `
+    )
+  ]
+);
+
+export const decisionExecutions = pgTable(
+  "decision_executions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    requestId: uuid("request_id").notNull(),
+    decisionCaseId: uuid("decision_case_id")
+      .notNull()
+      .references(() => decisionCases.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    baDecisionId: uuid("ba_decision_id").notNull(),
+    baDecision: baDecisionEnum("ba_decision").notNull().default("PAUSE"),
+    requestedAction: decisionExecutionActionEnum("requested_action").notNull(),
+    executionMode: decisionExecutionModeEnum("execution_mode").notNull(),
+    executionStatus: decisionExecutionStatusEnum("execution_status").notNull(),
+    sellerCenterCalled: boolean("seller_center_called").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("decision_executions_request_id_unique").on(table.requestId),
+    unique("decision_executions_case_unique").on(table.decisionCaseId),
+    index("decision_executions_ba_decision_idx").on(table.baDecisionId),
+    foreignKey({
+      columns: [table.baDecisionId, table.decisionCaseId, table.baDecision],
+      foreignColumns: [baDecisions.id, baDecisions.decisionCaseId, baDecisions.decision],
+      name: "decision_executions_ba_case_decision_fk"
+    })
+      .onDelete("restrict")
+      .onUpdate("cascade"),
+    check(
+      "decision_executions_dry_run_only",
+      sql`${table.requestedAction} = 'HOLIDAY_MODE_ON'
+        and ${table.baDecision} = 'PAUSE'
+        and ${table.executionMode} = 'DRY_RUN'
+        and ${table.executionStatus} = 'SIMULATED'
+        and not ${table.sellerCenterCalled}`
+    )
   ]
 );
 
@@ -452,3 +622,5 @@ export type KpiSnapshotRow = typeof kpiSnapshots.$inferSelect;
 export type RiskControlStateRow = typeof riskControlStates.$inferSelect;
 export type DecisionCaseRow = typeof decisionCases.$inferSelect;
 export type BaDecisionRow = typeof baDecisions.$inferSelect;
+export type AiDecisionRow = typeof aiDecisions.$inferSelect;
+export type DecisionExecutionRow = typeof decisionExecutions.$inferSelect;

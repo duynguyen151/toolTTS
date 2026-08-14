@@ -1,0 +1,1 @@
+CREATE INDEX "decision_cases_shop_origin_observed_id_idx" ON "decision_cases" USING btree ("shop_id","case_origin","observed_at","id");

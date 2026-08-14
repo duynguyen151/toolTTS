@@ -1,4 +1,5 @@
 import { pingDatabase, createDatabase, closeDatabase } from "@shop-health/db";
+import { readBaselineAiConfig } from "@shop-health/decision-ai";
 import type { Command } from "commander";
 
 import type { CliRuntime } from "../runtime.js";
@@ -8,14 +9,45 @@ interface DoctorOptions {
   readonly json?: boolean;
 }
 
+interface DoctorCheck {
+  readonly name: string;
+  readonly status: "OK" | "FAIL" | "SKIP";
+  readonly detail: string;
+}
+
+export function getAiDoctorCheck(environment: NodeJS.ProcessEnv): DoctorCheck {
+  try {
+    const config = readBaselineAiConfig(environment);
+    const identity = `${config.provider}/${config.model}`;
+    if (!config.enabled) {
+      return { name: "baseline-ai", status: "SKIP", detail: `DISABLED: ${identity}` };
+    }
+    if (!config.apiKey?.trim()) {
+      return {
+        name: "baseline-ai",
+        status: "SKIP",
+        detail: `UNCONFIGURED: ${identity} (TOOL_AI_API_KEY missing)`,
+      };
+    }
+    return {
+      name: "baseline-ai",
+      status: "OK",
+      detail: `CONFIGURED: ${identity} (provider call not attempted)`,
+    };
+  } catch {
+    return { name: "baseline-ai", status: "FAIL", detail: "INVALID_CONFIGURATION" };
+  }
+}
+
 export function registerDoctorCommand(program: Command, runtime: CliRuntime): void {
   program
     .command("doctor")
     .description("Check local runtime, AdsPower, and PostgreSQL connectivity")
     .option("--json", "Print stable JSON output")
     .action(async (options: DoctorOptions) => {
-      const checks: Array<{ name: string; status: "OK" | "FAIL" | "SKIP"; detail: string }> = [];
+      const checks: DoctorCheck[] = [];
       checks.push({ name: "node", status: "OK", detail: process.version });
+      checks.push(getAiDoctorCheck(process.env));
 
       try {
         const requestInit: RequestInit = {

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createBaselineAiClient,
+  readBaselineAiConfig,
   type BaselineAiInput,
 } from "./index.js";
 
@@ -120,11 +121,37 @@ describe("baseline AI client", () => {
       authorization: "Bearer test-key",
       "content-type": "application/json",
     });
-    const serializedBody = String(requestInit?.body);
-    expect(serializedBody).toContain('"knownRiskExceptions"');
-    expect(serializedBody).toContain('"id":"R1"');
-    expect(serializedBody).toContain('"id":"R5"');
-    expect(serializedBody).not.toMatch(
+    const requestBody = JSON.parse(String(requestInit?.body)) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const userContent = requestBody.messages.find(({ role }) => role === "user")?.content;
+    expect(userContent).toBeDefined();
+    const decisionContext = JSON.parse(userContent ?? "") as {
+      knownRiskExceptions: Array<{ id: string }>;
+      outputSchema: { reasonCodes: string[] };
+    };
+    expect(decisionContext.knownRiskExceptions.map(({ id }) => id)).toEqual([
+      "R1",
+      "R2",
+      "R3",
+      "R4",
+      "R5",
+    ]);
+    expect(decisionContext.outputSchema.reasonCodes).toEqual([
+      "HIGH_ABSOLUTE_EXPOSURE",
+      "LOW_DELIVERY_RATE",
+      "HIGH_VOLUME_HEALTHY",
+      "LOW_SAMPLE_SIZE",
+      "CARRIER_SYSTEMIC_DELAY",
+      "RAPID_ONHOLD_GROWTH",
+      "DELIVERY_DETERIORATION",
+      "REFUND_SPIKE",
+      "DATA_INCOMPLETE",
+      "RECOVERY_TREND",
+      "THRESHOLD_FLAPPING",
+      "OTHER",
+    ]);
+    expect(userContent).not.toMatch(
       /shopId|shopName|rawData|cookie|token|buyer|contact|address/i,
     );
   });
@@ -159,5 +186,131 @@ describe("baseline AI client", () => {
       errorCode: "MISSING_API_KEY",
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("uses the approved OpenCode Zen defaults from environment config", () => {
+    expect(readBaselineAiConfig({ TOOL_AI_API_KEY: "test-key" })).toEqual({
+      enabled: true,
+      provider: "opencode-zen",
+      baseUrl: "https://opencode.ai/zen/v1",
+      apiKey: "test-key",
+      model: "deepseek-v4-flash-free",
+      timeoutMs: 30_000,
+    });
+  });
+
+  it("rejects input containing fields outside the normalized decision contract", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const client = createBaselineAiClient({
+      enabled: true,
+      apiKey: "test-key",
+      fetch: fetchMock,
+      now: () => generatedAt,
+    });
+
+    await expect(
+      client.recommend({
+        ...validInput,
+        shopId: "must-not-cross-the-ai-boundary",
+      } as unknown as BaselineAiInput),
+    ).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [429, "RATE_LIMITED"],
+    [503, "PROVIDER_UNAVAILABLE"],
+  ] as const)("maps HTTP %s to %s without parsing the response body", async (status, errorCode) => {
+    const client = createBaselineAiClient({
+      enabled: true,
+      apiKey: "test-key",
+      fetch: async () => new Response("provider details must not escape", { status }),
+      now: () => generatedAt,
+    });
+
+    await expect(client.recommend(validInput)).resolves.toMatchObject({
+      status: "UNAVAILABLE",
+      errorCode,
+      humanReviewRequired: true,
+    });
+  });
+
+  it("returns unavailable when the provider response is not valid structured output", async () => {
+    const client = createBaselineAiClient({
+      enabled: true,
+      apiKey: "test-key",
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "not-json" } }],
+          }),
+          { status: 200 },
+        ),
+      now: () => generatedAt,
+    });
+
+    await expect(client.recommend(validInput)).resolves.toMatchObject({
+      status: "UNAVAILABLE",
+      errorCode: "INVALID_RESPONSE",
+    });
+  });
+
+  it("returns unavailable when a validated field is outside its contract", async () => {
+    const client = createBaselineAiClient({
+      enabled: true,
+      apiKey: "test-key",
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    decision: "WATCH",
+                    confidence: 1.5,
+                    reasonCodes: ["OTHER"],
+                    reason: "Invalid confidence must fail closed.",
+                    humanReviewRequired: true,
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      now: () => generatedAt,
+    });
+
+    await expect(client.recommend(validInput)).resolves.toMatchObject({
+      status: "UNAVAILABLE",
+      errorCode: "INVALID_OUTPUT",
+    });
+  });
+
+  it("distinguishes network failure from timeout", async () => {
+    const networkClient = createBaselineAiClient({
+      enabled: true,
+      apiKey: "test-key",
+      fetch: async () => {
+        throw new Error("connection refused");
+      },
+      now: () => generatedAt,
+    });
+    const timeoutClient = createBaselineAiClient({
+      enabled: true,
+      apiKey: "test-key",
+      timeoutMs: 1,
+      fetch: async () => new Promise<Response>(() => undefined),
+      now: () => generatedAt,
+    });
+
+    await expect(networkClient.recommend(validInput)).resolves.toMatchObject({
+      status: "UNAVAILABLE",
+      errorCode: "NETWORK_ERROR",
+    });
+    await expect(timeoutClient.recommend(validInput)).resolves.toMatchObject({
+      status: "UNAVAILABLE",
+      errorCode: "TIMEOUT",
+    });
   });
 });

@@ -9,6 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@shop-health/decision-ai": "workspace:*",
     "@shop-health/domain": "workspace:*",
     "zod": "^4.0.0"
   }

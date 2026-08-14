@@ -3,7 +3,14 @@ import { ZodError } from "zod";
 
 import type { Database } from "../client.js";
 import { baDecisions, decisionCases } from "../schema.js";
-import { captureBaDecision, type CaptureBaDecisionInput } from "../index.js";
+import {
+  captureBaDecision,
+  createDecisionCase,
+  recordAiDecision,
+  recordBaDecisionForCase,
+  recordDryRunExecution,
+  type CaptureBaDecisionInput,
+} from "../index.js";
 
 const input: CaptureBaDecisionInput = {
   decisionCase: {
@@ -30,6 +37,9 @@ const input: CaptureBaDecisionInput = {
       stopByOnHoldValue: false,
       stopByDeliveryRate: false,
       dataSufficient: true,
+      stopOnHoldValueAt: "3500.0000",
+      stopDeliveryRateBelow: 0.7,
+      minimumOrdersForRateRule: 0,
     },
     financeSnapshot: {
       capturedAt: "2026-08-14T00:00:00.000Z",
@@ -144,5 +154,66 @@ describe("captureBaDecision", () => {
     await expect(captureBaDecision(double.db, input)).rejects.toThrow("BA insert failed");
     expect(double.transactionEntered()).toBe(true);
     expect(double.inserted).toHaveLength(2);
+  });
+});
+
+describe("decision workflow persistence boundaries", () => {
+  const rejectingDb = new Proxy(
+    {},
+    {
+      get() {
+        throw new Error("Database must not be touched for invalid input");
+      },
+    },
+  ) as Database;
+
+  it("validates case creation before touching the database", async () => {
+    await expect(
+      createDecisionCase(rejectingDb, {
+        ...input.decisionCase,
+        requestId: "not-a-uuid",
+        caseOrigin: "LIVE",
+      }),
+    ).rejects.toBeInstanceOf(ZodError);
+  });
+
+  it("validates fail-closed AI persistence before touching the database", async () => {
+    await expect(
+      recordAiDecision(rejectingDb, {
+        requestId: "00000000-0000-4000-8000-000000000020",
+        decisionCaseId: "00000000-0000-4000-8000-000000000021",
+        status: "UNAVAILABLE",
+        provider: "opencode-zen",
+        model: "deepseek-v4-flash-free",
+        promptVersion: "baseline-ai-prompt.v1",
+        policyVersion: "risk-control-policy.v1",
+        recommendation: "WATCH",
+        confidence: null,
+        reasonCodes: null,
+        reason: null,
+        humanReviewRequired: true,
+        failureCode: "MISSING_API_KEY",
+      } as never),
+    ).rejects.toBeInstanceOf(ZodError);
+  });
+
+  it("validates BA and execution request IDs before touching the database", async () => {
+    await expect(
+      recordBaDecisionForCase(rejectingDb, {
+        requestId: "bad-request-id",
+        decisionCaseId: "00000000-0000-4000-8000-000000000021",
+        baDecision: input.baDecision,
+      }),
+    ).rejects.toBeInstanceOf(ZodError);
+
+    await expect(
+      recordDryRunExecution(rejectingDb, {
+        requestId: "bad-request-id",
+        decisionCaseId: "00000000-0000-4000-8000-000000000021",
+        baDecisionId: "00000000-0000-4000-8000-000000000022",
+        requestedAction: "HOLIDAY_MODE_ON",
+        executionMode: "DRY_RUN",
+      }),
+    ).rejects.toBeInstanceOf(ZodError);
   });
 });

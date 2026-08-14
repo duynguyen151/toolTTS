@@ -37,6 +37,9 @@ const validCase = {
     stopByOnHoldValue: false,
     stopByDeliveryRate: false,
     dataSufficient: true,
+    stopOnHoldValueAt: "4321.0000",
+    stopDeliveryRateBelow: 0.73,
+    minimumOrdersForRateRule: 25,
   },
   financeSnapshot: {
     capturedAt: "2026-08-14T00:00:00.000Z",
@@ -104,6 +107,43 @@ describe("decision contracts", () => {
     ["continue with trigger", { ...validCase, ruleDecision: "CONTINUE", ruleTriggers: ["DELIVERY_RATE"] }],
   ])("rejects a malformed decision case %s", (_label, input) => {
     expect(DecisionCaseInputSchema.safeParse(input).success).toBe(false);
+  });
+
+  it("rejects a decision snapshot without its evaluated rule thresholds", () => {
+    const {
+      stopOnHoldValueAt: _stopOnHoldValueAt,
+      stopDeliveryRateBelow: _stopDeliveryRateBelow,
+      minimumOrdersForRateRule: _minimumOrdersForRateRule,
+      ...riskSnapshotWithoutThresholds
+    } = validCase.riskSnapshot;
+
+    expect(
+      DecisionCaseInputSchema.safeParse({
+        ...validCase,
+        riskSnapshot: riskSnapshotWithoutThresholds,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts a zero-length metrics period only when no orders were observed", () => {
+    const periodEnd = validCase.metricsSnapshot.periodEnd;
+
+    expect(DecisionCaseInputSchema.safeParse({
+      ...validCase,
+      metricsSnapshot: {
+        ...validCase.metricsSnapshot,
+        periodStart: periodEnd,
+        totalOrders: 0,
+      },
+    }).success).toBe(true);
+    expect(DecisionCaseInputSchema.safeParse({
+      ...validCase,
+      metricsSnapshot: {
+        ...validCase.metricsSnapshot,
+        periodStart: periodEnd,
+        totalOrders: 1,
+      },
+    }).success).toBe(false);
   });
 
   it.each(["COMPLETE", "PARTIAL", "UNKNOWN"] as const)(

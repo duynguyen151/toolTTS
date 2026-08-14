@@ -14,7 +14,8 @@
     "shop-health": "pnpm --filter @shop-health/cli start",
     "worker": "pnpm --filter @shop-health/worker start",
     "db:generate": "drizzle-kit generate --config packages/db/drizzle.config.ts",
-    "db:migrate": "pnpm --filter @shop-health/db migrate"
+    "db:migrate": "tsx --env-file=.env packages/db/src/migrate.ts",
+    "db:seed:demo": "tsx --env-file=.env packages/db/src/seed-demo.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

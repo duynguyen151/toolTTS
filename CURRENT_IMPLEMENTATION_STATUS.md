@@ -1,205 +1,177 @@
-# Tool_TTS — Current Implementation Status
+# Tool_TTS - Current Implementation Status
 
 > Update this file whenever the implementation materially changes.
 > This is operational state, not long-term product strategy.
 
 ## Repository
 
-Path used in previous Codex session:
-
 ```text
 C:\DUY - DoWorks\Tool_TTS
 ```
 
-Current architecture:
+- Git branch: `master`
+- Baseline commit: `273573b baseline: V1 decision capture foundation`
+- No Git remote or push is configured for this wave.
+
+## Current architecture
 
 ```text
-AdsPower Local API
-    ↓ CDP / Playwright
-Seller Center collector
-    ↓ normalize
-Sync orchestration
-    ↓ transactional locks/upsert
-PostgreSQL / Drizzle ORM
-    ↓
-Domain metrics + recommendations + risk rules
-    ↓
-CLI reports / background worker
+AdsPower / Seller Center (live sync only)
+    -> normalization
+    -> PostgreSQL / Drizzle
+    -> deterministic metrics and Rule Result
 
-PostgreSQL decision capture foundation
-    ↓
-Immutable decision case + append-only BA decision
+Persisted PostgreSQL or sanitized DEMO seed
+    -> immutable Decision Case
+    -> optional baseline AI recommendation
+    -> BA decision
+    -> confirmed Holiday Mode DRY_RUN
+    -> keyset-paginated decision history
+    -> stable CLI presentation contracts
 ```
 
-## Current apps/packages
+The deterministic domain layer does not depend on the AI provider, database,
+browser, or presentation. Rule, AI, BA, and Execution are persisted and shown
+as separate records.
+
+## Apps and packages
 
 ```text
 apps/cli
 apps/worker
 
+packages/domain
+packages/db
+packages/decision-ai
+packages/decision-workflow
 packages/seller-center
 packages/sync
-packages/db
-packages/domain
 ```
 
-## Confirmed implementation state
+## V1 CLI decision workflow
 
-- V1 backend-first implementation exists.
-- No HTTP API at last inspection.
-- No web dashboard at last inspection.
-- No Redis or queue at last inspection.
-- No production LLM integration at last inspection.
-- Market support: US / en-US.
-- AdsPower live profile previously tested: `957`.
-- Orders collection returned 2 live rows in that test.
-- Finance snapshot worked.
-- AdsPower profile remained Active.
-- Holiday Mode is DRY_RUN.
-- Orders and finance persistence are intended to be idempotent.
-- Locking and sync-run audit exist.
-- Previous fixes:
-  - DB self-deadlock;
-  - safe-cycle race;
-  - stale writes;
-  - audit masking source error.
-- Current risk evaluation uses all latest persisted eligible order state.
-- Historical coverage is not proven.
-- `sync backfill` is blocked with `BACKFILL_UNRESOLVED`.
-- Confirmed order status mapping:
-  - `101 -> AWAITING_SHIPMENT`
-- Other status mappings still require source verification.
-- Decision capture foundation now exists:
-  - privacy-safe, strict decision snapshot contracts;
-  - explicit Rule Result to product decision mapping;
-  - `decision_cases` immutable snapshot rows;
-  - append-only `ba_decisions` rows;
-  - atomic `captureBaDecision` transaction boundary;
-  - same-shop provenance enforced between a decision case and its source sync run.
-- Decision snapshot inputs do not accept raw Seller Center payloads, buyer/contact/address fields, cookies, tokens, or session data.
-- AI decisions and execution records remain separate and are not implemented yet.
-- No known cookie/token/session/buyer PII in normalized logs from the previous review.
+Implemented commands:
 
-## Latest reported validation
+```text
+shop-health review start <profileNo> [--request-id <uuid>] [--json]
+shop-health review show <caseId> [--json]
+shop-health review decide <caseId> --decision <...> --reason-code <...> [--json]
+shop-health review execute <caseId> --confirm [--request-id <uuid>] [--json]
+shop-health review history <profileNo> [--limit <1..100>] [--cursor <opaque>] [--json]
+```
+
+Stable presentation schemas:
+
+```text
+decision-review.v1
+decision-history.v1
+```
+
+Current semantics:
+
+- Only `review start` creates a Decision Case.
+- Decision Case snapshots are immutable; a BA revision requires a new case.
+- A case has at most one baseline AI result, one BA decision, and one execution.
+- AI is `AVAILABLE` or `UNAVAILABLE`; failures never fabricate a recommendation.
+- AI provenance stores provider, model, prompt version, and policy version.
+- AI input contains normalized metrics, deterministic Rule Result, thresholds,
+  and fixed R1-R5 risk context; it excludes shop identity, raw orders, PII,
+  cookies, tokens, and browser/session data.
+- BA can decide `SCALE`, `CONTINUE`, `WATCH`, or `PAUSE` even when AI is unavailable.
+- Only confirmed BA `PAUSE` can create `HOLIDAY_MODE_ON` as `DRY_RUN` / `SIMULATED`.
+- Every execution records `sellerCenterCalled=false`.
+- History keeps Rule, AI, BA, and Execution separate and uses keyset pagination.
+
+## Data origin
+
+- Shops and Decision Cases carry `LIVE` or `DEMO_SANITIZED` origin.
+- Existing shops migrated as `LIVE`.
+- Sanitized DEMO shops are disabled and have no source sync run.
+- `pnpm db:seed:demo` is deterministic and idempotent.
+- `DEMO-001` is available locally for the CLI workflow.
+- DEMO history is not returned by LIVE history queries.
+
+## PostgreSQL runtime
+
+- PostgreSQL 16 service: `postgresql-x64-16`
+- Port: `5432`
+- Development database: `shop_health_dev`
+- Test database: `shop_health_test`
+- Credentials and URLs are stored only in ignored `.env`.
+
+The database runtime was detected before installation. No duplicate service or
+container was created.
+
+## Baseline AI
+
+Provider configuration:
+
+```text
+TOOL_AI_PROVIDER=opencode-zen
+TOOL_AI_BASE_URL=https://opencode.ai/zen/v1
+TOOL_AI_MODEL=deepseek-v4-flash-free
+```
+
+The client uses native `fetch` and strict Zod structured-output validation.
+Disabled configuration, missing key, timeout, network/HTTP/rate-limit failure,
+malformed response, or invalid output persists `AI UNAVAILABLE` with a sanitized
+failure code. No live provider smoke test is required without an API key.
+
+## Seller Center boundary
+
+- AdsPower was intentionally not used for this decision-workflow wave.
+- Final diagnostics found the local AdsPower API reachable; no profile was opened or manipulated.
+- No replacement scraper, login flow, or alternate live data source was added.
+- No Seller Center request is made by the review/decision/execution path.
+- Live Seller Center validation: `NOT RUN - AdsPower intentionally disabled`.
+- Holiday Mode remains DRY_RUN only.
+
+## Deferred scope
+
+The Dashboard Presentation Wave remains deferred until a UI reference is
+provided. This wave does not add Next.js, Tailwind, shadcn, TanStack Table,
+Poppins, Heroicons, Recharts, an HTTP API, Redis, a queue, RAG, pgvector,
+Mastra, LangChain, or fine-tuning.
+
+Future dashboard code should consume the stable decision presentation schemas
+and must not reimplement deterministic rules or workflow persistence.
+
+## Known live-data gaps
+
+- Seller Center status mappings other than confirmed code `101`.
+- Refund and settlement-row mappings.
+- Carrier variants.
+- Pagination/export request mapping and full-history backfill.
+- Holiday Mode live route/state/write discovery.
+- Proof of complete historical coverage.
+
+`sync backfill` remains disabled with `BACKFILL_UNRESOLVED`.
+
+## Verification
+
+Final local verification on 2026-08-14:
 
 ```text
 pnpm typecheck: PASS
-pnpm test: PASS (76 tests)
-pnpm build: PASS
+pnpm test: PASS (135/135)
+pnpm build: PASS, including plain Node CLI postbuild smoke
 pnpm exec drizzle-kit check --config packages/db/drizzle.config.ts: PASS
+pnpm db:migrate: PASS
+pnpm db:seed:demo: PASS twice, idempotent
+pnpm shop-health doctor --json: Node OK, PostgreSQL OK, AdsPower API OK,
+  baseline AI SKIP because TOOL_AI_API_KEY is missing
 ```
 
-Live PostgreSQL E2E:
-```text
-NOT RUN — no working DATABASE_URL
-```
-
-Reason:
-```text
-DATABASE_URL is not configured in the current environment
-```
-
-Current runtime diagnostics:
+Independent built-CLI PostgreSQL E2E passed:
 
 ```text
-Node.js: OK (v22.20.0)
-PostgreSQL: SKIP — DATABASE_URL is not configured
-AdsPower: FAIL — local API fetch failed during current inspection
+same request ID -> same immutable case
+origin -> DEMO_SANITIZED
+AI -> UNAVAILABLE / MISSING_API_KEY
+BA -> PAUSE persisted
+Execution -> HOLIDAY_MODE_ON / DRY_RUN / SIMULATED
+sellerCenterCalled -> false
+History -> decision-history.v1 with Rule / AI / BA / Execution separate
 ```
 
-## Git
-
-At last inspection, `.git` metadata was not found.
-
-Therefore:
-- no branch known;
-- no HEAD baseline;
-- no diff history.
-
-Recommended if still true:
-- initialize git;
-- create baseline commit before large dashboard/AI changes.
-
-## Important files
-
-```text
-README.md
-package.json
-
-apps/cli/src/index.ts
-apps/cli/src/commands/data.ts
-apps/cli/src/commands/sync.ts
-apps/worker/src/index.ts
-
-packages/seller-center/src/source/browser-source.ts
-packages/seller-center/src/normalizers/orders.ts
-
-packages/sync/src/index.ts
-
-packages/db/src/schema.ts
-packages/db/src/locks.ts
-packages/db/src/queries/decisions.ts
-packages/db/migrations/
-
-packages/domain/src/decisions.ts
-packages/domain/src/metrics/calculate.ts
-packages/domain/src/risk-control.ts
-packages/domain/src/recommendation/evaluate.ts
-```
-
-## Current high-priority gaps
-
-1. Working live PostgreSQL E2E/migrations.
-2. Critical Seller Center order status mappings.
-3. Refund mapping.
-4. Finance/settlement row mapping.
-5. Carrier variants.
-6. Pagination/full-history backfill.
-7. V1 web dashboard and aggregate dashboard read model.
-8. Baseline structured AI recommendation and AI decision provenance.
-9. BA decision UI/mutation workflow using the implemented capture boundary.
-10. Decision history queries and Rule-vs-AI-vs-BA comparison.
-11. Separate DRY_RUN execution records and confirmation workflow.
-12. Live PostgreSQL migration/transaction/rollback E2E.
-13. Holiday Mode read/write discovery later; real execution remains out of current V1 scope.
-
-## Latest milestone
-
-Implemented and verified the V1 Decision Capture Foundation:
-
-```text
-Prepared aggregate snapshots
-    + deterministic Rule Decision
-    + BA decision / confidence / reason codes / note
-    ↓ one database transaction
-decision_cases
-    + ba_decisions
-```
-
-Current limitations:
-
-- No dashboard calls `captureBaDecision` yet.
-- No decision-history read API/query exists yet.
-- Append-only behavior is enforced by the public capture API and workflow; database triggers/roles do not currently reject direct table updates/deletes.
-- Live PostgreSQL migration and rollback behavior remain unverified without `DATABASE_URL`.
-
-## Current product priority change
-
-Earlier dashboard work was considered deferrable.
-
-That is NO LONGER TRUE.
-
-Current V1 must visibly demonstrate:
-
-```text
-TikTok data
-→ Metrics
-→ Rule Result
-→ AI Recommendation
-→ Dashboard
-→ BA Decision
-→ DRY_RUN/Execution record
-→ Decision Dataset
-```
-
-The dashboard is now a required V1 deliverable and the data-capture interface for future V2 AI.
+Reviewer verdict: `APPROVE`.

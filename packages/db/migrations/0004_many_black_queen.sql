@@ -1,0 +1,1 @@
+ALTER TABLE "sync_runs" ADD CONSTRAINT "sync_runs_id_shop_unique" UNIQUE("id","shop_id");

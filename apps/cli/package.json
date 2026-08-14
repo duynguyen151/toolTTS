@@ -1,0 +1,25 @@
+{
+  "name": "@shop-health/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "shop-health": "./dist/index.js"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@shop-health/db": "workspace:*",
+    "@shop-health/domain": "workspace:*",
+    "@shop-health/seller-center": "workspace:*",
+    "@shop-health/sync": "workspace:*",
+    "cli-table3": "^0.6.5",
+    "commander": "^14.0.0",
+    "dotenv": "^17.2.1",
+    "pino": "^9.9.0",
+    "zod": "^4.0.0"
+  }
+}

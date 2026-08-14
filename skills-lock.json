@@ -1,0 +1,107 @@
+﻿{
+    "version":  1,
+    "skills":  {
+                   "adspower-browser":  {
+                                            "source":  "adspower/adspower-browser",
+                                            "sourceType":  "github",
+                                            "skillPath":  ".agents/skills/adspower-browser/SKILL.md",
+                                            "computedHash":  "b1f6143d8ad6b0876e8fb249f92f459c8357445d373a682f5964771f436b231d"
+                                        },
+                   "api-and-interface-design":  {
+                                                    "source":  "addyosmani/agent-skills",
+                                                    "sourceType":  "github",
+                                                    "skillPath":  ".agents/skills/api-and-interface-design/SKILL.md",
+                                                    "computedHash":  "eb41a2e27c8e83b58908832a4074555d531a2200451417de2c2bdb6e9e931452"
+                                                },
+                   "brainstorming":  {
+                                         "source":  "obra/superpowers",
+                                         "sourceType":  "github",
+                                         "skillPath":  ".agents/skills/brainstorming/SKILL.md",
+                                         "computedHash":  "11d302ddf258ddddf9b07ab8773a3ef4861b37442b8251e2b914a829488c34e5"
+                                     },
+                   "code-review-and-quality":  {
+                                                   "source":  "addyosmani/agent-skills",
+                                                   "sourceType":  "github",
+                                                   "skillPath":  ".agents/skills/code-review-and-quality/SKILL.md",
+                                                   "computedHash":  "0745976b37a89515705d53a673f151834a0eb7646a2f0970b07b2834196cc5d1"
+                                               },
+                   "context-engineering":  {
+                                               "source":  "addyosmani/agent-skills",
+                                               "sourceType":  "github",
+                                               "skillPath":  ".agents/skills/context-engineering/SKILL.md",
+                                               "computedHash":  "0a215d9504573eb55ec289f10b81f1b7b942968ee6753edb5bf4dc3c5b8fb96b"
+                                           },
+                   "documentation-and-adrs":  {
+                                                  "source":  "addyosmani/agent-skills",
+                                                  "sourceType":  "github",
+                                                  "skillPath":  ".agents/skills/documentation-and-adrs/SKILL.md",
+                                                  "computedHash":  "c4bfb3a9caf9977e4b2485bcf6836db1b1710264d2303cd7f32c8de5dd8cda1c"
+                                              },
+                   "incremental-implementation":  {
+                                                      "source":  "addyosmani/agent-skills",
+                                                      "sourceType":  "github",
+                                                      "skillPath":  ".agents/skills/incremental-implementation/SKILL.md",
+                                                      "computedHash":  "5e9295896f867f989367bddaf41eff1a0f85c763aad6da18990cf7fc9aefa516"
+                                                  },
+                   "karpathy-guidelines":  {
+                                               "source":  "multica-ai/andrej-karpathy-skills",
+                                               "sourceType":  "github",
+                                               "skillPath":  ".agents/skills/karpathy-guidelines/SKILL.md",
+                                               "computedHash":  "a6866c245bc8fb4e6e67cbe1f1b525f2a54304f96501522f969a24ec539e790d"
+                                           },
+                   "receiving-code-review":  {
+                                                 "source":  "obra/superpowers",
+                                                 "sourceType":  "github",
+                                                 "skillPath":  ".agents/skills/receiving-code-review/SKILL.md",
+                                                 "computedHash":  "9308eecc765204e03381975b7aac6aa62f3761e663b1f25cb77106f7e8f0ae0b"
+                                             },
+                   "systematic-debugging":  {
+                                                "source":  "obra/superpowers",
+                                                "sourceType":  "github",
+                                                "skillPath":  ".agents/skills/systematic-debugging/SKILL.md",
+                                                "computedHash":  "4b31c07779d41871aeb72768c111a3ff6a4eb29c7fa355263f16daf6c7a9163f"
+                                            },
+                   "test-driven-development":  {
+                                                   "source":  "obra/superpowers",
+                                                   "sourceType":  "github",
+                                                   "skillPath":  ".agents/skills/test-driven-development/SKILL.md",
+                                                   "computedHash":  "de65154a0806114e923882a5f5a8a91acc1720ffaf47637d9eae3f43b8e459a2"
+                                               },
+                   "verification-before-completion":  {
+                                                          "source":  "obra/superpowers",
+                                                          "sourceType":  "github",
+                                                          "skillPath":  ".agents/skills/verification-before-completion/SKILL.md",
+                                                          "computedHash":  "8ba3991726bd83a9ccdff71000be53b01287c457e634516655a662262b17449a"
+                                                      },
+                   "writing-plans":  {
+                                         "source":  "obra/superpowers",
+                                         "sourceType":  "github",
+                                         "skillPath":  ".agents/skills/writing-plans/SKILL.md",
+                                         "computedHash":  "239d3a23104b8252f49a609e7e151e857f615120b23035876454f0c64844239f"
+                                     },
+                   "supabase-postgres-best-practices":  {
+                                                            "source":  "supabase/agent-skills",
+                                                            "sourceType":  "github",
+                                                            "skillPath":  ".agents/skills/supabase-postgres-best-practices/SKILL.md",
+                                                            "computedHash":  "a8c285213eec4b8377a6eedbe222762c740ad7b81c87b229446604dabbd04be2"
+                                                        },
+                   "playwright-best-practices":  {
+                                                     "source":  "currents-dev/playwright-best-practices-skill",
+                                                     "sourceType":  "github",
+                                                     "skillPath":  ".agents/skills/playwright-best-practices/SKILL.md",
+                                                     "computedHash":  "e7738b748b8d1b655c5608cb46a54777891fe9bb54c5edbbd0dd705213d22632"
+                                                 },
+                   "nodejs-backend-patterns":  {
+                                                   "source":  "wshobson/agents",
+                                                   "sourceType":  "github",
+                                                   "skillPath":  ".agents/skills/nodejs-backend-patterns/SKILL.md",
+                                                   "computedHash":  "c3a1b0e8c5a7947135051701c3a2b63ec022f8a7008796ff44153d748972257a"
+                                               },
+                   "codebase-design":  {
+                                           "source":  "mattpocock/skills",
+                                           "sourceType":  "github",
+                                           "skillPath":  ".agents/skills/codebase-design/SKILL.md",
+                                           "computedHash":  "3a7a90b03953d2df199718f5e42046a45a33d969f3966c8183d6d87247e7ac36"
+                                       }
+               }
+}

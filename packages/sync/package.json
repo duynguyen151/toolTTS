@@ -1,0 +1,17 @@
+{
+  "name": "@shop-health/sync",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@shop-health/db": "workspace:*",
+    "@shop-health/domain": "workspace:*",
+    "@shop-health/seller-center": "workspace:*",
+    "pino": "^9.9.0"
+  }
+}

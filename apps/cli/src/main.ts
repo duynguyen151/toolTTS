@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { registerDataCommands } from "./commands/data.js";
 import { registerDoctorCommand } from "./commands/doctor.js";
 import { registerReviewCommands } from "./commands/review.js";
+import { registerProfileCommands } from "./commands/profile.js";
 import { registerRiskCommands } from "./commands/risk.js";
 import { registerShopCommands } from "./commands/shop.js";
 import { registerSyncExecutionCommands } from "./commands/sync.js";
@@ -25,6 +26,7 @@ program
 
 registerDoctorCommand(program, runtime);
 registerShopCommands(program, runtime);
+registerProfileCommands(program, runtime);
 registerDataCommands(program, runtime);
 registerSyncExecutionCommands(program, runtime);
 registerRiskCommands(program, runtime);

@@ -1,8 +1,8 @@
-import { eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import type { Database } from "../client.js";
-import { adspowerProfiles, shops, type AdsPowerProfileRow } from "../schema.js";
+import { adspowerProfiles, shops, type AdsPowerProfileRow, type ShopRow } from "../schema.js";
 
 const profileIdentitySchema = z.object({
   profileId: z.string().trim().min(1),
@@ -23,6 +23,7 @@ const verificationInputSchema = z.object({
   eligibilityStatus: z.enum(["ELIGIBLE", "INELIGIBLE", "UNSUPPORTED_REGION"]),
   verifiedTiktokShopId: z.string().trim().min(1).nullable().optional(),
   verifiedShopDisplayName: z.string().trim().min(1).nullable().optional(),
+  activeShopId: z.string().uuid().nullable().optional(),
   lastVerifiedAt: z.coerce.date().optional(),
 });
 
@@ -46,6 +47,25 @@ export async function getAdsPowerProfile(
   const [profile] = await db.select().from(adspowerProfiles)
     .where(eq(adspowerProfiles.profileId, profileId)).limit(1);
   return profile ?? null;
+}
+
+export async function listAdsPowerProfiles(db: Database): Promise<AdsPowerProfileRow[]> {
+  return db.select().from(adspowerProfiles).orderBy(asc(adspowerProfiles.profileNo));
+}
+
+export async function listReadyAdsPowerProfileShops(db: Database): Promise<ShopRow[]> {
+  const rows = await db.select({ shop: shops }).from(adspowerProfiles)
+    .innerJoin(shops, eq(adspowerProfiles.activeShopId, shops.id))
+    .where(and(
+      eq(adspowerProfiles.verificationState, "READY"),
+      eq(adspowerProfiles.eligibilityStatus, "ELIGIBLE"),
+      eq(shops.enabled, true),
+      eq(shops.syncState, "ACTIVE"),
+      eq(shops.verificationStatus, "VERIFIED"),
+      eq(shops.eligibilityStatus, "ELIGIBLE"),
+    ))
+    .orderBy(asc(adspowerProfiles.profileNo));
+  return rows.map((row) => row.shop);
 }
 
 export async function setAdsPowerProfileVerification(

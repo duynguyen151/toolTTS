@@ -49,6 +49,14 @@ export async function findShopByProfileNo(
   return shop ?? null;
 }
 
+export async function findShopByProfileId(
+  db: Database,
+  profileId: string,
+): Promise<ShopRow | null> {
+  const [shop] = await db.select().from(shops).where(eq(shops.profileId, profileId)).limit(1);
+  return shop ?? null;
+}
+
 export async function findShopById(db: Database, shopId: string): Promise<ShopRow | null> {
   const [shop] = await db.select().from(shops).where(eq(shops.id, shopId)).limit(1);
   return shop ?? null;

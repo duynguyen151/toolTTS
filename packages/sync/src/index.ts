@@ -33,6 +33,9 @@ import type {
 import { SellerCenterError } from "@shop-health/seller-center/errors";
 import type { Logger } from "pino";
 
+export { runSequentialProfileQueue, type ProfileQueueResult } from "./profile-orchestration.js";
+export { verifySelectedProfile, type ProfileVerificationResult } from "./profile-verification.js";
+
 export type SyncKind = "orders" | "finance";
 
 export interface RunSyncInput {

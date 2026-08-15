@@ -1,5 +1,6 @@
 import {
   AiDecisionInputSchema,
+  AiDecisionContextSchema,
   CaptureBaDecisionInputSchema,
   CreateDecisionCaseInputSchema,
   DecisionCoverageSnapshotSchema,
@@ -9,6 +10,7 @@ import {
   RecordBaDecisionForCaseInputSchema,
   RecordDryRunExecutionInputSchema,
   type AiDecisionInput,
+  type AiDecisionContext,
   type BaDecision,
   type BaDecisionReasonCode,
   type CaptureBaDecisionInput,
@@ -69,6 +71,7 @@ export interface DecisionReviewRecord {
     lastSyncAt: Date | null;
   };
   coverageSnapshot: DecisionCoverageSnapshot;
+  decisionContextSnapshot: AiDecisionContext | null;
   metrics: {
     totalOrders: number;
     onHoldValue: string | null;
@@ -185,6 +188,7 @@ export interface DecisionAiInputRecord {
   riskSnapshot: DecisionRiskSnapshot;
   ruleDecision: DecisionRuleResult;
   ruleTriggers: DecisionRuleTrigger[];
+  decisionContextSnapshot: AiDecisionContext | null;
 }
 
 export interface ListDecisionHistoryInput {
@@ -250,12 +254,20 @@ function assertCaseRetryMatches(existing: DecisionCaseRow, input: CreateDecision
   }
 }
 
+function parseDecisionContextSnapshot(value: unknown | null | undefined): AiDecisionContext | null {
+  return value == null ? null : AiDecisionContextSchema.parse(value);
+}
+
 export async function createDecisionCase(
   db: Database,
   input: CreateDecisionCaseInput,
 ): Promise<DecisionCaseRow> {
   const parsed = CreateDecisionCaseInputSchema.parse(input);
-  const [created] = await db.insert(decisionCases).values(parsed)
+  const decisionContextSnapshot = parseDecisionContextSnapshot(parsed.decisionContextSnapshot);
+  const [created] = await db.insert(decisionCases).values({
+    ...parsed,
+    decisionContextSnapshot,
+  })
     .onConflictDoNothing({ target: decisionCases.requestId }).returning();
   if (created) return created;
 
@@ -305,6 +317,7 @@ export async function getDecisionAiInput(
     ruleDecision: decisionCases.ruleDecision,
     ruleTriggers: decisionCases.ruleTriggers,
     dataCoverage: decisionCases.dataCoverage,
+    decisionContextSnapshot: decisionCases.decisionContextSnapshot,
   }).from(decisionCases).where(eq(decisionCases.id, parsedCaseId)).limit(1);
   if (!decisionCase) return null;
   const coverageSnapshot = decisionCase.coverageSnapshot ?? {
@@ -326,6 +339,7 @@ export async function getDecisionAiInput(
     riskSnapshot: DecisionRiskSnapshotSchema.parse(decisionCase.riskSnapshot),
     ruleDecision: decisionCase.ruleDecision,
     ruleTriggers: decisionCase.ruleTriggers,
+    decisionContextSnapshot: parseDecisionContextSnapshot(decisionCase.decisionContextSnapshot),
   };
 }
 
@@ -449,6 +463,7 @@ function makeReview(
       lastSyncAt: latestDate(shop.lastOrdersSyncedAt, shop.lastFinanceSyncedAt),
     },
     coverageSnapshot,
+    decisionContextSnapshot: parseDecisionContextSnapshot(decisionCase.decisionContextSnapshot),
     metrics: {
       totalOrders: metrics.totalOrders,
       onHoldValue: metrics.onHoldValue,
@@ -645,7 +660,12 @@ export async function captureBaDecision(
   const ba = normalizeBaInput(parsed.baDecision);
   return db.transaction(async (transaction) => {
     const [decisionCase] = await transaction.insert(decisionCases)
-      .values(parsed.decisionCase).returning();
+      .values({
+        ...parsed.decisionCase,
+        decisionContextSnapshot: parseDecisionContextSnapshot(
+          parsed.decisionCase.decisionContextSnapshot,
+        ),
+      }).returning();
     if (!decisionCase) throw new Error("Failed to create decision case");
 
     const [baDecision] = await transaction.insert(baDecisions).values({

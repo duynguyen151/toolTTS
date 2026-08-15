@@ -18,6 +18,7 @@ import {
 
 import type {
   AiFailureCode,
+  AiDecisionContext,
   BaDecisionReasonCode,
   DecisionCoverageSnapshot,
   DecisionFinanceSnapshot,
@@ -513,6 +514,7 @@ export const decisionCases = pgTable(
     riskSnapshot: jsonb("risk_snapshot").$type<DecisionRiskSnapshot>().notNull(),
     financeSnapshot: jsonb("finance_snapshot").$type<DecisionFinanceSnapshot>().notNull(),
     coverageSnapshot: jsonb("coverage_snapshot").$type<DecisionCoverageSnapshot>(),
+    decisionContextSnapshot: jsonb("decision_context_snapshot").$type<AiDecisionContext>(),
     ruleDecision: decisionRuleResultEnum("rule_decision").notNull(),
     ruleTriggers: jsonb("rule_triggers").$type<DecisionRuleTrigger[]>().notNull().default(sql`'[]'::jsonb`),
     dataCoverage: decisionDataCoverageEnum("data_coverage").notNull(),
@@ -569,6 +571,10 @@ export const decisionCases = pgTable(
     check(
       "decision_cases_coverage_snapshot_object",
       sql`${table.coverageSnapshot} is null or jsonb_typeof(${table.coverageSnapshot}) = 'object'`
+    ),
+    check(
+      "decision_cases_decision_context_snapshot_object",
+      sql`${table.decisionContextSnapshot} is null or jsonb_typeof(${table.decisionContextSnapshot}) = 'object'`
     ),
     check(
       "decision_cases_rule_triggers_array",

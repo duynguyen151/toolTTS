@@ -14,9 +14,11 @@ RULE = deterministic. AI = advisory. BA = final human decision. EXECUTION = DRY_
 
 ## Important Data Semantics
 
-- Official Finance On Hold is not operational exposure.
+- `operationalExposure` is order-derived operational exposure and is not `officialFinanceOnHold` from Seller Center Finance.
 - Complete within the proven rolling 12-month source window is not lifetime complete.
 - No LIVE -> DEMO fallback.
+- Objective metric deltas are available independently of categorical trend policies; categorical trend signals require configured policy and otherwise remain `NOT_EVALUATED`.
+- Historical Decision Cases preserve the Rule and AI decision context evidence received at decision time for audit and future RAG.
 
 ## Profile Semantics
 

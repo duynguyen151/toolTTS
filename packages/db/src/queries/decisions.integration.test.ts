@@ -189,6 +189,9 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
       constraint_name: "decision_cases_risk_thresholds_present",
     });
     const firstCase = await createDecisionCase(context.db, caseInput);
+    await expect(context.sql`
+      update decision_cases set rule_decision = 'CONTINUE' where id = ${firstCase.id}
+    `).rejects.toThrow("decision_cases are append-only");
     const retriedCase = await createDecisionCase(context.db, caseInput);
     expect(retriedCase.id).toBe(firstCase.id);
     const retriedAfterFactsChanged = await createDecisionCase(context.db, {
@@ -207,6 +210,7 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
       riskSnapshot: caseInput.riskSnapshot,
       ruleDecision: "PAUSE",
       ruleTriggers: ["DELIVERY_RATE"],
+      decisionContextSnapshot: null,
     });
     await expect(getDecisionReviewByRequestId(context.db, caseRequestId)).resolves.toMatchObject({
       case: { id: firstCase.id },

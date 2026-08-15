@@ -175,6 +175,8 @@ export const DecisionCaseInputSchema = z
     ruleTriggers: UniqueRuleTriggersSchema,
     dataCoverage: DecisionDataCoverageSchema,
     sourceSyncRunId: z.string().uuid().nullable(),
+    // Parsed by the persistence boundary to avoid a contract-module cycle.
+    decisionContextSnapshot: z.unknown().nullable().optional(),
   })
   .superRefine(({ ruleDecision, ruleTriggers, coverageSnapshot, dataCoverage }, context) => {
     if (coverageSnapshot.coverageState !== dataCoverage) {

@@ -12,7 +12,6 @@ import {
   DecisionMetricsSnapshotSchema,
   DecisionRiskSnapshotSchema,
   DecisionRuleResultSchema,
-  DecisionRuleTriggerSchema,
   DryRunExecutionSchema,
 } from "../decisions.js";
 import { PeriodMetricsSchema } from "../metrics/types.js";
@@ -78,31 +77,76 @@ export const DataQualitySummarySchema = z.object({
   blockers: z.array(z.string().trim().min(1)),
 }).strict();
 
+const MetricObservedValueSchema = z.union([z.number(), DecimalStringSchema, z.null()]);
+
+const { onHoldValue: _legacyOnHoldValue, ...DecisionMetricsForV1Fields } =
+  DecisionMetricsSnapshotSchema.shape;
+
+const DecisionMetricsForV1Schema = z.object({
+  ...DecisionMetricsForV1Fields,
+  operationalExposure: MetricObservedValueSchema,
+}).strict().refine(
+  ({ periodStart, periodEnd, totalOrders }) => periodStart < periodEnd
+    || (totalOrders === 0 && periodStart === periodEnd),
+  {
+    path: ["periodEnd"],
+    message: "Metrics period must have duration unless no orders were observed",
+  },
+);
+
+const DecisionFinanceForV1Schema = DecisionFinanceSnapshotSchema
+  .omit({ onHoldBalance: true, officialOnHoldAmount: true })
+  .extend({ officialFinanceOnHold: MetricObservedValueSchema });
+
+const DecisionRiskForV1Schema = DecisionRiskSnapshotSchema
+  .omit({ onHoldValue: true })
+  .extend({ operationalExposure: MetricObservedValueSchema });
+
 // This composition contains only deterministic, verified source and metric facts.
 export const MetricSnapshotSchema = z.object({
   observedAt: TimestampSchema,
-  decision: DecisionMetricsSnapshotSchema,
-  finance: DecisionFinanceSnapshotSchema,
+  decision: DecisionMetricsForV1Schema,
+  finance: DecisionFinanceForV1Schema,
   period: PeriodMetricsSchema.optional(),
 }).strict();
-
-const MetricObservedValueSchema = z.union([z.number(), DecimalStringSchema, z.null()]);
 
 export const MetricComparisonSchema = z.object({
   metric: z.string().trim().min(1),
   current: MetricObservedValueSchema,
   previous: MetricObservedValueSchema,
   absoluteDelta: MetricObservedValueSchema,
-  relativeChange: z.number().nullable(),
+  relativeDelta: z.number().nullable(),
+  direction: z.enum(["INCREASED", "DECREASED", "UNCHANGED", "UNKNOWN"]),
   currency: z.literal("USD").nullable(),
 }).strict();
 
-export const TrendSignalSchema = z.object({
+export const TrendNameSchema = z.enum([
+  "RAPID_ONHOLD_GROWTH",
+  "DELIVERY_DETERIORATION",
+  "REFUND_SPIKE",
+  "RECOVERY_TREND",
+  "THRESHOLD_FLAPPING",
+]);
+
+export const TrendPolicyThresholdSchema = z.object({
   metric: z.string().trim().min(1),
-  comparison: MetricComparisonSchema,
-  direction: z.enum(["IMPROVING", "STABLE", "WORSENING", "UNKNOWN"]),
-  status: z.enum(["AVAILABLE", "INSUFFICIENT_DATA"]),
-  reasonCodes: z.array(z.string().trim().min(1)),
+  operator: z.enum(["GT", "GTE", "LT", "LTE", "EQ"]),
+  value: z.number().finite(),
+}).strict();
+
+export const TrendPolicySchema = z.object({
+  version: z.string().trim().min(1),
+  signals: z.array(z.object({
+    signal: TrendNameSchema,
+    thresholds: z.array(TrendPolicyThresholdSchema).min(1),
+  }).strict()),
+}).strict();
+
+export const TrendSignalSchema = z.object({
+  signal: TrendNameSchema,
+  comparisons: z.array(MetricComparisonSchema),
+  status: z.enum(["TRIGGERED", "NOT_TRIGGERED", "NOT_EVALUATED"]),
+  reasonCode: z.enum(["POLICY_UNCONFIGURED", "INSUFFICIENT_DATA"]).nullable(),
 }).strict();
 
 export const RuleCheckSchema = z.object({
@@ -114,20 +158,43 @@ export const RuleCheckSchema = z.object({
   triggeredReason: z.string().trim().min(1).nullable(),
 }).strict();
 
+export const RuleTriggerForV1Schema = z.enum([
+  "OPERATIONAL_EXPOSURE",
+  "DELIVERY_RATE",
+]);
+
 export const RuleEvaluationSchema = z.object({
   result: DecisionRuleResultSchema,
   policyVersion: z.string().trim().min(1),
   checks: z.array(RuleCheckSchema),
-  triggers: z.array(DecisionRuleTriggerSchema),
+  triggers: z.array(RuleTriggerForV1Schema),
   expression: z.string().trim().min(1),
   evaluatedAt: TimestampSchema,
 }).strict();
 
 export const AiDecisionContextSchema = z.object({
+  schemaVersion: z.literal("ai-decision-context.v1"),
+  profile: z.object({
+    profileId: IdentifierSchema,
+    profileNo: IdentifierSchema,
+  }).strict(),
+  shop: ShopIdentitySummarySchema,
   metrics: MetricSnapshotSchema,
+  comparisons: z.array(MetricComparisonSchema),
+  trends: z.array(TrendSignalSchema),
   dataQuality: DataQualitySummarySchema,
-  risk: DecisionRiskSnapshotSchema,
+  risk: DecisionRiskForV1Schema,
   rule: RuleEvaluationSchema,
+  previousCompatibleSnapshot: z.object({
+    observedAt: TimestampSchema,
+    metrics: MetricSnapshotSchema,
+    dataQuality: DataQualitySummarySchema,
+  }).strict().nullable(),
+  policyVersions: z.object({
+    metricDefinitionVersion: z.string().trim().min(1),
+    riskPolicyVersion: z.string().trim().min(1),
+    trendPolicyVersion: z.string().trim().min(1).nullable(),
+  }).strict(),
 }).strict();
 
 // Existing AI persistence contract already contains availability, advice, and provenance.
@@ -202,8 +269,12 @@ export type ProfileSummary = z.infer<typeof ProfileSummarySchema>;
 export type DataQualitySummary = z.infer<typeof DataQualitySummarySchema>;
 export type MetricSnapshot = z.infer<typeof MetricSnapshotSchema>;
 export type MetricComparison = z.infer<typeof MetricComparisonSchema>;
+export type TrendName = z.infer<typeof TrendNameSchema>;
+export type TrendPolicyThreshold = z.infer<typeof TrendPolicyThresholdSchema>;
+export type TrendPolicy = z.infer<typeof TrendPolicySchema>;
 export type TrendSignal = z.infer<typeof TrendSignalSchema>;
 export type RuleCheck = z.infer<typeof RuleCheckSchema>;
+export type RuleTriggerForV1 = z.infer<typeof RuleTriggerForV1Schema>;
 export type RuleEvaluation = z.infer<typeof RuleEvaluationSchema>;
 export type AiDecisionContext = z.infer<typeof AiDecisionContextSchema>;
 export type AiAnalysis = z.infer<typeof AiAnalysisSchema>;

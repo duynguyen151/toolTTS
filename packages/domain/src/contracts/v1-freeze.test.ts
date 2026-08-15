@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AiDecisionContextSchema,
   BaReviewCommandSchema,
+  MetricComparisonSchema,
   ReviewQueueReasonSchema,
   ShopHealthSnapshotSchema,
+  TrendSignalSchema,
 } from "./v1-freeze.js";
 
 describe("V1 shared contracts", () => {
@@ -33,6 +36,40 @@ describe("V1 shared contracts", () => {
       currentBaDecision: expect.anything(),
       baHistory: expect.anything(),
       execution: expect.anything(),
+    });
+  });
+
+  it("keeps operational exposure separate from official Finance On Hold", () => {
+    expect(MetricComparisonSchema.parse({
+      metric: "operationalExposure",
+      current: "125.0000",
+      previous: "100.0000",
+      absoluteDelta: "25.0000",
+      relativeDelta: 0.25,
+      direction: "INCREASED",
+      currency: "USD",
+    })).toMatchObject({ metric: "operationalExposure", relativeDelta: 0.25 });
+
+    expect(TrendSignalSchema.parse({
+      signal: "RAPID_ONHOLD_GROWTH",
+      comparisons: [],
+      status: "NOT_EVALUATED",
+      reasonCode: "POLICY_UNCONFIGURED",
+    }).status).toBe("NOT_EVALUATED");
+  });
+
+  it("requires the AI context to retain deterministic audit inputs", () => {
+    expect(AiDecisionContextSchema.shape).toMatchObject({
+      schemaVersion: expect.anything(),
+      profile: expect.anything(),
+      shop: expect.anything(),
+      metrics: expect.anything(),
+      comparisons: expect.anything(),
+      trends: expect.anything(),
+      rule: expect.anything(),
+      dataQuality: expect.anything(),
+      previousCompatibleSnapshot: expect.anything(),
+      policyVersions: expect.anything(),
     });
   });
 });

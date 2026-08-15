@@ -134,6 +134,13 @@
       "when": 1786810609202,
       "tag": "0018_light_celestials",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1786837308511,
+      "tag": "0019_fine_toxin",
+      "breakpoints": true
     }
   ]
 }

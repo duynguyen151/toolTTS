@@ -15,6 +15,93 @@ import {
   type CaptureBaDecisionInput,
 } from "../index.js";
 
+const decisionContextSnapshot = {
+  schemaVersion: "ai-decision-context.v1" as const,
+  profile: { profileId: "profile-1", profileNo: "1" },
+  shop: {
+    shopId: "00000000-0000-4000-8000-000000000001",
+    tiktokShopId: null,
+    displayName: null,
+    region: "US" as const,
+    locale: "en-US" as const,
+    currency: "USD" as const,
+  },
+  metrics: {
+    observedAt: "2026-08-14T00:00:00.000Z",
+    decision: {
+      window: "FULL_PERSISTED_HISTORY",
+      periodStart: "2026-08-01T00:00:00.000Z",
+      periodEnd: "2026-08-14T00:00:00.000Z",
+      totalOrders: 120,
+      onHoldOrderCount: 18,
+      deliveredCount: 84,
+      deliveryRate: 0.84,
+      cancellationRate: 0.05,
+      refundRate: 0.02,
+      operationalExposure: "1200.0000",
+      currency: "USD" as const,
+    },
+    finance: {
+      capturedAt: "2026-08-14T00:00:00.000Z",
+      currency: "USD" as const,
+      availableBalance: "2400.0000",
+      frozenBalance: "100.0000",
+      totalBalance: "2500.0000",
+      toSettleBalance: "800.0000",
+      officialFinanceOnHold: "1200.0000",
+      settlementCount: 40,
+      onHoldSettlementCount: 6,
+    },
+  },
+  comparisons: [],
+  trends: [{
+    signal: "RAPID_ONHOLD_GROWTH" as const,
+    comparisons: [],
+    status: "NOT_EVALUATED" as const,
+    reasonCode: "POLICY_UNCONFIGURED" as const,
+  }],
+  dataQuality: {
+    coverage: "COMPLETE" as const,
+    source: "SELLER_CENTER" as const,
+    provenSourceWindow: "ROLLING_12_MONTHS" as const,
+    completeWithinSourceWindow: true,
+    lifetimeHistoryComplete: false,
+    ordersSourceComplete: true,
+    financeRequiredSourceComplete: true,
+    sourceReconciled: true,
+    freshness: "FRESH" as const,
+    latestSuccessfulSyncAt: "2026-08-14T00:00:00.000Z",
+    financeCapturedAt: "2026-08-14T00:00:00.000Z",
+    blockers: [],
+  },
+  risk: {
+    policyVersion: "risk-control-policy.v1",
+    evaluatedAt: "2026-08-14T00:00:00.000Z",
+    operationalExposure: "1200.0000",
+    deliveryRate: 0.84,
+    stopByOnHoldValue: false,
+    stopByDeliveryRate: false,
+    dataSufficient: true,
+    stopOnHoldValueAt: "3500.0000",
+    stopDeliveryRateBelow: 0.7,
+    minimumOrdersForRateRule: 0,
+  },
+  rule: {
+    result: "CONTINUE" as const,
+    policyVersion: "risk-control-policy.v1",
+    checks: [],
+    triggers: [],
+    expression: "No rule triggered",
+    evaluatedAt: "2026-08-14T00:00:00.000Z",
+  },
+  previousCompatibleSnapshot: null,
+  policyVersions: {
+    metricDefinitionVersion: "metrics.v1",
+    riskPolicyVersion: "risk-control-policy.v1",
+    trendPolicyVersion: null,
+  },
+};
+
 const input: CaptureBaDecisionInput = {
   decisionCase: {
     shopId: "00000000-0000-4000-8000-000000000001",
@@ -68,6 +155,7 @@ const input: CaptureBaDecisionInput = {
     ruleTriggers: [],
     dataCoverage: "COMPLETE",
     sourceSyncRunId: null,
+    decisionContextSnapshot,
   },
   baDecision: {
     decision: "WATCH",
@@ -243,6 +331,7 @@ describe("decision workflow persistence boundaries", () => {
         riskSnapshot: input.decisionCase.riskSnapshot,
         ruleDecision: input.decisionCase.ruleDecision,
         ruleTriggers: input.decisionCase.ruleTriggers,
+        decisionContextSnapshot: null,
       });
   });
 

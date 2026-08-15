@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SyncRequest } from "@shop-health/domain";
+import { SellerCenterError } from "../errors.js";
 
 const { connectOverCDP } = vi.hoisted(() => ({
   connectOverCDP: vi.fn(),
@@ -18,6 +19,24 @@ import { SellerCenterBrowserDataSource } from "./browser-source.js";
 
 describe("SellerCenterBrowserDataSource order response capture", () => {
   beforeEach(() => connectOverCDP.mockReset());
+
+  it("reports browser disconnections as unavailable instead of layout changes", async () => {
+    const source = new SellerCenterBrowserDataSource({
+      adsPowerClient: {
+        open: vi.fn().mockRejectedValue(new SellerCenterError(
+          "BROWSER_DISCONNECTED",
+          "AdsPower browser connection is unavailable",
+        )),
+      } as never,
+    });
+
+    const health = await source.health(shopConfig());
+
+    expect(health).toMatchObject({
+      status: "UNAVAILABLE",
+      detail: expect.stringContaining("browser connection"),
+    });
+  });
 
   it("matches the POST order count response used by probe", async () => {
     const page = new FakeOrdersPage();

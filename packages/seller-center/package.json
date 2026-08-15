@@ -3,15 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./adspower": "./src/adspower/client.ts",
+    "./browser-source": "./src/source/browser-source.ts",
+    "./errors": "./src/errors.ts"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@shop-health/domain": "workspace:*",
-    "playwright-core": "^1.55.0",
+    "chromium-bidi": "12.1.0",
     "pino": "^9.9.0",
+    "playwright-core": "^1.55.0",
     "zod": "^4.0.0"
   }
 }

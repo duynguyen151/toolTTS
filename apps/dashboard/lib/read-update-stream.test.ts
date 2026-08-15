@@ -32,7 +32,7 @@ async function collect(stream: ReadableStream<Uint8Array>): Promise<UpdateDataEv
 describe("readUpdateDataEvents", () => {
   it("parses events split across arbitrary response chunks", async () => {
     const first = JSON.stringify(event("OPENING_PROFILE"));
-    const second = JSON.stringify(event("CONNECTING"));
+    const second = JSON.stringify(event("SUCCESS", true));
     const payload = `${first}\n${second}\n`;
 
     await expect(collect(streamFrom([
@@ -41,7 +41,7 @@ describe("readUpdateDataEvents", () => {
       payload.slice(first.length + 3),
     ]))).resolves.toEqual([
       event("OPENING_PROFILE"),
-      event("CONNECTING"),
+      event("SUCCESS", true),
     ]);
   });
 
@@ -59,6 +59,12 @@ describe("readUpdateDataEvents", () => {
     ]);
   });
 
+  it("accepts HUMAN_ACTION_REQUIRED as a terminal operator state", async () => {
+    await expect(collect(streamFrom([
+      JSON.stringify(event("HUMAN_ACTION_REQUIRED", true)),
+    ]))).resolves.toEqual([event("HUMAN_ACTION_REQUIRED", true)]);
+  });
+
   it("rejects malformed event JSON", async () => {
     await expect(collect(streamFrom(["{not-json}\n"]))).rejects.toThrow(
       "Update stream contained invalid JSON",
@@ -69,5 +75,26 @@ describe("readUpdateDataEvents", () => {
     await expect(collect(streamFrom(["{\"state\":\"SUCCESS\"}\n"]))).rejects.toThrow(
       "Update stream contained an invalid event",
     );
+  });
+
+  it("rejects stream errors with codes outside the client-safe allowlist", async () => {
+    await expect(collect(streamFrom([
+      `${JSON.stringify({
+        ...event("ERROR", true),
+        error: { code: "PRIVATE_UPSTREAM_ERROR", message: "Unexpected upstream detail" },
+      })}\n`,
+    ]))).rejects.toThrow("Update stream contained an invalid event");
+  });
+
+  it("rejects a stream that ends before a terminal event", async () => {
+    await expect(collect(streamFrom([
+      `${JSON.stringify(event("SYNCING_ORDERS"))}\n`,
+    ]))).rejects.toThrow("Update stream ended without a terminal event");
+  });
+
+  it("rejects events whose terminal flag does not match their state", async () => {
+    await expect(collect(streamFrom([
+      `${JSON.stringify(event("SUCCESS"))}\n`,
+    ]))).rejects.toThrow("Update stream contained an invalid event");
   });
 });

@@ -30,7 +30,7 @@ import type {
   ShopSourceConfig,
   SyncRequest
 } from "@shop-health/domain";
-import { SellerCenterError } from "@shop-health/seller-center";
+import { SellerCenterError } from "@shop-health/seller-center/errors";
 import type { Logger } from "pino";
 
 export type SyncKind = "orders" | "finance";

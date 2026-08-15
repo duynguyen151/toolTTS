@@ -9,7 +9,7 @@
 C:\DUY - DoWorks\Tool_TTS
 ```
 
-- Git branch: `master`
+- Git branch: `codex/dashboard-presentation`
 - Baseline commit: `273573b baseline: V1 decision capture foundation`
 - Stable Seller Center extraction commit: `49cad57 feat: lock down live seller data coverage`
 - No Git remote or push is configured for this wave.
@@ -101,6 +101,7 @@ as separate records.
 
 ```text
 apps/cli
+apps/dashboard
 apps/worker
 
 packages/domain
@@ -194,10 +195,10 @@ models, logs, documentation, and future UI contracts must not expose cookies,
 session/browser storage, authorization data, API keys, CDP endpoints, or proxy
 credentials.
 
-## Stable application boundaries for future UI
+## Stable application boundaries for Dashboard
 
-Future Dashboard presentation should reuse these existing application/package
-boundaries rather than importing browser internals or rebuilding business logic:
+Dashboard presentation reuses these existing application/package boundaries
+rather than importing browser internals or rebuilding business logic:
 
 | Capability | Stable boundary |
 | --- | --- |
@@ -208,19 +209,54 @@ boundaries rather than importing browser internals or rebuilding business logic:
 | Sync result/failure state | `listSyncRuns`, `ShopSyncState`, and CLI JSON contracts `sync-history.v1` / `shop-status.v1` |
 | Coverage state | `SyncResult.sourceCoverage`: `SELLER_CENTER`, `ROLLING_12_MONTHS`, `completeWithinWindow`, and `lifetimeHistoryComplete=false` |
 
-The UI may adapt these application results into presentation DTOs, but it must
-not receive or expose `AdsPowerBrowserConnection.cdpEndpoint` or other secret
+The UI adapts these application results into presentation DTOs, but it does not
+receive or expose `AdsPowerBrowserConnection.cdpEndpoint` or other secret
 connection material.
+
+## Dashboard Checkpoint A
+
+The local Next.js Dashboard presentation is implemented in `apps/dashboard`.
+Its `UPDATE DATA` operation stays behind the server/application boundary and
+reuses the existing AdsPower, Seller Center, and sync subsystems.
+
+Locked behavior:
+
+- Probe the AdsPower Local API and, when necessary, launch AdsPower through the
+  application-level service with a bounded readiness timeout.
+- Resolve the exact selected profile; open it only when closed, otherwise reuse
+  the existing session; wait for browser/CDP readiness before collection.
+- Verify the Seller Center session before running the existing LIVE Orders,
+  Finance, reconciliation, persistence, and deterministic risk workflow.
+- Return `HUMAN_ACTION_REQUIRED` with an `OPEN PROFILE` action for login or
+  security challenges. The Dashboard does not bypass human authentication.
+- Preserve required source-coverage and source/fetched/persisted reconciliation
+  gates. Incomplete required data returns `PARTIAL` or `ERROR`, never `SUCCESS`.
+- Keep DEMO operations disabled and preserve `NOT_VERIFIED`; missing values are
+  not fabricated or silently converted into complete results.
+
+The local operation routes validate loopback host/origin, forwarded headers,
+and profile input. Cookies, tokens, credentials, proxy data, internal profile
+identifiers, CDP endpoints, and raw upstream errors remain server-private.
+Background CDP extraction may avoid foregrounding Seller Center tabs, but it
+uses the same completeness guarantees as foreground extraction.
+
+Desktop and mobile presentation verification artifacts:
+
+```text
+output/playwright/dashboard-checkpoint-a-verified-1440x900.png
+output/playwright/dashboard-checkpoint-a-verified-mobile-390x844.png
+```
+
+The Dashboard uses the workspace-installed `playwright-core@1.62.1` browser
+runtime. Its explicit `chromium-bidi@12.1.0` dependency is retained because
+that Playwright version references the module without installing it.
 
 ## Deferred scope
 
-The Dashboard Presentation Wave remains deferred until a UI reference is
-provided. This wave does not add Next.js, Tailwind, shadcn, TanStack Table,
-Poppins, Heroicons, Recharts, an HTTP API, Redis, a queue, RAG, pgvector,
-Mastra, LangChain, or fine-tuning.
-
-Future dashboard code should consume the stable decision presentation schemas
-and must not reimplement deterministic rules or workflow persistence.
+The Dashboard does not add Redis, a queue, RAG, pgvector, Mastra, LangChain,
+fine-tuning, or Seller Center write actions. Dashboard presentation consumes
+stable decision and sync boundaries and does not reimplement deterministic
+rules or workflow persistence.
 
 ## Known limitations and deferred items
 
@@ -237,26 +273,37 @@ and must not reimplement deterministic rules or workflow persistence.
 
 ## Verification
 
-Final extraction verification on 2026-08-14:
+Dashboard Checkpoint A verification on 2026-08-15:
 
 ```text
+Focused Dashboard/AdsPower/Seller Center tests: PASS (92/92)
 pnpm typecheck: PASS
-pnpm test: PASS (204/204)
+pnpm test: PASS (294 passed, 4 PostgreSQL integration tests skipped)
 pnpm build: PASS
 pnpm exec drizzle-kit check --config packages/db/drizzle.config.ts: PASS
+git diff --check: PASS
+desktop/mobile visual verification: PASS
+accessibility/keyboard verification: PASS
+reviewer-luna final independent review: APPROVE (no findings)
 ```
 
-Exact verification commands:
+Exact full-workspace verification commands:
 
 ```powershell
 pnpm typecheck
-node --env-file=.env node_modules/vitest/vitest.mjs run
+pnpm test
 pnpm build
 pnpm exec drizzle-kit check --config packages/db/drizzle.config.ts
+git diff --check
 ```
 
-The explicit Node test command loads ignored local test-database configuration
-so the PostgreSQL integration tests run instead of being skipped.
+The four skipped tests require the ignored local PostgreSQL integration-test
+configuration. The production build retains accepted non-blocking warnings for
+optional Playwright modules.
+
+Visual verification covered 1440x900 desktop and 390x844 mobile layouts with no
+horizontal overflow. Keyboard verification covered visible focus, the skip
+link, logical tab order, mobile navigation, and 44px primary mobile targets.
 
 Independent built-CLI PostgreSQL E2E passed:
 

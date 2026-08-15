@@ -1,14 +1,14 @@
 import {
   ArrowPathRoundedSquareIcon,
-  ComputerDesktopIcon,
 } from "@heroicons/react/24/outline";
 
 import type { DashboardPresentation } from "../../lib/dashboard-contract";
+import { ProfileOperationState } from "../operations/profile-operation-state";
 import { InlineLoader } from "../ui/inline-loader";
 import { StatusBadge, type StatusTone } from "../ui/status-badge";
 import styles from "./dashboard-overview.module.css";
 
-type OperationalPanelProps = Pick<DashboardPresentation, "profile" | "sync">;
+type OperationalPanelProps = Pick<DashboardPresentation, "sync" | "profile">;
 
 function badgeTone(tone: DashboardPresentation["sync"]["tone"]): StatusTone {
   if (tone === "success" || tone === "warning" || tone === "danger") return tone;
@@ -44,19 +44,7 @@ export function OperationalPanel({ profile, sync }: OperationalPanelProps) {
           </div>
         </article>
 
-        <article className={styles.stateBlock}>
-          <div className={styles.stateIcon} data-tone={profile.tone}>
-            <ComputerDesktopIcon aria-hidden="true" />
-          </div>
-          <div>
-            <p className={styles.stateLabel}>AdsPower profile</p>
-            <h3>{profile.label}</h3>
-            <p>{profile.detail}</p>
-          </div>
-          <div className={styles.stateMeta}>
-            <StatusBadge tone={badgeTone(profile.tone)}>{profile.status}</StatusBadge>
-          </div>
-        </article>
+        <ProfileOperationState fallbackProfile={profile} />
       </div>
 
     </section>

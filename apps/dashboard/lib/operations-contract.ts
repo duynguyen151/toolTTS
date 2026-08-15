@@ -13,20 +13,36 @@ export type UpdateDataState =
   | "PARTIAL"
   | "ERROR"
   | "LOGIN_REQUIRED"
-  | "SECURITY_CHECK_REQUIRED";
+  | "SECURITY_CHECK_REQUIRED"
+  | "HUMAN_ACTION_REQUIRED";
 
-export type OperationErrorCode =
-  | "ADSPOWER_UNAVAILABLE"
-  | "DATABASE_UNAVAILABLE"
-  | "INVALID_REQUEST"
-  | "LAYOUT_CHANGED"
-  | "PROFILE_NOT_FOUND"
-  | "PROFILE_READY_TIMEOUT"
-  | "PROFILE_START_FAILED"
-  | "SHOP_NOT_LINKED"
-  | "SYNC_FAILED"
-  | "SYNC_SKIPPED"
-  | "UNEXPECTED_ERROR";
+export const OPERATION_ERROR_CODES = [
+  "ADSPOWER_UNAVAILABLE",
+  "ADSPOWER_NOT_RUNNING",
+  "ADSPOWER_LAUNCH_TIMEOUT",
+  "DATABASE_UNAVAILABLE",
+  "INVALID_REQUEST",
+  "LAYOUT_CHANGED",
+  "PROFILE_NOT_FOUND",
+  "PROFILE_READY_TIMEOUT",
+  "PROFILE_START_FAILED",
+  "PROFILE_OPEN_FAILED",
+  "PROFILE_NOT_READY",
+  "CDP_UNAVAILABLE",
+  "SHOP_NOT_LINKED",
+  "LOGIN_REQUIRED",
+  "SECURITY_CHALLENGE_REQUIRED",
+  "SYNC_PARTIAL",
+  "SYNC_FAILED",
+  "SYNC_SKIPPED",
+  "UNEXPECTED_ERROR",
+] as const;
+
+export type OperationErrorCode = (typeof OPERATION_ERROR_CODES)[number];
+
+export function isOperationErrorCode(value: unknown): value is OperationErrorCode {
+  return typeof value === "string" && OPERATION_ERROR_CODES.includes(value as OperationErrorCode);
+}
 
 export interface OperationError {
   readonly code: OperationErrorCode;
@@ -79,6 +95,7 @@ const TERMINAL_UPDATE_STATES = new Set<UpdateDataState>([
   "ERROR",
   "LOGIN_REQUIRED",
   "SECURITY_CHECK_REQUIRED",
+  "HUMAN_ACTION_REQUIRED",
 ]);
 
 export function isTerminalUpdateState(state: UpdateDataState): boolean {

@@ -23,6 +23,7 @@
 
 .operationMessage {
   position: relative;
+  min-width: 0;
   max-width: 260px;
   overflow: hidden;
   padding-left: 10px;
@@ -146,5 +147,12 @@
   .generatedAt,
   .operationMessage {
     white-space: normal;
+  }
+
+  .operationMessage {
+    max-width: none;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
   }
 }

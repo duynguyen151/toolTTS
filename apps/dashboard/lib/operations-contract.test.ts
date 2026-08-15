@@ -20,6 +20,7 @@ describe("dashboard operations contract", () => {
       ERROR: true,
       LOGIN_REQUIRED: true,
       SECURITY_CHECK_REQUIRED: true,
+      HUMAN_ACTION_REQUIRED: true,
     };
 
     for (const [state, terminal] of Object.entries(expected)) {

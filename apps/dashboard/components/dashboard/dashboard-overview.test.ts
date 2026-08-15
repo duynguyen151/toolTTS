@@ -1,9 +1,15 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { DashboardPresentation } from "../../lib/dashboard-contract";
+import type { ProfileOperationsPresentation } from "../../lib/operations-contract";
+import { OperationsProvider } from "../operations/operations-provider";
 import { DashboardOverview } from "./dashboard-overview";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
 
 const presentation: DashboardPresentation = {
   generatedAt: "2026-08-14T16:02:04.716Z",
@@ -116,9 +122,36 @@ const presentation: DashboardPresentation = {
   ],
 };
 
+const operationsPresentation: ProfileOperationsPresentation = {
+  status: "READY",
+  selectedProfileNo: "957",
+  profiles: [{
+    profileNo: "957",
+    state: "CLOSED",
+    linkState: "LINKED",
+    linkedShop: { profileNo: "957", displayName: "TikTok Shop 957" },
+  }],
+  error: null,
+};
+
+function renderDashboard(dataOrigin: DashboardPresentation["dataOrigin"] = "DEMO_SANITIZED"): string {
+  return renderToStaticMarkup(createElement(
+    OperationsProvider,
+    {
+      initialPresentation: operationsPresentation,
+      persistedShop: {
+        profileNo: presentation.selectedShop.profileNo,
+        displayName: presentation.selectedShop.displayName,
+        dataOrigin,
+      },
+      children: createElement(DashboardOverview, { presentation: { ...presentation, dataOrigin } }),
+    },
+  ));
+}
+
 describe("DashboardOverview", () => {
   it("keeps operational unknowns and decision stages explicit", () => {
-    const html = renderToStaticMarkup(createElement(DashboardOverview, { presentation }));
+    const html = renderDashboard();
 
     expect(html).toContain("DEMO_SANITIZED");
     expect(html).toContain("Delivery rate");
@@ -131,7 +164,7 @@ describe("DashboardOverview", () => {
   });
 
   it("renders dashboard regions with semantic headings and lists", () => {
-    const html = renderToStaticMarkup(createElement(DashboardOverview, { presentation }));
+    const html = renderDashboard();
 
     expect(html).toMatch(/<h1[^>]*>Operational overview<\/h1>/);
     expect(html).toMatch(/<section[^>]*aria-labelledby="kpi-heading"/);
@@ -142,21 +175,31 @@ describe("DashboardOverview", () => {
     expect(html).toContain('aria-label="Stage 4 of 4: Execution"');
   });
 
-  it("shows the operational read states without implying unavailable actions work", () => {
-    const html = renderToStaticMarkup(createElement(DashboardOverview, { presentation }));
+  it("connects profile operations without changing the approved dashboard regions", () => {
+    const html = renderDashboard();
 
     expect(html).toContain('id="shops"');
     expect(html).toContain('id="sync-state"');
     expect(html).toContain("Order health");
     expect(html).toContain("Data coverage");
     expect(html).toContain("Paused: layout changed");
-    expect(html).toContain("Profile not verified");
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>.*Update data/s);
+    expect(html).toContain("Live operations are disabled for sanitized demo data.");
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>.*Open profile/s);
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>.*Update data/s);
+    expect(html).not.toMatch(/profileId|cdpEndpoint|user_id|password|proxy/i);
+  });
+
+  it("enables profile operations only for LIVE dashboard data", () => {
+    const html = renderDashboard("LIVE");
+
+    expect(html).toContain("Profile 957 · CLOSED · linked");
+    expect(html).toContain("Linked to TikTok Shop 957");
+    expect(html).toMatch(/<button(?![^>]*disabled)[^>]*>.*Open profile/s);
+    expect(html).toMatch(/<button(?![^>]*disabled)[^>]*>.*Update data/s);
   });
 
   it("formats the generated timestamp for the dashboard display zone", () => {
-    const html = renderToStaticMarkup(createElement(DashboardOverview, { presentation }));
+    const html = renderDashboard();
 
     expect(html).toContain("14 Aug 2026");
     expect(html).toContain("GMT+7");

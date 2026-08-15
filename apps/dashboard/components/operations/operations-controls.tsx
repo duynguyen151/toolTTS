@@ -22,11 +22,12 @@ const updateLabels = {
   ERROR: "Update data",
   LOGIN_REQUIRED: "Update data",
   SECURITY_CHECK_REQUIRED: "Update data",
+  HUMAN_ACTION_REQUIRED: "Retry update",
 } as const;
 
 export function OperationsControls({ generatedAtLabel }: { generatedAtLabel: string }) {
   const operations = useDashboardOperations();
-  const canOpen = operations.presentationStatus === "READY"
+  const canOpen = operations.liveOperationsEnabled
     && operations.selectedProfile !== null
     && !operations.isBusy;
   const canUpdate = canOpen && operations.selectedProfile?.linkState === "LINKED";
@@ -35,7 +36,13 @@ export function OperationsControls({ generatedAtLabel }: { generatedAtLabel: str
     <div className={styles.controls}>
       <div className={styles.metaLine}>
         <span className={styles.generatedAt}>Generated {generatedAtLabel}</span>
-        <span className={styles.operationMessage} aria-live="polite">
+        <span
+          className={styles.operationMessage}
+          aria-live="polite"
+          aria-atomic="true"
+          role="status"
+          title={operations.operationMessage}
+        >
           {operations.operationMessage}
         </span>
       </div>
@@ -44,14 +51,14 @@ export function OperationsControls({ generatedAtLabel }: { generatedAtLabel: str
           <span className="sr-only">AdsPower profile</span>
           <select
             aria-label="AdsPower profile"
-            disabled={operations.presentationStatus !== "READY" || operations.isBusy}
+            disabled={!operations.liveOperationsEnabled || operations.isBusy}
             onChange={(event) => operations.selectProfile(event.target.value)}
             value={operations.selectedProfileNo ?? ""}
           >
             {operations.profiles.length === 0 ? <option value="">No profiles available</option> : null}
             {operations.profiles.map((profile) => (
               <option key={profile.profileNo} value={profile.profileNo}>
-                Profile {profile.profileNo} · {profile.linkState === "LINKED" ? "linked" : profile.linkState === "UNLINKED" ? "unlinked" : "link unknown"}
+                Profile {profile.profileNo} · {profile.state} · {profile.linkState === "LINKED" ? "linked" : profile.linkState === "UNLINKED" ? "unlinked" : "link unknown"}
               </option>
             ))}
           </select>
@@ -63,7 +70,7 @@ export function OperationsControls({ generatedAtLabel }: { generatedAtLabel: str
           loading={operations.operationState === "OPENING_PROFILE"}
           onClick={() => void operations.openProfile()}
         >
-          Open profile
+          {operations.operationState === "HUMAN_ACTION_REQUIRED" ? "Open profile to continue" : "Open profile"}
         </SecondaryButton>
         <PrimaryButton
           disabled={!canUpdate}

@@ -3,6 +3,7 @@ import type {
   UpdateDataEvent,
   UpdateDataState,
 } from "./operations-contract.js";
+import { isOperationErrorCode, isTerminalUpdateState } from "./operations-contract.js";
 
 const UPDATE_STATES = new Set<UpdateDataState>([
   "READY",
@@ -16,6 +17,7 @@ const UPDATE_STATES = new Set<UpdateDataState>([
   "ERROR",
   "LOGIN_REQUIRED",
   "SECURITY_CHECK_REQUIRED",
+  "HUMAN_ACTION_REQUIRED",
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -24,7 +26,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isOperationError(value: unknown): value is OperationError {
   return isRecord(value)
-    && typeof value.code === "string"
+    && isOperationErrorCode(value.code)
     && typeof value.message === "string";
 }
 
@@ -41,6 +43,7 @@ function parseEvent(line: string): UpdateDataEvent {
     || !UPDATE_STATES.has(value.state as UpdateDataState)
     || typeof value.message !== "string"
     || typeof value.terminal !== "boolean"
+    || value.terminal !== isTerminalUpdateState(value.state as UpdateDataState)
     || !Array.isArray(value.completedKinds)
     || !value.completedKinds.every((kind) => kind === "orders" || kind === "finance")
     || !(value.error === null || isOperationError(value.error))) {
@@ -56,6 +59,14 @@ export async function* readUpdateDataEvents(
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let terminalSeen = false;
+
+  const readEvent = (line: string): UpdateDataEvent => {
+    if (terminalSeen) throw new Error("Update stream contained events after a terminal state");
+    const event = parseEvent(line);
+    terminalSeen = event.terminal;
+    return event;
+  };
 
   try {
     while (true) {
@@ -66,7 +77,7 @@ export async function* readUpdateDataEvents(
       while (newline >= 0) {
         const line = buffer.slice(0, newline).trim();
         buffer = buffer.slice(newline + 1);
-        if (line.length > 0) yield parseEvent(line);
+        if (line.length > 0) yield readEvent(line);
         newline = buffer.indexOf("\n");
       }
 
@@ -74,7 +85,8 @@ export async function* readUpdateDataEvents(
     }
 
     const finalLine = buffer.trim();
-    if (finalLine.length > 0) yield parseEvent(finalLine);
+    if (finalLine.length > 0) yield readEvent(finalLine);
+    if (!terminalSeen) throw new Error("Update stream ended without a terminal event");
   } finally {
     reader.releaseLock();
   }

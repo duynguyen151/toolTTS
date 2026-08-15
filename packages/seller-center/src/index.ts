@@ -1,5 +1,11 @@
 export { AdsPowerClient } from "./adspower/client.js";
-export type { AdsPowerBrowserConnection, AdsPowerClientOptions } from "./adspower/client.js";
+export type {
+  AdsPowerBrowserConnection,
+  AdsPowerClientOptions,
+  AdsPowerOpenReadyOptions,
+  AdsPowerProfileState,
+  AdsPowerProfileSummary,
+} from "./adspower/client.js";
 export { SellerCenterError } from "./errors.js";
 export type { SellerCenterFailureType } from "./errors.js";
 export {

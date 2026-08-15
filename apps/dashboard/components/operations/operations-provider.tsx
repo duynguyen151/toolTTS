@@ -22,6 +22,7 @@ import { readUpdateDataEvents } from "../../lib/read-update-stream.js";
 
 type OperationsContextValue = {
   presentationStatus: ProfileOperationsPresentation["status"];
+  liveOperationsEnabled: boolean;
   profiles: readonly DashboardProfile[];
   selectedProfile: DashboardProfile | null;
   selectedProfileNo: string | null;
@@ -35,27 +36,58 @@ type OperationsContextValue = {
 
 const OperationsContext = createContext<OperationsContextValue | null>(null);
 
+type PersistedDashboardShop = {
+  readonly profileNo: string;
+  readonly displayName: string;
+  readonly dataOrigin: "LIVE" | "DEMO_SANITIZED";
+};
+
 function failedMessage(status: number): string {
   return status === 403
     ? "This operation is available only from the local dashboard."
     : "The operation could not be completed.";
 }
 
+export function preflightUpdateState(
+  profileState: DashboardProfile["state"] | undefined,
+): "OPENING_PROFILE" | "CONNECTING" {
+  return profileState === "OPEN" ? "CONNECTING" : "OPENING_PROFILE";
+}
+
 export function OperationsProvider({
   children,
   initialPresentation,
+  preferredProfileNo,
+  persistedShop,
 }: {
   children: ReactNode;
   initialPresentation: ProfileOperationsPresentation;
+  preferredProfileNo?: string;
+  persistedShop?: PersistedDashboardShop;
 }) {
   const router = useRouter();
-  const [profiles, setProfiles] = useState(initialPresentation.profiles);
+  const liveOperationsEnabled = persistedShop?.dataOrigin !== "DEMO_SANITIZED";
+  const initialProfiles = !liveOperationsEnabled
+    ? []
+    : initialPresentation.status === "ERROR" && initialPresentation.profiles.length === 0 && persistedShop?.dataOrigin === "LIVE"
+      ? [{
+          profileNo: persistedShop.profileNo,
+          state: "ERROR" as const,
+          linkState: "LINKED" as const,
+          linkedShop: { profileNo: persistedShop.profileNo, displayName: persistedShop.displayName },
+        }]
+      : initialPresentation.profiles;
+  const [profiles, setProfiles] = useState(initialProfiles);
   const [selectedProfileNo, setSelectedProfileNo] = useState(
-    initialPresentation.selectedProfileNo,
+    initialProfiles.some((profile) => profile.profileNo === (preferredProfileNo ?? persistedShop?.profileNo))
+      ? preferredProfileNo ?? persistedShop?.profileNo ?? null
+      : initialPresentation.selectedProfileNo,
   );
   const [operationState, setOperationState] = useState<UpdateDataState>("READY");
   const [operationMessage, setOperationMessage] = useState(
-    initialPresentation.error?.message ?? "Ready for operator action",
+    !liveOperationsEnabled
+      ? "Live operations are disabled for sanitized demo data."
+      : initialPresentation.error?.message ?? "Ready for operator action",
   );
 
   const selectedProfile = useMemo(
@@ -65,13 +97,14 @@ export function OperationsProvider({
   const isBusy = operationState !== "READY" && !isTerminalUpdateState(operationState);
 
   const selectProfile = useCallback((profileNo: string) => {
+    if (!liveOperationsEnabled) return;
     setSelectedProfileNo(profileNo);
     setOperationState("READY");
     setOperationMessage("Ready for operator action");
-  }, []);
+  }, [liveOperationsEnabled]);
 
   const openProfile = useCallback(async () => {
-    if (selectedProfileNo === null) return;
+    if (!liveOperationsEnabled || selectedProfileNo === null) return;
     setOperationState("OPENING_PROFILE");
     setOperationMessage(`Opening AdsPower profile ${selectedProfileNo}`);
 
@@ -98,12 +131,15 @@ export function OperationsProvider({
       setOperationState("ERROR");
       setOperationMessage("AdsPower could not be reached from the dashboard.");
     }
-  }, [selectedProfileNo]);
+  }, [liveOperationsEnabled, selectedProfileNo]);
 
   const updateData = useCallback(async () => {
-    if (selectedProfileNo === null) return;
-    setOperationState("CONNECTING");
-    setOperationMessage(`Connecting to profile ${selectedProfileNo}`);
+    if (!liveOperationsEnabled || selectedProfileNo === null) return;
+    const initialState = preflightUpdateState(selectedProfile?.state);
+    setOperationState(initialState);
+    setOperationMessage(initialState === "OPENING_PROFILE"
+      ? `Opening AdsPower profile ${selectedProfileNo}`
+      : `Connecting to profile ${selectedProfileNo}`);
 
     try {
       const response = await fetch("/api/update-data", {
@@ -121,7 +157,7 @@ export function OperationsProvider({
       for await (const event of readUpdateDataEvents(response.body)) {
         setOperationState(event.state);
         setOperationMessage(event.message);
-        if (event.state === "OPENING_PROFILE" || event.state === "CONNECTING") {
+        if (event.state === "CONNECTING") {
           setProfiles((current) => current.map((profile) => profile.profileNo === selectedProfileNo
             ? { ...profile, state: "OPEN" }
             : profile));
@@ -134,10 +170,11 @@ export function OperationsProvider({
       setOperationState("ERROR");
       setOperationMessage("The update stream ended unexpectedly.");
     }
-  }, [router, selectedProfileNo]);
+  }, [liveOperationsEnabled, router, selectedProfile, selectedProfileNo]);
 
   const value = useMemo<OperationsContextValue>(() => ({
     presentationStatus: initialPresentation.status,
+    liveOperationsEnabled,
     profiles,
     selectedProfile,
     selectedProfileNo,
@@ -149,6 +186,7 @@ export function OperationsProvider({
     updateData,
   }), [
     initialPresentation.status,
+    liveOperationsEnabled,
     profiles,
     selectedProfile,
     selectedProfileNo,

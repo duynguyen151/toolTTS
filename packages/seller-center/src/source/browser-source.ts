@@ -14,7 +14,11 @@ import {
 import type { Logger } from "pino";
 import { chromium, type Browser, type Page, type Response } from "playwright-core";
 
-import { AdsPowerClient, type AdsPowerClientOptions } from "../adspower/client.js";
+import {
+  AdsPowerClient,
+  type AdsPowerBrowserConnection,
+  type AdsPowerClientOptions,
+} from "../adspower/client.js";
 import { SellerCenterError } from "../errors.js";
 import {
   OrderCountResponseSchema,
@@ -48,6 +52,26 @@ export function createSellerCenterDataSource(
   options: SellerCenterDataSourceOptions = {},
 ): SellerDataSource {
   return new SellerCenterBrowserDataSource(options);
+}
+
+async function connectBrowser(cdpEndpoint: string, timeoutMs: number): Promise<Browser> {
+  try {
+    return await chromium.connectOverCDP(cdpEndpoint, { timeout: timeoutMs });
+  } catch {
+    throw new SellerCenterError(
+      "BROWSER_DISCONNECTED",
+      "AdsPower browser connection is unavailable",
+    );
+  }
+}
+
+export async function verifyAdsPowerBrowserConnection(
+  connection: AdsPowerBrowserConnection,
+  timeoutMs = 10_000,
+): Promise<void> {
+  const browser = await connectBrowser(connection.cdpEndpoint, timeoutMs);
+  // Closing the Playwright transport does not stop the AdsPower profile.
+  await browser.close().catch(() => undefined);
 }
 
 export class SellerCenterBrowserDataSource implements SellerDataSource {
@@ -171,10 +195,14 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
     let browser: Browser | undefined;
     let page: Page | undefined;
     try {
-      browser = await chromium.connectOverCDP(connection.cdpEndpoint, { timeout: this.responseTimeoutMs });
+      browser = await connectBrowser(connection.cdpEndpoint, this.responseTimeoutMs);
       const context = browser.contexts()[0];
       if (!context) throw new SellerCenterError("BROWSER_DISCONNECTED", "AdsPower browser has no context");
-      page = await context.newPage();
+      try {
+        page = await context.newPage();
+      } catch {
+        throw new SellerCenterError("BROWSER_DISCONNECTED", "AdsPower browser page is unavailable");
+      }
       return await operation(page);
     } catch (error) {
       if (error instanceof SellerCenterError) throw error;

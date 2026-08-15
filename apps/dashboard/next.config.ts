@@ -10,6 +10,7 @@ if (process.env.DATABASE_URL === undefined && existsSync(workspaceEnv)) {
 
 const nextConfig: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
+  serverExternalPackages: ["playwright-core"],
   transpilePackages: [
     "@shop-health/db",
     "@shop-health/seller-center",

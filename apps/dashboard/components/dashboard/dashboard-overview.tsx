@@ -1,10 +1,5 @@
-import {
-  ArrowPathIcon,
-  ArrowTopRightOnSquareIcon,
-} from "@heroicons/react/24/outline";
-
 import type { DashboardPresentation } from "../../lib/dashboard-contract";
-import { PrimaryButton, SecondaryButton } from "../ui/buttons";
+import { OperationsControls } from "../operations/operations-controls";
 import { StatusBadge } from "../ui/status-badge";
 import { DataQualityPanel } from "./data-quality-panel";
 import { DecisionTrace } from "./decision-trace";
@@ -34,7 +29,7 @@ function formatGeneratedAt(value: string): string {
 }
 
 export function DashboardOverview({ presentation }: DashboardOverviewProps) {
-  const isSyncing = presentation.sync.status === "RUNNING";
+  const generatedAtLabel = formatGeneratedAt(presentation.generatedAt);
 
   return (
     <div className={styles.dashboard}>
@@ -56,33 +51,7 @@ export function DashboardOverview({ presentation }: DashboardOverviewProps) {
           </p>
         </div>
 
-        <div className={styles.headerActions}>
-          <time className={styles.generatedAt} dateTime={presentation.generatedAt}>
-            Generated {formatGeneratedAt(presentation.generatedAt)}
-          </time>
-          <div className={styles.actionRow} aria-describedby="action-boundary-note">
-            <SecondaryButton
-              className={styles.compactAction}
-              disabled
-              leadingIcon={<ArrowTopRightOnSquareIcon />}
-              title="Profile actions are not connected in Phase 1"
-            >
-              Open profile
-            </SecondaryButton>
-            <PrimaryButton
-              className={styles.compactAction}
-              disabled
-              leadingIcon={<ArrowPathIcon />}
-              loading={isSyncing}
-              title="Data updates remain read-only in Phase 1"
-            >
-              Update data
-            </PrimaryButton>
-          </div>
-          <p className="sr-only" id="action-boundary-note">
-            Phase 1 presents existing read states. Profile and update actions are not connected.
-          </p>
-        </div>
+        <OperationsControls generatedAtLabel={generatedAtLabel} />
       </header>
 
       <div className={styles.primaryGrid}>

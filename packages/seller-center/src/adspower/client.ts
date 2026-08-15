@@ -14,6 +14,29 @@ const AdsPowerResponseSchema = z.object({
   data: AdsPowerBrowserDataSchema.optional(),
 }).passthrough();
 
+const AdsPowerReadinessResponseSchema = z.object({ code: z.number() }).passthrough();
+
+const AdsPowerProfileListItemSchema = z.object({
+  user_id: z.string().min(1),
+  serial_number: z.union([z.string(), z.number()]).transform(String),
+  group_name: z.string().nullable().optional(),
+});
+
+const AdsPowerProfileListResponseSchema = z.object({
+  code: z.number(),
+  msg: z.string().optional(),
+  data: z.object({
+    list: z.array(AdsPowerProfileListItemSchema),
+  }).optional(),
+});
+
+const AdsPowerActiveListResponseSchema = z.object({
+  code: z.number(),
+  data: z.object({
+    list: z.array(z.object({ user_id: z.string().min(1) })),
+  }).optional(),
+});
+
 export interface AdsPowerClientOptions {
   baseUrl?: string;
   apiKey?: string;
@@ -25,6 +48,20 @@ export interface AdsPowerBrowserConnection {
   profileId: string;
   status: string;
   cdpEndpoint: string;
+}
+
+export type AdsPowerProfileState = "OPEN" | "CLOSED" | "ERROR";
+
+export interface AdsPowerProfileSummary {
+  profileId: string;
+  profileNo: string;
+  groupName: string | null;
+  state: AdsPowerProfileState;
+}
+
+export interface AdsPowerOpenReadyOptions {
+  readyTimeoutMs?: number;
+  pollIntervalMs?: number;
 }
 
 export class AdsPowerClient {
@@ -40,14 +77,23 @@ export class AdsPowerClient {
     this.fetchImpl = options.fetch ?? globalThis.fetch;
   }
 
-  async active(profileId: string): Promise<AdsPowerBrowserConnection | null> {
-    const response = await this.request("/api/v1/browser/active", profileId);
+  async active(profileId: string, timeoutMs?: number): Promise<AdsPowerBrowserConnection | null> {
+    const response = await this.request("/api/v1/browser/active", profileId, timeoutMs);
     if (response.code !== 0 || !response.data?.ws?.puppeteer) return null;
     return {
       profileId,
       status: response.data.status ?? "Active",
       cdpEndpoint: response.data.ws.puppeteer,
     };
+  }
+
+  async probeReadiness(): Promise<boolean> {
+    try {
+      const response = AdsPowerReadinessResponseSchema.parse(await this.requestJson("/status", {}));
+      return response.code === 0;
+    } catch {
+      return false;
+    }
   }
 
   async open(profileId: string): Promise<AdsPowerBrowserConnection> {
@@ -69,28 +115,154 @@ export class AdsPowerClient {
     };
   }
 
-  private async request(path: string, profileId: string): Promise<z.infer<typeof AdsPowerResponseSchema>> {
+  async getProfileState(profileId: string): Promise<AdsPowerProfileState> {
+    try {
+      const response = await this.request("/api/v1/browser/active", profileId);
+      if (response.code !== 0 || response.data === undefined) return "ERROR";
+      return response.data?.ws?.puppeteer ? "OPEN" : "CLOSED";
+    } catch {
+      return "ERROR";
+    }
+  }
+
+  async listProfiles(): Promise<AdsPowerProfileSummary[]> {
+    const profiles: z.infer<typeof AdsPowerProfileListItemSchema>[] = [];
+    let page = 1;
+
+    while (true) {
+      const response = AdsPowerProfileListResponseSchema.parse(await this.requestJson(
+        "/api/v1/user/list",
+        { page: String(page), page_size: "200" },
+      ));
+      if (response.code !== 0 || response.data === undefined) {
+        throw new SellerCenterError(
+          "ADSPOWER_UNAVAILABLE",
+          `AdsPower could not list profiles: ${response.msg ?? `code ${response.code}`}`,
+        );
+      }
+
+      profiles.push(...response.data.list);
+      if (response.data.list.length !== 200) break;
+      page += 1;
+    }
+
+    const activeIds = await this.listActiveProfileIds();
+    return profiles.map((profile) => ({
+      profileId: profile.user_id,
+      profileNo: profile.serial_number,
+      groupName: profile.group_name?.trim() || null,
+      state: activeIds === null ? "ERROR" : activeIds.has(profile.user_id) ? "OPEN" : "CLOSED",
+    }));
+  }
+
+  async openReady(
+    profileId: string,
+    options: AdsPowerOpenReadyOptions = {},
+  ): Promise<AdsPowerBrowserConnection> {
+    const readyTimeoutMs = Math.max(options.readyTimeoutMs ?? 15_000, 0);
+    const pollIntervalMs = Math.max(options.pollIntervalMs ?? 250, 0);
+    const deadline = Date.now() + readyTimeoutMs;
+    const sourceTimeout = () => new SellerCenterError(
+      "SOURCE_TIMEOUT",
+      `AdsPower profile ${profileId} did not become ready before the deadline`,
+    );
+    const withinReadyDeadline = async <T>(operation: (timeoutMs: number) => Promise<T>): Promise<T> => {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) throw sourceTimeout();
+      try {
+        return await operation(Math.min(this.timeoutMs, remainingMs));
+      } catch (error) {
+        if (Date.now() >= deadline) throw sourceTimeout();
+        throw error;
+      }
+    };
+
+    const active = await withinReadyDeadline((timeoutMs) => this.active(profileId, timeoutMs));
+    if (active) return active;
+
+    const response = await withinReadyDeadline((timeoutMs) => (
+      this.request("/api/v1/browser/start", profileId, timeoutMs)
+    ));
+    if (response.code !== 0) {
+      throw new SellerCenterError(
+        "PROFILE_START_FAILED",
+        `AdsPower could not start profile ${profileId}: ${response.msg ?? `code ${response.code}`}`,
+      );
+    }
+    if (response.data?.ws?.puppeteer) {
+      return {
+        profileId,
+        status: response.data.status ?? "Active",
+        cdpEndpoint: response.data.ws.puppeteer,
+      };
+    }
+
+    while (Date.now() < deadline) {
+      if (pollIntervalMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, deadline - Date.now())));
+      }
+      const connection = await withinReadyDeadline((timeoutMs) => this.active(profileId, timeoutMs));
+      if (connection) return connection;
+    }
+
+    throw sourceTimeout();
+  }
+
+  private async listActiveProfileIds(): Promise<Set<string> | null> {
+    try {
+      const response = AdsPowerActiveListResponseSchema.parse(
+        await this.requestJson("/api/v1/browser/local-active", {}),
+      );
+      if (response.code !== 0 || response.data === undefined) return null;
+      return new Set(response.data.list.map((profile) => profile.user_id));
+    } catch {
+      return null;
+    }
+  }
+
+  private async request(
+    path: string,
+    profileId: string,
+    timeoutMs?: number,
+  ): Promise<z.infer<typeof AdsPowerResponseSchema>> {
+    return AdsPowerResponseSchema.parse(await this.requestJson(path, { user_id: profileId }, timeoutMs));
+  }
+
+  private async requestJson(
+    path: string,
+    params: Record<string, string>,
+    timeoutMs = this.timeoutMs,
+  ): Promise<unknown> {
     const url = new URL(`${this.baseUrl}${path}`);
-    url.searchParams.set("user_id", profileId);
+    for (const [key, value] of Object.entries(params)) {
+      url.searchParams.set(key, value);
+    }
     if (this.apiKey) url.searchParams.set("api_key", this.apiKey);
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      const response = await this.fetchImpl(url, { signal: controller.signal });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      return AdsPowerResponseSchema.parse(await response.json());
+      return await Promise.race([
+        this.fetchImpl(url, { signal: controller.signal }).then(async (response) => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.json();
+        }),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => {
+            controller.abort();
+            reject(new Error("AdsPower request deadline exceeded"));
+          }, Math.max(timeoutMs, 0));
+        }),
+      ]);
     } catch (error) {
       if (error instanceof SellerCenterError) throw error;
       throw new SellerCenterError(
         "ADSPOWER_UNAVAILABLE",
-        `AdsPower Local API request failed for profile ${profileId}`,
+        `AdsPower Local API request failed for ${path}`,
         { cause: error },
       );
     } finally {
-      clearTimeout(timeout);
+      if (timeout !== undefined) clearTimeout(timeout);
     }
   }
 }

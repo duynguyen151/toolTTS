@@ -98,8 +98,19 @@ export const DecisionFinanceSnapshotSchema = z
     totalBalance: OptionalMoneySchema,
     toSettleBalance: OptionalMoneySchema,
     onHoldBalance: OptionalMoneySchema,
+    officialOnHoldAmount: OptionalMoneySchema,
     settlementCount: z.number().int().nonnegative(),
     onHoldSettlementCount: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export const DecisionCoverageSnapshotSchema = z
+  .object({
+    coverageState: DecisionDataCoverageSchema,
+    persistedMetricsWindow: z.string().trim().min(1),
+    provenSourceWindow: z.enum(["ROLLING_12_MONTHS"]).nullable(),
+    completeWithinSourceWindow: z.boolean().nullable(),
+    lifetimeHistoryComplete: z.boolean().nullable(),
   })
   .strict();
 
@@ -116,12 +127,20 @@ export const DecisionCaseInputSchema = z
     metricsSnapshot: DecisionMetricsSnapshotSchema,
     riskSnapshot: DecisionRiskSnapshotSchema,
     financeSnapshot: DecisionFinanceSnapshotSchema,
+    coverageSnapshot: DecisionCoverageSnapshotSchema,
     ruleDecision: DecisionRuleResultSchema,
     ruleTriggers: UniqueRuleTriggersSchema,
     dataCoverage: DecisionDataCoverageSchema,
     sourceSyncRunId: z.string().uuid().nullable(),
   })
-  .superRefine(({ ruleDecision, ruleTriggers }, context) => {
+  .superRefine(({ ruleDecision, ruleTriggers, coverageSnapshot, dataCoverage }, context) => {
+    if (coverageSnapshot.coverageState !== dataCoverage) {
+      context.addIssue({
+        code: "custom",
+        path: ["coverageSnapshot", "coverageState"],
+        message: "Coverage snapshot state must match decision data coverage",
+      });
+    }
     if (ruleDecision === "PAUSE" && ruleTriggers.length === 0) {
       context.addIssue({
         code: "custom",
@@ -174,25 +193,30 @@ export const AiDecisionStatusSchema = z.enum(["AVAILABLE", "UNAVAILABLE"]);
 
 export const AiFailureCodeSchema = z.enum([
   "FEATURE_DISABLED",
-  "MISSING_API_KEY",
-  "NOT_CONFIGURED",
+  "CONFIG_MISSING",
   "TIMEOUT",
   "NETWORK_ERROR",
   "HTTP_ERROR",
   "RATE_LIMITED",
-  "MALFORMED_RESPONSE",
   "INVALID_RESPONSE",
-  "INVALID_OUTPUT",
   "PROVIDER_UNAVAILABLE",
+  "MODEL_UNAVAILABLE",
+  "MODEL_NOT_ALLOWED",
 ]);
 
 const AiProvenanceFields = {
   requestId: RequestIdSchema,
   decisionCaseId: z.string().uuid(),
   provider: z.string().trim().min(1),
-  model: z.string().trim().min(1),
+  model: z.string().trim().min(1).nullable(),
+  requestedModel: z.string().trim().min(1),
+  reportedModel: z.string().trim().min(1).nullable(),
+  actualModelUsed: z.string().trim().min(1).nullable(),
+  authMode: z.enum(["LOCAL_NO_AUTH", "BEARER", "CONFIG_MISSING"]),
+  outputSchemaVersion: z.literal("decision-ai-output.v1"),
   promptVersion: z.string().trim().min(1),
   policyVersion: z.string().trim().min(1),
+  aiPolicyVersion: z.string().trim().min(1),
 } as const;
 
 const UniqueAiReasonCodesSchema = z
@@ -202,13 +226,23 @@ const UniqueAiReasonCodesSchema = z
     message: "AI reason codes must not contain duplicates",
   });
 
+const AiFactorsSchema = z.array(z.string().trim().min(1).max(240)).max(5);
+
 export const AvailableAiDecisionInputSchema = z
   .object({
     ...AiProvenanceFields,
     status: z.literal("AVAILABLE"),
+    model: z.string().trim().min(1),
+    reportedModel: z.string().trim().min(1),
+    actualModelUsed: z.string().trim().min(1),
     recommendation: BaDecisionSchema,
+    riskLevel: z.enum(["LOW", "MEDIUM", "HIGH"]),
     confidence: z.number().min(0).max(1),
+    ruleOverride: z.boolean(),
     reasonCodes: UniqueAiReasonCodesSchema,
+    supportingFactors: AiFactorsSchema,
+    riskFactors: AiFactorsSchema,
+    whatWouldChangeDecision: AiFactorsSchema,
     reason: z.string().trim().min(1),
     humanReviewRequired: z.boolean(),
     failureCode: z.null(),
@@ -219,9 +253,17 @@ export const UnavailableAiDecisionInputSchema = z
   .object({
     ...AiProvenanceFields,
     status: z.literal("UNAVAILABLE"),
+    model: z.null(),
+    reportedModel: z.null(),
+    actualModelUsed: z.null(),
     recommendation: z.null(),
+    riskLevel: z.null(),
     confidence: z.null(),
+    ruleOverride: z.null(),
     reasonCodes: z.null(),
+    supportingFactors: z.null(),
+    riskFactors: z.null(),
+    whatWouldChangeDecision: z.null(),
     reason: z.null(),
     humanReviewRequired: z.literal(true),
     failureCode: AiFailureCodeSchema,
@@ -278,6 +320,7 @@ export type DecisionRuleTrigger = z.infer<typeof DecisionRuleTriggerSchema>;
 export type DecisionMetricsSnapshot = z.infer<typeof DecisionMetricsSnapshotSchema>;
 export type DecisionRiskSnapshot = z.infer<typeof DecisionRiskSnapshotSchema>;
 export type DecisionFinanceSnapshot = z.infer<typeof DecisionFinanceSnapshotSchema>;
+export type DecisionCoverageSnapshot = z.infer<typeof DecisionCoverageSnapshotSchema>;
 export type DecisionCaseInput = z.infer<typeof DecisionCaseInputSchema>;
 export type BaDecisionInput = z.infer<typeof BaDecisionInputSchema>;
 export type CaptureBaDecisionInput = z.infer<typeof CaptureBaDecisionInputSchema>;

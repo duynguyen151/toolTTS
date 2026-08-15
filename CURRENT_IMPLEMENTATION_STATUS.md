@@ -136,7 +136,8 @@ Current semantics:
 - Decision Case snapshots are immutable; a BA revision requires a new case.
 - A case has at most one baseline AI result, one BA decision, and one execution.
 - AI is `AVAILABLE` or `UNAVAILABLE`; failures never fabricate a recommendation.
-- AI provenance stores provider, model, prompt version, and policy version.
+- AI provenance stores provider, requested/reported/actual model, auth mode,
+  output schema version, prompt version, and rule/AI policy versions.
 - AI input contains normalized metrics, deterministic Rule Result, thresholds,
   and fixed R1-R5 risk context; it excludes shop identity, raw orders, PII,
   cookies, tokens, and browser/session data.
@@ -170,15 +171,19 @@ container was created.
 Provider configuration:
 
 ```text
-TOOL_AI_PROVIDER=opencode-zen
-TOOL_AI_BASE_URL=https://opencode.ai/zen/v1
-TOOL_AI_MODEL=deepseek-v4-flash-free
+TOOL_AI_PROVIDER=9router
+TOOL_AI_BASE_URL=http://127.0.0.1:20128/v1
+TOOL_AI_FREE_ONLY=true
+TOOL_AI_DEFAULT_MODEL=oc/deepseek-v4-flash-free
+TOOL_AI_ALLOWED_MODELS=oc/deepseek-v4-flash-free,oc/big-pickle,oc/hy3-free,oc/laguna-s-2.1-free,oc/nemotron-3-ultra-free,oc/nemotron-3.5-lightning-free
+TOOL_AI_FALLBACK_MODELS=
 ```
 
 The client uses native `fetch` and strict Zod structured-output validation.
 Disabled configuration, missing key, timeout, network/HTTP/rate-limit failure,
 malformed response, or invalid output persists `AI UNAVAILABLE` with a sanitized
-failure code. No live provider smoke test is required without an API key.
+failure code. Loopback 9Router allows no application key; non-loopback endpoints
+require `TOOL_AI_API_KEY`.
 
 ## Seller Center boundary
 
@@ -237,7 +242,8 @@ and must not reimplement deterministic rules or workflow persistence.
 
 ## Verification
 
-Final extraction verification on 2026-08-14:
+Historical extraction-wave verification recorded on 2026-08-14 (before the
+current 9Router baseline-AI configuration):
 
 ```text
 pnpm typecheck: PASS
@@ -246,28 +252,18 @@ pnpm build: PASS
 pnpm exec drizzle-kit check --config packages/db/drizzle.config.ts: PASS
 ```
 
-Exact verification commands:
-
-```powershell
-pnpm typecheck
-node --env-file=.env node_modules/vitest/vitest.mjs run
-pnpm build
-pnpm exec drizzle-kit check --config packages/db/drizzle.config.ts
-```
-
-The explicit Node test command loads ignored local test-database configuration
-so the PostgreSQL integration tests run instead of being skipped.
-
-Independent built-CLI PostgreSQL E2E passed:
+Current V1 baseline-AI verification:
 
 ```text
-same request ID -> same immutable case
-origin -> DEMO_SANITIZED
-AI -> UNAVAILABLE / MISSING_API_KEY
-BA -> PAUSE persisted
-Execution -> HOLIDAY_MODE_ON / DRY_RUN / SIMULATED
-sellerCenterCalled -> false
-History -> decision-history.v1 with Rule / AI / BA / Execution separate
+Targeted tests: PASS (101 passed, 2 PostgreSQL tests skipped)
+pnpm test: PASS (214 passed, 4 PostgreSQL tests skipped)
+pnpm typecheck: PASS
+pnpm build: PASS
+pnpm exec drizzle-kit check --config packages/db/drizzle.config.ts: PASS
+pnpm shop-health doctor --json: Node / baseline AI / AdsPower OK; PostgreSQL SKIP without DATABASE_URL
+Sanitized loopback smoke: AVAILABLE via 9Router with LOCAL_NO_AUTH and verified requested, reported, and actual model provenance
 ```
 
-Reviewer verdict: `APPROVE`.
+The skipped PostgreSQL tests remain a residual verification risk when ignored
+local database configuration is not loaded. Reviewer-luna verdict: `APPROVE`,
+with those DB skips recorded as the residual risk.

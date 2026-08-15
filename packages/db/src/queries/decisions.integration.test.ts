@@ -22,6 +22,35 @@ import {
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const describeWithDatabase = databaseUrl ? describe : describe.skip;
 
+function unavailableAi(requestId: string, decisionCaseId: string, failureCode: "CONFIG_MISSING" | "TIMEOUT") {
+  return {
+    requestId,
+    decisionCaseId,
+    status: "UNAVAILABLE" as const,
+    provider: "9router",
+    model: null,
+    requestedModel: "oc/deepseek-v4-flash-free",
+    reportedModel: null,
+    actualModelUsed: null,
+    authMode: "LOCAL_NO_AUTH" as const,
+    outputSchemaVersion: "decision-ai-output.v1" as const,
+    promptVersion: "decision-ai-prompt.v2",
+    policyVersion: "risk-control-policy.v1",
+    aiPolicyVersion: "decision-ai-policy.v1",
+    recommendation: null,
+    riskLevel: null,
+    confidence: null,
+    ruleOverride: null,
+    reasonCodes: null,
+    supportingFactors: null,
+    riskFactors: null,
+    whatWouldChangeDecision: null,
+    reason: null,
+    humanReviewRequired: true as const,
+    failureCode,
+  };
+}
+
 describeWithDatabase("decision workflow PostgreSQL integration", () => {
   let context: DatabaseContext;
   const profileNo = `TEST-${randomUUID()}`;
@@ -129,8 +158,16 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
         totalBalance: null,
         toSettleBalance: null,
         onHoldBalance: null,
+        officialOnHoldAmount: null,
         settlementCount: 0,
         onHoldSettlementCount: 0,
+      },
+      coverageSnapshot: {
+        coverageState: "UNKNOWN" as const,
+        persistedMetricsWindow: "FULL_PERSISTED_HISTORY",
+        provenSourceWindow: null,
+        completeWithinSourceWindow: null,
+        lifetimeHistoryComplete: null,
       },
       ruleDecision: "PAUSE" as const,
       ruleTriggers: ["DELIVERY_RATE" as const],
@@ -170,6 +207,8 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
     expect(retriedAfterFactsChanged.id).toBe(firstCase.id);
     await expect(getDecisionAiInput(context.db, firstCase.id)).resolves.toEqual({
       metricsSnapshot: caseInput.metricsSnapshot,
+      financeSnapshot: caseInput.financeSnapshot,
+      coverageSnapshot: caseInput.coverageSnapshot,
       riskSnapshot: caseInput.riskSnapshot,
       ruleDecision: "PAUSE",
       ruleTriggers: ["DELIVERY_RATE"],
@@ -180,57 +219,21 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
     });
 
     const aiRequestId = randomUUID();
-    await recordAiDecision(context.db, {
-      requestId: aiRequestId,
-      decisionCaseId: firstCase.id,
-      status: "UNAVAILABLE",
-      provider: "opencode-zen",
-      model: "deepseek-v4-flash-free",
-      promptVersion: "baseline-ai-prompt.v1",
-      policyVersion: "risk-control-policy.v1",
-      recommendation: null,
-      confidence: null,
-      reasonCodes: null,
-      reason: null,
-      humanReviewRequired: true,
-      failureCode: "MISSING_API_KEY",
-    });
-    await expect(recordAiDecision(context.db, {
-      requestId: aiRequestId,
-      decisionCaseId: firstCase.id,
-      status: "UNAVAILABLE",
-      provider: "opencode-zen",
-      model: "deepseek-v4-flash-free",
-      promptVersion: "baseline-ai-prompt.v1",
-      policyVersion: "risk-control-policy.v1",
-      recommendation: null,
-      confidence: null,
-      reasonCodes: null,
-      reason: null,
-      humanReviewRequired: true,
-      failureCode: "TIMEOUT",
-    })).resolves.toMatchObject({
+    await recordAiDecision(context.db, unavailableAi(aiRequestId, firstCase.id, "CONFIG_MISSING"));
+    await expect(recordAiDecision(
+      context.db,
+      unavailableAi(aiRequestId, firstCase.id, "TIMEOUT"),
+    )).resolves.toMatchObject({
       id: expect.any(String),
-      failureCode: "MISSING_API_KEY",
+      failureCode: "CONFIG_MISSING",
     });
-    await expect(recordAiDecision(context.db, {
-      requestId: randomUUID(),
-      decisionCaseId: firstCase.id,
-      status: "UNAVAILABLE",
-      provider: "opencode-zen",
-      model: "deepseek-v4-flash-free",
-      promptVersion: "baseline-ai-prompt.v1",
-      policyVersion: "risk-control-policy.v1",
-      recommendation: null,
-      confidence: null,
-      reasonCodes: null,
-      reason: null,
-      humanReviewRequired: true,
-      failureCode: "TIMEOUT",
-    })).resolves.toMatchObject({
+    await expect(recordAiDecision(
+      context.db,
+      unavailableAi(randomUUID(), firstCase.id, "TIMEOUT"),
+    )).resolves.toMatchObject({
       id: expect.any(String),
       requestId: aiRequestId,
-      failureCode: "MISSING_API_KEY",
+      failureCode: "CONFIG_MISSING",
     });
     const baRequestId = randomUUID();
     const baDecision = await recordBaDecisionForCase(context.db, {
@@ -280,7 +283,7 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
           minimumOrdersForRateRule: 25,
         },
       },
-      ai: { status: "UNAVAILABLE", failureCode: "MISSING_API_KEY" },
+      ai: { status: "UNAVAILABLE", failureCode: "CONFIG_MISSING" },
       ba: { id: baDecision.id, decision: "PAUSE" },
       execution: {
         requestedAction: "HOLIDAY_MODE_ON",
@@ -309,21 +312,10 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
         evaluatedAt: "2026-08-13T23:00:00.000Z",
       },
     });
-    await expect(recordAiDecision(context.db, {
-      requestId: aiRequestId,
-      decisionCaseId: olderCase.id,
-      status: "UNAVAILABLE",
-      provider: "opencode-zen",
-      model: "deepseek-v4-flash-free",
-      promptVersion: "baseline-ai-prompt.v1",
-      policyVersion: "risk-control-policy.v1",
-      recommendation: null,
-      confidence: null,
-      reasonCodes: null,
-      reason: null,
-      humanReviewRequired: true,
-      failureCode: "MISSING_API_KEY",
-    })).rejects.toThrow("another decision case");
+    await expect(recordAiDecision(
+      context.db,
+      unavailableAi(aiRequestId, olderCase.id, "CONFIG_MISSING"),
+    )).rejects.toThrow("another decision case");
     await expect(context.sql`
       insert into ai_decisions (
         request_id, decision_case_id, status, provider, model,
@@ -338,13 +330,24 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
       requestId: randomUUID(),
       decisionCaseId: olderCase.id,
       status: "AVAILABLE",
-      provider: "opencode-zen",
+      provider: "9router",
       model: "deepseek-v4-flash-free",
-      promptVersion: "baseline-ai-prompt.v1",
+      requestedModel: "oc/deepseek-v4-flash-free",
+      reportedModel: "deepseek-v4-flash-free",
+      actualModelUsed: "deepseek-v4-flash-free",
+      authMode: "LOCAL_NO_AUTH",
+      outputSchemaVersion: "decision-ai-output.v1",
+      promptVersion: "decision-ai-prompt.v2",
       policyVersion: "risk-control-policy.v1",
+      aiPolicyVersion: "decision-ai-policy.v1",
       recommendation: "WATCH",
+      riskLevel: "MEDIUM",
       confidence: 0.8,
+      ruleOverride: true,
       reasonCodes: ["DATA_INCOMPLETE"],
+      supportingFactors: ["Delivery remains above the deterministic threshold."],
+      riskFactors: ["Coverage remains unknown."],
+      whatWouldChangeDecision: ["Verified complete coverage."],
       reason: "Persisted history requires BA review.",
       humanReviewRequired: true,
       failureCode: null,
@@ -370,9 +373,10 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
         status: "AVAILABLE",
         recommendation: "WATCH",
         confidence: 0.8,
-        provider: "opencode-zen",
+        provider: "9router",
         model: "deepseek-v4-flash-free",
-        promptVersion: "baseline-ai-prompt.v1",
+        actualModelUsed: "deepseek-v4-flash-free",
+        promptVersion: "decision-ai-prompt.v2",
         policyVersion: "risk-control-policy.v1",
       },
     });
@@ -481,8 +485,16 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
         totalBalance: null,
         toSettleBalance: null,
         onHoldBalance: null,
+        officialOnHoldAmount: null,
         settlementCount: 0,
         onHoldSettlementCount: 0,
+      },
+      coverageSnapshot: {
+        coverageState: "UNKNOWN",
+        persistedMetricsWindow: "FULL_PERSISTED_HISTORY",
+        provenSourceWindow: null,
+        completeWithinSourceWindow: null,
+        lifetimeHistoryComplete: null,
       },
       ruleDecision: "INSUFFICIENT_DATA",
       ruleTriggers: [],

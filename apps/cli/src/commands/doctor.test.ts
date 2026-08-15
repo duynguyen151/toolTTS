@@ -3,11 +3,11 @@ import { describe, expect, test } from "vitest";
 import { getAiDoctorCheck } from "./doctor.js";
 
 describe("AI doctor check", () => {
-  test("reports missing configuration without making a provider request", () => {
+  test("reports approved loopback no-auth without making a provider request", () => {
     expect(getAiDoctorCheck({ TOOL_AI_ENABLED: "true" })).toEqual({
       name: "baseline-ai",
-      status: "SKIP",
-      detail: "UNCONFIGURED: opencode-zen/deepseek-v4-flash-free (TOOL_AI_API_KEY missing)",
+      status: "OK",
+      detail: "LOCAL_NO_AUTH: 9router/oc/deepseek-v4-flash-free (provider call not attempted)",
     });
   });
 
@@ -15,11 +15,22 @@ describe("AI doctor check", () => {
     expect(getAiDoctorCheck({
       TOOL_AI_ENABLED: "true",
       TOOL_AI_API_KEY: "test-key",
-      TOOL_AI_MODEL: "deepseek-v4-flash-free",
+      TOOL_AI_DEFAULT_MODEL: "oc/deepseek-v4-flash-free",
     })).toEqual({
       name: "baseline-ai",
       status: "OK",
-      detail: "CONFIGURED: opencode-zen/deepseek-v4-flash-free (provider call not attempted)",
+      detail: "BEARER: 9router/oc/deepseek-v4-flash-free (provider call not attempted)",
+    });
+  });
+
+  test("requires an application key for a non-loopback endpoint", () => {
+    expect(getAiDoctorCheck({
+      TOOL_AI_ENABLED: "true",
+      TOOL_AI_BASE_URL: "https://router.example.test/v1",
+    })).toEqual({
+      name: "baseline-ai",
+      status: "SKIP",
+      detail: "CONFIG_MISSING: 9router/oc/deepseek-v4-flash-free (non-loopback requires TOOL_AI_API_KEY)",
     });
   });
 });

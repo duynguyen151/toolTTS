@@ -11,6 +11,8 @@ import {
   type CreateDecisionCaseInput,
   type DecisionDataCoverage,
   type DecisionDataOrigin,
+  type DecisionCoverageSnapshot,
+  type DecisionFinanceSnapshot,
   type DecisionMetricsSnapshot,
   type DecisionRiskSnapshot,
   type DecisionRuleResult,
@@ -93,24 +95,50 @@ export interface DecisionReviewRecord {
     | {
         status: "AVAILABLE";
         recommendation: BaDecision;
+        riskLevel: "LOW" | "MEDIUM" | "HIGH" | null;
         confidence: number;
+        ruleOverride: boolean | null;
         reasonCodes: BaDecisionReasonCode[];
+        supportingFactors: string[] | null;
+        riskFactors: string[] | null;
+        whatWouldChangeDecision: string[] | null;
         reason: string;
         humanReviewRequired: boolean;
         provider: string;
-        model: string;
+        model: string | null;
+        requestedModel: string | null;
+        reportedModel: string | null;
+        actualModelUsed: string | null;
+        authMode: "LOCAL_NO_AUTH" | "BEARER" | "CONFIG_MISSING" | null;
+        outputSchemaVersion: string | null;
         promptVersion: string;
         policyVersion: string;
+        aiPolicyVersion: string | null;
         createdAt: Date;
       }
     | {
-        status: "UNAVAILABLE";
+      status: "UNAVAILABLE";
+        recommendation: null;
+        riskLevel: null;
+        confidence: null;
+        ruleOverride: null;
+        reasonCodes: null;
+        supportingFactors: null;
+        riskFactors: null;
+        whatWouldChangeDecision: null;
+        reason: null;
         failureCode: string;
         humanReviewRequired: true;
         provider: string;
-        model: string;
+        model: string | null;
+        requestedModel: string | null;
+        reportedModel: string | null;
+        actualModelUsed: string | null;
+        authMode: "LOCAL_NO_AUTH" | "BEARER" | "CONFIG_MISSING" | null;
+        outputSchemaVersion: string | null;
         promptVersion: string;
         policyVersion: string;
+        aiPolicyVersion: string | null;
         createdAt: Date;
       }
     | null;
@@ -142,6 +170,8 @@ export interface DecisionHistoryPageRecord {
 
 export interface DecisionAiInputRecord {
   metricsSnapshot: DecisionMetricsSnapshot;
+  financeSnapshot: DecisionFinanceSnapshot;
+  coverageSnapshot: DecisionCoverageSnapshot;
   riskSnapshot: DecisionRiskSnapshot;
   ruleDecision: DecisionRuleResult;
   ruleTriggers: DecisionRuleTrigger[];
@@ -239,11 +269,31 @@ export async function getDecisionAiInput(
   const parsedCaseId = z.string().uuid().parse(decisionCaseId);
   const [decisionCase] = await db.select({
     metricsSnapshot: decisionCases.metricsSnapshot,
+    financeSnapshot: decisionCases.financeSnapshot,
+    coverageSnapshot: decisionCases.coverageSnapshot,
     riskSnapshot: decisionCases.riskSnapshot,
     ruleDecision: decisionCases.ruleDecision,
     ruleTriggers: decisionCases.ruleTriggers,
+    dataCoverage: decisionCases.dataCoverage,
   }).from(decisionCases).where(eq(decisionCases.id, parsedCaseId)).limit(1);
-  return decisionCase ?? null;
+  if (!decisionCase) return null;
+  return {
+    metricsSnapshot: decisionCase.metricsSnapshot,
+    financeSnapshot: {
+      ...decisionCase.financeSnapshot,
+      officialOnHoldAmount: decisionCase.financeSnapshot.officialOnHoldAmount ?? null,
+    },
+    coverageSnapshot: decisionCase.coverageSnapshot ?? {
+      coverageState: decisionCase.dataCoverage,
+      persistedMetricsWindow: decisionCase.metricsSnapshot.window,
+      provenSourceWindow: null,
+      completeWithinSourceWindow: null,
+      lifetimeHistoryComplete: null,
+    },
+    riskSnapshot: decisionCase.riskSnapshot,
+    ruleDecision: decisionCase.ruleDecision,
+    ruleTriggers: decisionCase.ruleTriggers,
+  };
 }
 
 export async function recordBaDecisionForCase(
@@ -382,24 +432,50 @@ function makeReview(
         ? {
             status: "AVAILABLE",
             recommendation: aiDecision.recommendation!,
+            riskLevel: aiDecision.riskLevel,
             confidence: Number(aiDecision.confidence),
+            ruleOverride: aiDecision.ruleOverride,
             reasonCodes: aiDecision.reasonCodes!,
+            supportingFactors: aiDecision.supportingFactors,
+            riskFactors: aiDecision.riskFactors,
+            whatWouldChangeDecision: aiDecision.whatWouldChangeDecision,
             reason: aiDecision.reason!,
             humanReviewRequired: aiDecision.humanReviewRequired,
             provider: aiDecision.provider,
             model: aiDecision.model,
+            requestedModel: aiDecision.requestedModel,
+            reportedModel: aiDecision.reportedModel,
+            actualModelUsed: aiDecision.actualModelUsed,
+            authMode: aiDecision.authMode,
+            outputSchemaVersion: aiDecision.outputSchemaVersion,
             promptVersion: aiDecision.promptVersion,
             policyVersion: aiDecision.policyVersion,
+            aiPolicyVersion: aiDecision.aiPolicyVersion,
             createdAt: aiDecision.createdAt,
           }
         : {
             status: "UNAVAILABLE",
+            recommendation: null,
+            riskLevel: null,
+            confidence: null,
+            ruleOverride: null,
+            reasonCodes: null,
+            supportingFactors: null,
+            riskFactors: null,
+            whatWouldChangeDecision: null,
+            reason: null,
             failureCode: aiDecision.failureCode!,
             humanReviewRequired: true,
             provider: aiDecision.provider,
             model: aiDecision.model,
+            requestedModel: aiDecision.requestedModel,
+            reportedModel: aiDecision.reportedModel,
+            actualModelUsed: aiDecision.actualModelUsed,
+            authMode: aiDecision.authMode,
+            outputSchemaVersion: aiDecision.outputSchemaVersion,
             promptVersion: aiDecision.promptVersion,
             policyVersion: aiDecision.policyVersion,
+            aiPolicyVersion: aiDecision.aiPolicyVersion,
             createdAt: aiDecision.createdAt,
           },
     ba: !baDecision ? null : {

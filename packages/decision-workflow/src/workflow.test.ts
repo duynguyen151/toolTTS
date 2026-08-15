@@ -49,6 +49,7 @@ const source: ReviewStartSource = {
     totalBalance: null,
     toSettleBalance: null,
     onHoldBalance: null,
+    officialOnHoldAmount: null,
     settlementCount: 0,
     onHoldSettlementCount: 0,
   },
@@ -71,6 +72,14 @@ const persistedAiInput: BaselineAiInput = {
     onHoldValue: "4400.0000",
     currency: "USD",
   },
+  financeSnapshot: source.financeSnapshot,
+  coverageSnapshot: {
+    coverageState: "UNKNOWN",
+    persistedMetricsWindow: "FULL_PERSISTED_HISTORY",
+    provenSourceWindow: null,
+    completeWithinSourceWindow: null,
+    lifetimeHistoryComplete: null,
+  },
   riskSnapshot: {
     policyVersion: "risk-control-policy.v1",
     evaluatedAt: now.toISOString(),
@@ -85,6 +94,22 @@ const persistedAiInput: BaselineAiInput = {
   },
   ruleDecision: "PAUSE",
   ruleTriggers: ["ONHOLD_VALUE"],
+};
+
+const unavailableResult = {
+  status: "UNAVAILABLE" as const,
+  errorCode: "CONFIG_MISSING" as const,
+  humanReviewRequired: true as const,
+  provider: "9router" as const,
+  requestedModel: "oc/deepseek-v4-flash-free",
+  reportedModel: null,
+  actualModelUsed: null,
+  authMode: "CONFIG_MISSING" as const,
+  outputSchemaVersion: "decision-ai-output.v1" as const,
+  promptVersion: "decision-ai-prompt.v2" as const,
+  aiPolicyVersion: "decision-ai-policy.v1" as const,
+  rulePolicyVersion: "risk-control-policy.v1",
+  generatedAt: now.toISOString(),
 };
 
 function review(overrides: Partial<PersistedDecisionReview> = {}): PersistedDecisionReview {
@@ -158,25 +183,51 @@ function createStore(): DecisionWorkflowStore & {
         ai: input.result.status === "AVAILABLE"
           ? {
               status: "AVAILABLE",
-              recommendation: input.result.decision,
+              recommendation: input.result.recommendation,
+              riskLevel: input.result.riskLevel,
               confidence: input.result.confidence,
+              ruleOverride: input.result.ruleOverride,
               reasonCodes: input.result.reasonCodes,
+              supportingFactors: input.result.supportingFactors,
+              riskFactors: input.result.riskFactors,
+              whatWouldChangeDecision: input.result.whatWouldChangeDecision,
               reason: input.result.reason,
               humanReviewRequired: input.result.humanReviewRequired,
               provider: input.result.provider,
-              model: input.result.model,
+              model: input.result.actualModelUsed,
+              requestedModel: input.result.requestedModel,
+              reportedModel: input.result.reportedModel,
+              actualModelUsed: input.result.actualModelUsed,
+              authMode: input.result.authMode,
+              outputSchemaVersion: "decision-ai-output.v1",
               promptVersion: input.result.promptVersion,
-              policyVersion: input.result.policyVersion,
+              policyVersion: input.result.rulePolicyVersion,
+              aiPolicyVersion: input.result.aiPolicyVersion,
               createdAt: now,
             }
           : {
               status: "UNAVAILABLE",
+              recommendation: null,
+              riskLevel: null,
+              confidence: null,
+              ruleOverride: null,
+              reasonCodes: null,
+              supportingFactors: null,
+              riskFactors: null,
+              whatWouldChangeDecision: null,
+              reason: null,
               failureCode: input.result.errorCode,
               humanReviewRequired: true,
               provider: input.result.provider,
-              model: input.result.model,
+              model: null,
+              requestedModel: input.result.requestedModel,
+              reportedModel: input.result.reportedModel,
+              actualModelUsed: input.result.actualModelUsed,
+              authMode: input.result.authMode,
+              outputSchemaVersion: "decision-ai-output.v1",
               promptVersion: input.result.promptVersion,
-              policyVersion: input.result.policyVersion,
+              policyVersion: input.result.rulePolicyVersion,
+              aiPolicyVersion: input.result.aiPolicyVersion,
               createdAt: now,
             },
       });
@@ -215,16 +266,7 @@ describe("decision workflow", () => {
       aiClient: {
         async recommend(input) {
           receivedAiInput = input;
-          return {
-            status: "UNAVAILABLE" as const,
-            errorCode: "MISSING_API_KEY" as const,
-            humanReviewRequired: true as const,
-            provider: "opencode-zen",
-            model: "deepseek-v4-flash-free",
-            promptVersion: "baseline-ai-prompt.v1",
-            policyVersion: "risk-control-policy.v1",
-            generatedAt: now.toISOString(),
-          };
+          return unavailableResult;
         },
       },
       now: () => now,
@@ -262,7 +304,7 @@ describe("decision workflow", () => {
     expect(store.aiRecords[0]).toMatchObject({
       decisionCaseId: caseId,
       requestId: "8d0c6464-1976-4a2f-84fb-25e2cd6efea5",
-      result: { status: "UNAVAILABLE", errorCode: "MISSING_API_KEY" },
+      result: { status: "UNAVAILABLE", errorCode: "CONFIG_MISSING" },
     });
   });
 
@@ -337,16 +379,7 @@ describe("decision workflow", () => {
     const workflow = createDecisionWorkflow({
       store,
       aiClient: {
-        recommend: async () => ({
-          status: "UNAVAILABLE",
-          errorCode: "MISSING_API_KEY",
-          humanReviewRequired: true,
-          provider: "opencode-zen",
-          model: "deepseek-v4-flash-free",
-          promptVersion: "baseline-ai-prompt.v1",
-          policyVersion: "risk-control-policy.v1",
-          generatedAt: now.toISOString(),
-        }),
+        recommend: async () => unavailableResult,
       },
       now: () => now,
       randomUuid: () => generated.shift()!,
@@ -369,12 +402,27 @@ describe("decision workflow", () => {
     store.getDecisionReviewByRequestId = async () => review({
       ai: {
         status: "UNAVAILABLE",
-        failureCode: "MISSING_API_KEY",
+        recommendation: null,
+        riskLevel: null,
+        confidence: null,
+        ruleOverride: null,
+        reasonCodes: null,
+        supportingFactors: null,
+        riskFactors: null,
+        whatWouldChangeDecision: null,
+        reason: null,
+        failureCode: "CONFIG_MISSING",
         humanReviewRequired: true,
-        provider: "opencode-zen",
-        model: "deepseek-v4-flash-free",
-        promptVersion: "baseline-ai-prompt.v1",
+        provider: "9router",
+        model: null,
+        requestedModel: "oc/deepseek-v4-flash-free",
+        reportedModel: null,
+        actualModelUsed: null,
+        authMode: "CONFIG_MISSING",
+        outputSchemaVersion: "decision-ai-output.v1",
+        promptVersion: "decision-ai-prompt.v2",
         policyVersion: "risk-control-policy.v1",
+        aiPolicyVersion: "decision-ai-policy.v1",
         createdAt: now,
       },
     });
@@ -409,16 +457,7 @@ describe("decision workflow", () => {
       aiClient: {
         recommend: async (input) => {
           receivedAiInput = input;
-          return {
-            status: "UNAVAILABLE",
-            errorCode: "MISSING_API_KEY",
-            humanReviewRequired: true,
-            provider: "opencode-zen",
-            model: "deepseek-v4-flash-free",
-            promptVersion: "baseline-ai-prompt.v1",
-            policyVersion: "risk-control-policy.v1",
-            generatedAt: now.toISOString(),
-          };
+          return unavailableResult;
         },
       },
       now: () => now,
@@ -432,7 +471,7 @@ describe("decision workflow", () => {
     expect(receivedAiInput).toBe(persistedAiInput);
     expect(store.created).toHaveLength(0);
     expect(store.aiRecords).toHaveLength(1);
-    expect(result.ai).toMatchObject({ status: "UNAVAILABLE", failureCode: "MISSING_API_KEY" });
+    expect(result.ai).toMatchObject({ status: "UNAVAILABLE", failureCode: "CONFIG_MISSING" });
   });
 
   test("concurrent starts keep AI records associated with the one persisted case", async () => {
@@ -447,16 +486,7 @@ describe("decision workflow", () => {
           calls += 1;
           if (calls === 2) release?.();
           else await bothStarted;
-          return {
-            status: "UNAVAILABLE",
-            errorCode: "MISSING_API_KEY",
-            humanReviewRequired: true,
-            provider: "opencode-zen",
-            model: "deepseek-v4-flash-free",
-            promptVersion: "baseline-ai-prompt.v1",
-            policyVersion: "risk-control-policy.v1",
-            generatedAt: now.toISOString(),
-          };
+          return unavailableResult;
         },
       },
       now: () => now,
@@ -473,8 +503,8 @@ describe("decision workflow", () => {
 
     expect(left.case.id).toBe(caseId);
     expect(right.case.id).toBe(caseId);
-    expect(left.ai).toMatchObject({ status: "UNAVAILABLE", failureCode: "MISSING_API_KEY" });
-    expect(right.ai).toMatchObject({ status: "UNAVAILABLE", failureCode: "MISSING_API_KEY" });
+    expect(left.ai).toMatchObject({ status: "UNAVAILABLE", failureCode: "CONFIG_MISSING" });
+    expect(right.ai).toMatchObject({ status: "UNAVAILABLE", failureCode: "CONFIG_MISSING" });
     expect(store.aiRecords).toHaveLength(2);
     expect(store.aiRecords).toEqual(store.aiRecords.map((record) => expect.objectContaining({
       requestId: input.requestId,
@@ -487,16 +517,7 @@ describe("decision workflow", () => {
     const workflow = createDecisionWorkflow({
       store,
       aiClient: {
-        recommend: async () => ({
-          status: "UNAVAILABLE",
-          errorCode: "MISSING_API_KEY",
-          humanReviewRequired: true,
-          provider: "opencode-zen",
-          model: "deepseek-v4-flash-free",
-          promptVersion: "baseline-ai-prompt.v1",
-          policyVersion: "risk-control-policy.v1",
-          generatedAt: now.toISOString(),
-        }),
+        recommend: async () => unavailableResult,
       },
       now: () => now,
     });

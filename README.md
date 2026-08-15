@@ -128,7 +128,7 @@ Implemented and validated by typechecks/tests/schema checks:
 - KPI, score, recommendation, operational risk evaluation, and CLI output.
 - Immutable Decision Cases with separate AI, BA, and DRY_RUN execution records.
 - Keyset-paginated decision history with explicit `LIVE` / `DEMO_SANITIZED` origin.
-- Optional OpenCode Zen baseline AI with structured output and fail-closed `AI UNAVAILABLE` behavior.
+- Optional 9Router baseline AI with structured output and fail-closed `AI UNAVAILABLE` behavior.
 
 Still unresolved and deliberately not guessed:
 

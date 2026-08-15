@@ -59,24 +59,50 @@ export interface PersistedDecisionReview {
     | {
         readonly status: "AVAILABLE";
         readonly recommendation: BaDecision;
+        readonly riskLevel: "LOW" | "MEDIUM" | "HIGH" | null;
         readonly confidence: number;
+        readonly ruleOverride: boolean | null;
         readonly reasonCodes: readonly BaDecisionReasonCode[];
+        readonly supportingFactors: readonly string[] | null;
+        readonly riskFactors: readonly string[] | null;
+        readonly whatWouldChangeDecision: readonly string[] | null;
         readonly reason: string;
         readonly humanReviewRequired: boolean;
         readonly provider: string;
-        readonly model: string;
+        readonly model: string | null;
+        readonly requestedModel: string | null;
+        readonly reportedModel: string | null;
+        readonly actualModelUsed: string | null;
+        readonly authMode: "LOCAL_NO_AUTH" | "BEARER" | "CONFIG_MISSING" | null;
+        readonly outputSchemaVersion: string | null;
         readonly promptVersion: string;
         readonly policyVersion: string;
+        readonly aiPolicyVersion: string | null;
         readonly createdAt: Date;
       }
     | {
-        readonly status: "UNAVAILABLE";
+      readonly status: "UNAVAILABLE";
+        readonly recommendation: null;
+        readonly riskLevel: null;
+        readonly confidence: null;
+        readonly ruleOverride: null;
+        readonly reasonCodes: null;
+        readonly supportingFactors: null;
+        readonly riskFactors: null;
+        readonly whatWouldChangeDecision: null;
+        readonly reason: null;
         readonly failureCode: string;
         readonly humanReviewRequired: true;
         readonly provider: string;
-        readonly model: string;
+        readonly model: string | null;
+        readonly requestedModel: string | null;
+        readonly reportedModel: string | null;
+        readonly actualModelUsed: string | null;
+        readonly authMode: "LOCAL_NO_AUTH" | "BEARER" | "CONFIG_MISSING" | null;
+        readonly outputSchemaVersion: string | null;
         readonly promptVersion: string;
         readonly policyVersion: string;
+        readonly aiPolicyVersion: string | null;
         readonly createdAt: Date;
       }
     | null;
@@ -134,7 +160,20 @@ export interface DecisionReviewView {
     | (Omit<Extract<NonNullable<PersistedDecisionReview["ai"]>, { status: "UNAVAILABLE" }>, "createdAt"> & {
         readonly createdAt: string;
       })
-    | { readonly status: "UNAVAILABLE"; readonly failureCode: "NOT_RECORDED"; readonly humanReviewRequired: true };
+    | {
+        readonly status: "UNAVAILABLE";
+        readonly recommendation: null;
+        readonly riskLevel: null;
+        readonly confidence: null;
+        readonly ruleOverride: null;
+        readonly reasonCodes: null;
+        readonly supportingFactors: null;
+        readonly riskFactors: null;
+        readonly whatWouldChangeDecision: null;
+        readonly reason: null;
+        readonly failureCode: "NOT_RECORDED";
+        readonly humanReviewRequired: true;
+      };
   readonly ba:
     | {
         readonly status: "DECIDED";
@@ -189,7 +228,20 @@ export function toDecisionReviewView(review: PersistedDecisionReview): DecisionR
     },
     rule: review.rule,
     ai: review.ai === null
-      ? { status: "UNAVAILABLE", failureCode: "NOT_RECORDED", humanReviewRequired: true }
+      ? {
+          status: "UNAVAILABLE",
+          recommendation: null,
+          riskLevel: null,
+          confidence: null,
+          ruleOverride: null,
+          reasonCodes: null,
+          supportingFactors: null,
+          riskFactors: null,
+          whatWouldChangeDecision: null,
+          reason: null,
+          failureCode: "NOT_RECORDED",
+          humanReviewRequired: true,
+        }
       : { ...review.ai, createdAt: review.ai.createdAt.toISOString() },
     ba: review.ba === null
       ? { status: "NOT_DECIDED" }

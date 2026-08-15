@@ -25,7 +25,7 @@ import {
 } from "@shop-health/domain";
 import type {
   RiskControlDecision,
-  OrderSourceWindow,
+  SourceCoverageProof,
   SellerDataSource,
   ShopSourceConfig,
   SyncRequest
@@ -54,12 +54,14 @@ export interface SyncResult {
   readonly rowsWritten: number;
   readonly checkpoint: string | null;
   readonly complete: boolean;
-  readonly sourceCoverage?: {
-    readonly source: "SELLER_CENTER";
-    readonly window: "ROLLING_12_MONTHS";
-    readonly completeWithinWindow: boolean;
-    readonly lifetimeHistoryComplete: false;
-  };
+  readonly sourceCoverage?: SourceCoverageProof;
+  readonly financeProof?: FinanceCompletionProof;
+}
+
+export interface FinanceCompletionProof {
+  readonly capturedAt: Date;
+  readonly officialOnHoldAmount: string;
+  readonly reasonTotalsReconcileToOfficialOnHold: true;
 }
 
 export async function evaluateAndStoreRiskControl(
@@ -129,7 +131,9 @@ export async function runShopSync(input: RunSyncInput): Promise<SyncResult> {
     let rowsWritten = 0;
     let checkpoint = input.checkpoint ?? null;
     let complete = false;
-    let orderSourceWindow: OrderSourceWindow | undefined;
+    let sourceCoverageProof: SourceCoverageProof | undefined;
+    let financeProof: FinanceCompletionProof | undefined;
+    let sourceCapturedAt: Date | null = null;
     const request: SyncRequest = {
       shop: sourceConfig(input.shop),
       mode,
@@ -148,13 +152,24 @@ export async function runShopSync(input: RunSyncInput): Promise<SyncResult> {
           rowsWritten += write.rowsWritten;
           checkpoint = batch.checkpoint;
           complete = batch.complete;
-          orderSourceWindow = batch.sourceWindow;
+          sourceCapturedAt = new Date();
+          sourceCoverageProof = {
+            source: batch.sourceWindow.source,
+            window: "ROLLING_12_MONTHS",
+            completeWithinSourceWindow: batch.complete,
+            completeWithinWindow: batch.complete,
+            lifetimeHistoryComplete: false,
+          };
           await updateSyncCheckpoint(input.context.db, run.id, checkpoint === null ? null : { cursor: checkpoint }, rowsRead, rowsWritten);
         }
       } else {
         for await (const batch of input.source.collectFinancials(request)) {
           const write = await withTransactionalShopLock(input.context, input.shop.id, async (transaction) => {
-            const settlement = await upsertSettlementBatch(transaction, batch.settlements);
+            const settlement = await upsertSettlementBatch(
+              transaction,
+              batch.settlements,
+              batch.snapshot?.capturedAt ?? null
+            );
             const snapshot = batch.snapshot === null
               ? { inserted: false }
               : await insertFinancialSnapshot(transaction, batch.snapshot);
@@ -167,36 +182,53 @@ export async function runShopSync(input: RunSyncInput): Promise<SyncResult> {
           rowsWritten += write.rowsWritten;
           checkpoint = batch.checkpoint;
           complete = batch.complete;
+          sourceCapturedAt = batch.snapshot?.capturedAt ?? null;
+          if (batch.snapshot !== null &&
+            batch.snapshot.officialOnHoldAmount !== null &&
+            batch.snapshot.reasonTotalsReconcileToOfficialOnHold === true) {
+            financeProof = {
+              capturedAt: batch.snapshot.capturedAt,
+              officialOnHoldAmount: batch.snapshot.officialOnHoldAmount,
+              reasonTotalsReconcileToOfficialOnHold: true,
+            };
+          }
           await updateSyncCheckpoint(input.context.db, run.id, checkpoint === null ? null : { cursor: checkpoint }, rowsRead, rowsWritten);
         }
       }
 
+      const syncComplete = input.kind === "finance"
+        ? complete && financeProof !== undefined
+        : complete;
       await completeSyncRun(input.context.db, {
         runId: run.id,
         checkpoint: checkpoint === null ? null : { cursor: checkpoint },
         rowsRead,
-        rowsWritten
+        rowsWritten,
+        ...(sourceCoverageProof === undefined ? {} : { sourceCoverage: sourceCoverageProof }),
+        sourceComplete: syncComplete,
+        sourceCapturedAt,
       });
-      await markShopSynced(input.context.db, input.shop.id, input.kind);
+      if (syncComplete) {
+        await markShopSynced(input.context.db, input.shop.id, input.kind);
+      }
       input.logger?.info({ shopId: input.shop.id, profileId: input.shop.profileId, syncRunId: run.id, operation: `sync.${input.kind}`, entity: input.kind, rowsRead, rowsWritten }, "Shop sync completed");
-      const sourceCoverage = orderSourceWindow === undefined
+      const sourceCoverage = sourceCoverageProof === undefined
         ? {}
         : {
-            sourceCoverage: {
-              source: orderSourceWindow.source,
-              window: "ROLLING_12_MONTHS" as const,
-              completeWithinWindow: complete,
-              lifetimeHistoryComplete: false as const,
-            },
+            sourceCoverage: sourceCoverageProof,
           };
+      const financeCompletion = financeProof === undefined
+        ? {}
+        : { financeProof };
       return {
         status: "SUCCEEDED" as const,
         syncRunId: run.id,
         rowsRead,
         rowsWritten,
         checkpoint,
-        complete,
+        complete: syncComplete,
         ...sourceCoverage,
+        ...financeCompletion,
       };
     } catch (error) {
       const failureType = error instanceof SellerCenterError ? error.failureType : "UNEXPECTED_ERROR";

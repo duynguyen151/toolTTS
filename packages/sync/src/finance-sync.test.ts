@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ShopRow } from "@shop-health/db";
 import type { NormalizedFinancialBatch, SellerDataSource } from "@shop-health/domain";
@@ -26,6 +26,10 @@ vi.mock("@shop-health/db", () => db);
 import { runShopSync } from "./index.js";
 
 describe("finance sync persistence", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("counts and persists settlements and the summary snapshot", async () => {
     const result = await runShopSync({
       context: { db: {}, sql: {} } as never,
@@ -39,7 +43,58 @@ describe("finance sync persistence", () => {
       rowsRead: 9,
       rowsWritten: 9,
       complete: true,
+      financeProof: {
+        capturedAt: new Date("2026-08-14T00:00:00.000Z"),
+        officialOnHoldAmount: "1200.0000",
+        reasonTotalsReconcileToOfficialOnHold: true,
+      },
     });
+    expect(db.upsertSettlementBatch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      new Date("2026-08-14T00:00:00.000Z")
+    );
+    expect(db.completeSyncRun).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      sourceComplete: true,
+      sourceCapturedAt: expect.any(Date),
+    }));
+  });
+
+  it("persists incomplete finance coverage when the source batch is incomplete", async () => {
+    await runShopSync({
+      context: { db: {}, sql: {} } as never,
+      source: financeSource({ ...financialBatch(), complete: false }),
+      shop: shop(),
+      kind: "finance",
+    });
+
+    expect(db.completeSyncRun).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({
+      sourceComplete: false,
+      sourceCapturedAt: expect.any(Date),
+    }));
+    expect(db.markShopSynced).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["the snapshot is absent", null],
+    ["the official On Hold amount is absent", { officialOnHoldAmount: null }],
+    ["reason totals do not reconcile", { reasonTotalsReconcileToOfficialOnHold: false }],
+  ])("does not report finance proof when %s", async (_description, snapshotOverride) => {
+    const result = await runShopSync({
+      context: { db: {}, sql: {} } as never,
+      source: financeSource(snapshotOverride === null
+        ? { ...financialBatch(), snapshot: null }
+        : { ...financialBatch(), snapshot: { ...financialSnapshot(), ...snapshotOverride } }),
+      shop: shop(),
+      kind: "finance",
+    });
+
+    expect(result.complete).toBe(false);
+    expect(result.financeProof).toBeUndefined();
+    expect(db.completeSyncRun).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      sourceComplete: false,
+    }));
+    expect(db.markShopSynced).not.toHaveBeenCalled();
   });
 });
 
@@ -57,10 +112,18 @@ function financeSource(batch: NormalizedFinancialBatch): SellerDataSource {
 function financialBatch(): NormalizedFinancialBatch {
   return {
     settlements: Array.from({ length: 8 }, () => ({})) as never,
-    snapshot: {} as never,
+    snapshot: financialSnapshot(),
     checkpoint: null,
     complete: true,
   };
+}
+
+function financialSnapshot() {
+  return {
+    capturedAt: new Date("2026-08-14T00:00:00.000Z"),
+    officialOnHoldAmount: "1200.0000",
+    reasonTotalsReconcileToOfficialOnHold: true,
+  } as NormalizedFinancialBatch["snapshot"] & {};
 }
 
 function shop(): ShopRow {

@@ -25,7 +25,8 @@ export function buildDecisionAiMessages(input: BaselineAiInput) {
       role: "user" as const,
       content: JSON.stringify({
         operationalMetrics: {
-          totalOrders: input.metricsSnapshot.totalOrders,
+          totalPersistedOrders: input.metricsSnapshot.totalPersistedOrders ?? null,
+          operationalOrderCount: input.metricsSnapshot.operationalOrderCount ?? null,
           onHoldOrderCount: input.metricsSnapshot.onHoldOrderCount,
           deliveredCount: input.metricsSnapshot.deliveredCount,
           deliveryRate: input.metricsSnapshot.deliveryRate,
@@ -36,6 +37,11 @@ export function buildDecisionAiMessages(input: BaselineAiInput) {
         },
         finance: {
           officialOnHoldAmount: input.financeSnapshot.officialOnHoldAmount,
+          waitingForPackageDeliveryAmount: input.financeSnapshot.waitingForPackageDeliveryAmount ?? null,
+          deliveredAwaitingSettlementAmount: input.financeSnapshot.deliveredAwaitingSettlementAmount ?? null,
+          waitingForCompletedRefundReturnAmount: input.financeSnapshot.waitingForCompletedRefundReturnAmount ?? null,
+          reasonTotalsReconcileToOfficialOnHold: input.financeSnapshot.reasonTotalsReconcileToOfficialOnHold ?? null,
+          missingOnHoldExpectedAmountCount: input.financeSnapshot.missingOnHoldExpectedAmountCount ?? null,
           onHoldBalance: input.financeSnapshot.onHoldBalance,
           onHoldSettlementCount: input.financeSnapshot.onHoldSettlementCount,
           settlementCount: input.financeSnapshot.settlementCount,
@@ -46,6 +52,13 @@ export function buildDecisionAiMessages(input: BaselineAiInput) {
           result: input.ruleDecision,
           triggers: input.ruleTriggers,
           policyVersion: input.riskSnapshot.policyVersion,
+          dataSufficient: input.riskSnapshot.dataSufficient,
+          stopByOnHoldValue: input.riskSnapshot.stopByOnHoldValue,
+          stopByDeliveryRate: input.riskSnapshot.stopByDeliveryRate,
+          currentValues: {
+            onHoldValue: input.riskSnapshot.onHoldValue,
+            deliveryRate: input.riskSnapshot.deliveryRate,
+          },
           thresholds: {
             stopOnHoldValueAt: input.riskSnapshot.stopOnHoldValueAt,
             stopDeliveryRateBelow: input.riskSnapshot.stopDeliveryRateBelow,

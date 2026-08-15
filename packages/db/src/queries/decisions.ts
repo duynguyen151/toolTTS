@@ -2,6 +2,10 @@ import {
   AiDecisionInputSchema,
   CaptureBaDecisionInputSchema,
   CreateDecisionCaseInputSchema,
+  DecisionCoverageSnapshotSchema,
+  DecisionFinanceSnapshotSchema,
+  DecisionMetricsSnapshotSchema,
+  DecisionRiskSnapshotSchema,
   RecordBaDecisionForCaseInputSchema,
   RecordDryRunExecutionInputSchema,
   type AiDecisionInput,
@@ -64,6 +68,7 @@ export interface DecisionReviewRecord {
     dataCoverage: DecisionDataCoverage;
     lastSyncAt: Date | null;
   };
+  coverageSnapshot: DecisionCoverageSnapshot;
   metrics: {
     totalOrders: number;
     onHoldValue: string | null;
@@ -277,20 +282,23 @@ export async function getDecisionAiInput(
     dataCoverage: decisionCases.dataCoverage,
   }).from(decisionCases).where(eq(decisionCases.id, parsedCaseId)).limit(1);
   if (!decisionCase) return null;
+  const coverageSnapshot = decisionCase.coverageSnapshot ?? {
+    coverageState: decisionCase.dataCoverage,
+    persistedMetricsWindow: decisionCase.metricsSnapshot.window,
+    provenSourceWindow: null,
+    completeWithinSourceWindow: null,
+    lifetimeHistoryComplete: null,
+  };
   return {
-    metricsSnapshot: decisionCase.metricsSnapshot,
-    financeSnapshot: {
+    metricsSnapshot: DecisionMetricsSnapshotSchema.parse(decisionCase.metricsSnapshot),
+    financeSnapshot: DecisionFinanceSnapshotSchema.parse({
       ...decisionCase.financeSnapshot,
       officialOnHoldAmount: decisionCase.financeSnapshot.officialOnHoldAmount ?? null,
-    },
-    coverageSnapshot: decisionCase.coverageSnapshot ?? {
-      coverageState: decisionCase.dataCoverage,
-      persistedMetricsWindow: decisionCase.metricsSnapshot.window,
-      provenSourceWindow: null,
-      completeWithinSourceWindow: null,
-      lifetimeHistoryComplete: null,
-    },
-    riskSnapshot: decisionCase.riskSnapshot,
+      waitingForCompletedRefundReturnAmount:
+        decisionCase.financeSnapshot.waitingForCompletedRefundReturnAmount ?? null,
+    }),
+    coverageSnapshot: DecisionCoverageSnapshotSchema.parse(coverageSnapshot),
+    riskSnapshot: DecisionRiskSnapshotSchema.parse(decisionCase.riskSnapshot),
     ruleDecision: decisionCase.ruleDecision,
     ruleTriggers: decisionCase.ruleTriggers,
   };
@@ -377,6 +385,13 @@ function makeReview(
 ): DecisionReviewRecord {
   const metrics = decisionCase.metricsSnapshot;
   const risk = decisionCase.riskSnapshot;
+  const coverageSnapshot = decisionCase.coverageSnapshot ?? {
+    coverageState: decisionCase.dataCoverage,
+    persistedMetricsWindow: metrics.window,
+    provenSourceWindow: null,
+    completeWithinSourceWindow: null,
+    lifetimeHistoryComplete: null,
+  };
   const unavailableReason = decisionCase.dataCoverage === "COMPLETE" ? "NOT_CAPTURED" : "DATA_INCOMPLETE";
   const { stopOnHoldValueAt, stopDeliveryRateBelow, minimumOrdersForRateRule } = risk;
   const events: DecisionReviewRecord["events"] = [
@@ -403,6 +418,7 @@ function makeReview(
       dataCoverage: decisionCase.dataCoverage,
       lastSyncAt: latestDate(shop.lastOrdersSyncedAt, shop.lastFinanceSyncedAt),
     },
+    coverageSnapshot,
     metrics: {
       totalOrders: metrics.totalOrders,
       onHoldValue: metrics.onHoldValue,

@@ -17,6 +17,7 @@ import type {
   UpdateDataEvent,
   UpdateDataState,
 } from "../../lib/operations-contract.js";
+import type { DashboardDataOrigin } from "../../lib/dashboard-contract.js";
 import { isTerminalUpdateState } from "../../lib/operations-contract.js";
 import { readUpdateDataEvents } from "../../lib/read-update-stream.js";
 
@@ -39,7 +40,7 @@ const OperationsContext = createContext<OperationsContextValue | null>(null);
 type PersistedDashboardShop = {
   readonly profileNo: string;
   readonly displayName: string;
-  readonly dataOrigin: "LIVE" | "DEMO_SANITIZED";
+  readonly dataOrigin: DashboardDataOrigin;
 };
 
 function failedMessage(status: number): string {
@@ -66,7 +67,7 @@ export function OperationsProvider({
   persistedShop?: PersistedDashboardShop;
 }) {
   const router = useRouter();
-  const liveOperationsEnabled = persistedShop?.dataOrigin !== "DEMO_SANITIZED";
+  const liveOperationsEnabled = persistedShop === undefined || persistedShop.dataOrigin === "LIVE";
   const initialProfiles = !liveOperationsEnabled
     ? []
     : initialPresentation.status === "ERROR" && initialPresentation.profiles.length === 0 && persistedShop?.dataOrigin === "LIVE"

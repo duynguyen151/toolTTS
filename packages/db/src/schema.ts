@@ -23,7 +23,8 @@ import type {
   DecisionFinanceSnapshot,
   DecisionMetricsSnapshot,
   DecisionRiskSnapshot,
-  DecisionRuleTrigger
+  DecisionRuleTrigger,
+  SourceCoverageProof
 } from "@shop-health/domain";
 
 export const canonicalOrderStatusEnum = pgEnum("canonical_order_status", [
@@ -256,7 +257,6 @@ export const settlementRecords = pgTable(
     check("settlements_earning_nonnegative", sql`${table.earningAmount} is null or ${table.earningAmount} >= 0`),
     check("settlements_fee_nonnegative", sql`${table.feeAmount} is null or ${table.feeAmount} >= 0`),
     check("settlements_shipping_nonnegative", sql`${table.shippingAmount} is null or ${table.shippingAmount} >= 0`),
-    check("settlements_expected_nonnegative", sql`${table.expectedSettlementAmount} is null or ${table.expectedSettlementAmount} >= 0`),
     check("settlements_eligible_nonnegative", sql`${table.eligibleSettlementAmount} is null or ${table.eligibleSettlementAmount} >= 0`),
     check("settlements_settled_nonnegative", sql`${table.settledAmount} is null or ${table.settledAmount} >= 0`),
     check("settlements_currency_format", sql`${table.currency} ~ '^[A-Z]{3}$'`)
@@ -316,6 +316,9 @@ export const syncRuns = pgTable(
     rowsRead: integer("rows_read").notNull().default(0),
     rowsWritten: integer("rows_written").notNull().default(0),
     retryCount: integer("retry_count").notNull().default(0),
+    sourceCoverage: jsonb("source_coverage").$type<SourceCoverageProof>(),
+    sourceComplete: boolean("source_complete"),
+    sourceCapturedAt: timestamp("source_captured_at", { withTimezone: true }),
     failureType: text("failure_type"),
     failureMessage: text("failure_message"),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
@@ -328,7 +331,11 @@ export const syncRuns = pgTable(
     index("sync_runs_running_idx").on(table.status).where(sql`${table.status} = 'RUNNING'`),
     check("sync_runs_rows_read_nonnegative", sql`${table.rowsRead} >= 0`),
     check("sync_runs_rows_written_nonnegative", sql`${table.rowsWritten} >= 0`),
-    check("sync_runs_retry_count_nonnegative", sql`${table.retryCount} >= 0`)
+    check("sync_runs_retry_count_nonnegative", sql`${table.retryCount} >= 0`),
+    check(
+      "sync_runs_source_coverage_object",
+      sql`${table.sourceCoverage} is null or jsonb_typeof(${table.sourceCoverage}) = 'object'`
+    )
   ]
 );
 

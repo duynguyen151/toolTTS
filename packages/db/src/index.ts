@@ -79,13 +79,18 @@ export {
   type RecordDryRunExecutionInput,
 } from "./queries/decisions.js";
 export {
+  buildDecisionFinanceSnapshot,
   getFinanceSummary,
+  getLatestFinancialSnapshotAtOrBefore,
   getLatestFinancialSnapshot,
+  normalizeFinanceReasonSummary,
   insertFinancialSnapshot,
   listOnHoldSettlements,
   listSettlementsForMetrics,
   upsertSettlementBatch,
   type FinanceSummary,
+  type DecisionFinanceSnapshotInput,
+  type DecisionFinanceReasonSummary,
   type FinancialSnapshotInput,
   type SettlementUpsertInput
 } from "./queries/finance.js";

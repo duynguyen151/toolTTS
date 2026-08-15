@@ -22,6 +22,13 @@ const review: PersistedDecisionReview = {
     dataCoverage: "UNKNOWN",
     lastSyncAt: null,
   },
+  coverageSnapshot: {
+    coverageState: "UNKNOWN",
+    persistedMetricsWindow: "FULL_PERSISTED_HISTORY",
+    provenSourceWindow: null,
+    completeWithinSourceWindow: null,
+    lifetimeHistoryComplete: null,
+  },
   metrics: {
     totalOrders: 12,
     onHoldValue: null,
@@ -89,6 +96,7 @@ describe("decision presentation contracts", () => {
     const view = toDecisionReviewView(review);
 
     expect(view.schemaVersion).toBe("decision-review.v1");
+    expect(view.coverageSnapshot).toEqual(review.coverageSnapshot);
     expect(view.metrics.totalOrders).toEqual({ status: "AVAILABLE", value: 12 });
     expect(view.metrics.onHoldValue).toEqual({
       status: "UNAVAILABLE",

@@ -2,6 +2,7 @@ import { and, desc, eq, lt, sql } from "drizzle-orm";
 
 import type { Database } from "../client.js";
 import { syncRuns, type SyncRunRow } from "../schema.js";
+import type { SourceCoverageProof } from "@shop-health/domain";
 
 export type SyncMode = SyncRunRow["mode"];
 
@@ -33,6 +34,9 @@ export interface CompleteSyncRunInput {
   checkpoint?: Record<string, unknown> | null;
   rowsRead: number;
   rowsWritten: number;
+  sourceCoverage?: SourceCoverageProof;
+  sourceComplete?: boolean | null;
+  sourceCapturedAt?: Date | null;
 }
 
 export async function completeSyncRun(db: Database, input: CompleteSyncRunInput): Promise<void> {
@@ -44,6 +48,9 @@ export async function completeSyncRun(db: Database, input: CompleteSyncRunInput)
       checkpoint: input.checkpoint ?? null,
       rowsRead: input.rowsRead,
       rowsWritten: input.rowsWritten,
+      sourceCoverage: input.sourceCoverage ?? null,
+      sourceComplete: input.sourceComplete ?? null,
+      sourceCapturedAt: input.sourceCapturedAt ?? null,
       finishedAt: now,
       updatedAt: now
     })
@@ -134,11 +141,16 @@ export async function listSyncRuns(
 export async function findLatestSuccessfulSyncRun(
   db: Database,
   shopId: string,
+  mode?: SyncMode,
+  sourceComplete?: boolean,
 ): Promise<SyncRunRow | null> {
+  const conditions = [eq(syncRuns.shopId, shopId), eq(syncRuns.status, "SUCCEEDED")];
+  if (mode !== undefined) conditions.push(eq(syncRuns.mode, mode));
+  if (sourceComplete !== undefined) conditions.push(eq(syncRuns.sourceComplete, sourceComplete));
   const [run] = await db
     .select()
     .from(syncRuns)
-    .where(and(eq(syncRuns.shopId, shopId), eq(syncRuns.status, "SUCCEEDED")))
+    .where(and(...conditions))
     .orderBy(desc(syncRuns.startedAt))
     .limit(1);
   return run ?? null;

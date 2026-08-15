@@ -1,6 +1,7 @@
 import type {
   BaDecision,
   BaDecisionReasonCode,
+  DecisionCoverageSnapshot,
   DecisionDataCoverage,
   DecisionRuleResult,
   DecisionRuleTrigger,
@@ -28,6 +29,7 @@ export interface PersistedDecisionReview {
     readonly dataCoverage: DecisionDataCoverage;
     readonly lastSyncAt: Date | null;
   };
+  readonly coverageSnapshot: DecisionCoverageSnapshot;
   readonly metrics: {
     readonly totalOrders: number;
     readonly onHoldValue: string | null;
@@ -144,6 +146,7 @@ export interface DecisionReviewView {
     readonly dataCoverage: DecisionDataCoverage;
     readonly lastSyncAt: string | null;
   };
+  readonly coverageSnapshot?: DecisionCoverageSnapshot;
   readonly metrics: {
     readonly totalOrders: MetricValue<number>;
     readonly onHoldValue: MetricValue<{ readonly amount: string; readonly currency: string }>;
@@ -213,6 +216,7 @@ export function toDecisionReviewView(review: PersistedDecisionReview): DecisionR
       ...review.shop,
       lastSyncAt: review.shop.lastSyncAt?.toISOString() ?? null,
     },
+    coverageSnapshot: review.coverageSnapshot,
     metrics: {
       totalOrders: { status: "AVAILABLE", value: metrics.totalOrders },
       onHoldValue: metric(

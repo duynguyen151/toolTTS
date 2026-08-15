@@ -15,6 +15,8 @@ const validInput: BaselineAiInput = {
     periodStart: "2026-08-01T00:00:00.000Z",
     periodEnd: "2026-08-14T00:00:00.000Z",
     totalOrders: 120,
+    totalPersistedOrders: 120,
+    operationalOrderCount: 100,
     onHoldOrderCount: 18,
     deliveredCount: 84,
     deliveryRate: 0.84,
@@ -36,11 +38,18 @@ const validInput: BaselineAiInput = {
     onHoldSettlementCount: 8,
   },
   coverageSnapshot: {
-    coverageState: "UNKNOWN",
+    coverageState: "COMPLETE",
     persistedMetricsWindow: "FULL_PERSISTED_HISTORY",
-    provenSourceWindow: null,
-    completeWithinSourceWindow: null,
-    lifetimeHistoryComplete: null,
+    source: "SELLER_CENTER",
+    provenSourceWindow: "ROLLING_12_MONTHS",
+    completeWithinSourceWindow: true,
+    lifetimeHistoryComplete: false,
+    ordersSourceComplete: true,
+    financeRequiredSourceComplete: true,
+    sourceReconciled: true,
+    latestSuccessfulSyncAt: "2026-08-14T00:00:00.000Z",
+    financeCapturedAt: "2026-08-14T00:00:00.000Z",
+    freshness: "FRESH",
   },
   riskSnapshot: {
     policyVersion: "risk-control-policy.v1",
@@ -71,6 +80,40 @@ function config(overrides: NodeJS.ProcessEnv = {}) {
 }
 
 describe("baseline AI technical failures", () => {
+  it("does not call the provider without a verified Seller Center source identity", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const client = createBaselineAiClientFromConfig(config(), { fetch: fetchMock });
+    const { source: _source, ...coverageWithoutSource } = validInput.coverageSnapshot;
+
+    await client.recommend({
+      ...validInput,
+      coverageSnapshot: coverageWithoutSource,
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not call the provider without exact source coverage proof", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const client = createBaselineAiClientFromConfig(config(), {
+      fetch: fetchMock,
+    });
+
+    await expect(client.recommend({
+      ...validInput,
+      coverageSnapshot: {
+        ...validInput.coverageSnapshot,
+        provenSourceWindow: null,
+        completeWithinSourceWindow: null,
+        lifetimeHistoryComplete: null,
+      },
+    })).resolves.toMatchObject({
+      status: "UNAVAILABLE",
+      errorCode: "INVALID_RESPONSE",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("does not call the provider when disabled", async () => {
     const fetchMock = vi.fn<typeof fetch>();
     const client = createBaselineAiClientFromConfig(config({ TOOL_AI_ENABLED: "false" }), {

@@ -108,6 +108,23 @@ describe("normalizeSettlementRecord", () => {
     });
   });
 
+  it("preserves a signed settlement amount from the live Finance response", () => {
+    const raw = RawStatementOrderSchema.parse({
+      ...statementRow("detail-signed-settlement", 1),
+      settlement_amount: { amount: "-0.41", currency: "USD" },
+    });
+
+    expect(normalizeSettlementRecord(raw, "shop-1").expectedSettlementAmount).toBe("-0.41");
+  });
+
+  it("maps live reason code 2 to completed refund or return", () => {
+    const raw = RawStatementOrderSchema.parse(statementRow("detail-reason-2", 2));
+
+    expect(normalizeSettlementRecord(raw, "shop-1").onHoldReason).toBe(
+      "WAITING_FOR_COMPLETED_REFUND_RETURN",
+    );
+  });
+
   it("treats Seller Center delivery time zero as unavailable", () => {
     const raw = RawStatementOrderSchema.parse({
       ...statementRow("detail-zero-delivery", 1),
@@ -136,6 +153,7 @@ describe("normalizeFinancialSnapshot", () => {
           amount: { amount: "310.16", currency: "USD" },
           reasons_detail: [
             { reason: 1, amount: { amount: "177.33", currency: "USD" } },
+            { reason: 2, amount: { amount: "0.00", currency: "USD" } },
             { reason: 3, amount: { amount: "132.83", currency: "USD" } },
           ],
         },
@@ -167,14 +185,16 @@ describe("normalizeFinancialSnapshot", () => {
         onHoldAmount: "310.16",
         reasons: [
           { reason: 1, name: "WAITING_FOR_PACKAGE_DELIVERY", amount: "177.33", currency: "USD" },
+          { reason: 2, name: "WAITING_FOR_COMPLETED_REFUND_RETURN", amount: "0.00", currency: "USD" },
           { reason: 3, name: "DELIVERED_AWAITING_SETTLEMENT", amount: "132.83", currency: "USD" },
         ],
       },
     });
+    expect(snapshot?.reasonTotalsReconcileToOfficialOnHold).toBeUndefined();
   });
 });
 
-function statementRow(id: string, reason: 1 | 3): Record<string, unknown> {
+function statementRow(id: string, reason: 1 | 2 | 3): Record<string, unknown> {
   return {
     statement_detail_id: id,
     reference_id: `reference-${id}`,

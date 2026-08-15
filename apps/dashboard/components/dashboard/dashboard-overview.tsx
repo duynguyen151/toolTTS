@@ -37,10 +37,12 @@ export function DashboardOverview({ presentation }: DashboardOverviewProps) {
         <div className={styles.pageIntro}>
           <div className={styles.eyebrowLine}>
             <span>Shop operations</span>
-            {presentation.dataOrigin === "DEMO_SANITIZED" ? (
+            {presentation.dataOrigin === "LIVE" ? (
+              <StatusBadge tone="success">Live data</StatusBadge>
+            ) : presentation.dataOrigin === "DEMO_SANITIZED" ? (
               <StatusBadge tone="info">DEMO_SANITIZED</StatusBadge>
             ) : (
-              <StatusBadge tone="success">Live data</StatusBadge>
+              <StatusBadge tone="danger">Live data unavailable</StatusBadge>
             )}
           </div>
           <h1>Operational overview</h1>

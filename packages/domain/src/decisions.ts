@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   CurrencyCodeSchema,
+  DecimalStringSchema,
   NonNegativeDecimalStringSchema,
 } from "./contracts/common.js";
 import type { RiskControlDecision } from "./risk-control.js";
@@ -49,6 +50,7 @@ export const DecisionRuleTriggerSchema = z.enum([
 
 const OptionalRateSchema = z.number().min(0).max(1).nullable();
 const OptionalMoneySchema = NonNegativeDecimalStringSchema.nullable();
+const OptionalSignedMoneySchema = DecimalStringSchema.nullable();
 
 export const DecisionMetricsSnapshotSchema = z
   .object({
@@ -56,6 +58,8 @@ export const DecisionMetricsSnapshotSchema = z
     periodStart: z.string().datetime(),
     periodEnd: z.string().datetime(),
     totalOrders: z.number().int().nonnegative(),
+    totalPersistedOrders: z.number().int().nonnegative().optional(),
+    operationalOrderCount: z.number().int().nonnegative().nullable().optional(),
     onHoldOrderCount: z.number().int().nonnegative().nullable(),
     deliveredCount: z.number().int().nonnegative().nullable(),
     deliveryRate: OptionalRateSchema,
@@ -99,6 +103,11 @@ export const DecisionFinanceSnapshotSchema = z
     toSettleBalance: OptionalMoneySchema,
     onHoldBalance: OptionalMoneySchema,
     officialOnHoldAmount: OptionalMoneySchema,
+    waitingForPackageDeliveryAmount: OptionalSignedMoneySchema.optional(),
+    deliveredAwaitingSettlementAmount: OptionalSignedMoneySchema.optional(),
+    waitingForCompletedRefundReturnAmount: OptionalSignedMoneySchema.optional(),
+    reasonTotalsReconcileToOfficialOnHold: z.boolean().nullable().optional(),
+    missingOnHoldExpectedAmountCount: z.number().int().nonnegative().optional(),
     settlementCount: z.number().int().nonnegative(),
     onHoldSettlementCount: z.number().int().nonnegative(),
   })
@@ -108,11 +117,45 @@ export const DecisionCoverageSnapshotSchema = z
   .object({
     coverageState: DecisionDataCoverageSchema,
     persistedMetricsWindow: z.string().trim().min(1),
+    source: z.literal("SELLER_CENTER").nullable().optional(),
     provenSourceWindow: z.enum(["ROLLING_12_MONTHS"]).nullable(),
     completeWithinSourceWindow: z.boolean().nullable(),
     lifetimeHistoryComplete: z.boolean().nullable(),
+    ordersSourceComplete: z.boolean().nullable().optional(),
+    financeRequiredSourceComplete: z.boolean().nullable().optional(),
+    sourceReconciled: z.boolean().nullable().optional(),
+    latestSuccessfulSyncAt: z.string().datetime().nullable().optional(),
+    financeCapturedAt: z.string().datetime().nullable().optional(),
+    freshness: z.enum(["FRESH", "STALE", "UNKNOWN"]).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((coverage, context) => {
+    if (
+      coverage.provenSourceWindow === "ROLLING_12_MONTHS" &&
+      coverage.completeWithinSourceWindow === true &&
+      coverage.lifetimeHistoryComplete !== false
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["lifetimeHistoryComplete"],
+        message: "A complete rolling 12-month source window does not prove lifetime history",
+      });
+    }
+    if (
+      coverage.freshness === "FRESH" &&
+      (coverage.ordersSourceComplete !== true ||
+        coverage.financeRequiredSourceComplete !== true ||
+        coverage.sourceReconciled !== true ||
+        coverage.latestSuccessfulSyncAt == null ||
+        coverage.financeCapturedAt == null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["freshness"],
+        message: "FRESH requires complete, reconciled source facts and timestamps",
+      });
+    }
+  });
 
 const UniqueRuleTriggersSchema = z
   .array(DecisionRuleTriggerSchema)

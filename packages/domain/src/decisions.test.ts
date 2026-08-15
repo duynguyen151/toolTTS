@@ -89,6 +89,92 @@ describe("decision contracts", () => {
     expect(result.baDecision.note).toBe("Monitor the next settlement cycle.");
   });
 
+  it("requires explicit rolling-window proof to deny lifetime completeness", () => {
+    expect(DecisionCaseInputSchema.safeParse({
+      ...validCase,
+      coverageSnapshot: {
+        ...validCase.coverageSnapshot,
+        provenSourceWindow: "ROLLING_12_MONTHS",
+        completeWithinSourceWindow: true,
+        lifetimeHistoryComplete: true,
+      },
+    }).success).toBe(false);
+  });
+
+  it("does not allow FRESH coverage without complete reconciled source facts", () => {
+    expect(DecisionCaseInputSchema.safeParse({
+      ...validCase,
+      coverageSnapshot: {
+        ...validCase.coverageSnapshot,
+        freshness: "FRESH",
+        ordersSourceComplete: false,
+        financeRequiredSourceComplete: true,
+        sourceReconciled: true,
+        latestSuccessfulSyncAt: "2026-08-14T00:00:00.000Z",
+        financeCapturedAt: "2026-08-14T00:00:00.000Z",
+      },
+    }).success).toBe(false);
+  });
+
+  it("rejects FRESH coverage when required timestamps are omitted", () => {
+    expect(DecisionCaseInputSchema.safeParse({
+      ...validCase,
+      coverageSnapshot: {
+        ...validCase.coverageSnapshot,
+        freshness: "FRESH",
+        ordersSourceComplete: true,
+        financeRequiredSourceComplete: true,
+        sourceReconciled: true,
+        latestSuccessfulSyncAt: undefined,
+        financeCapturedAt: "2026-08-14T00:00:00.000Z",
+      },
+    }).success).toBe(false);
+  });
+
+  it("accepts typed quality, explicit order, and finance separation facts", () => {
+    const parsed = DecisionCaseInputSchema.parse({
+      ...validCase,
+      metricsSnapshot: {
+        ...validCase.metricsSnapshot,
+        totalPersistedOrders: 120,
+        operationalOrderCount: 100,
+      },
+      financeSnapshot: {
+        ...validCase.financeSnapshot,
+        waitingForPackageDeliveryAmount: "100.0000",
+        deliveredAwaitingSettlementAmount: "1100.0000",
+        waitingForCompletedRefundReturnAmount: "50.0000",
+        reasonTotalsReconcileToOfficialOnHold: true,
+      },
+      coverageSnapshot: {
+        ...validCase.coverageSnapshot,
+        ordersSourceComplete: true,
+        financeRequiredSourceComplete: true,
+        sourceReconciled: true,
+        latestSuccessfulSyncAt: "2026-08-14T00:00:00.000Z",
+        financeCapturedAt: "2026-08-14T00:00:00.000Z",
+        freshness: "FRESH",
+      },
+    });
+
+    expect(parsed.metricsSnapshot.operationalOrderCount).toBe(100);
+    expect(parsed.financeSnapshot.reasonTotalsReconcileToOfficialOnHold).toBe(true);
+    expect(parsed.financeSnapshot.waitingForCompletedRefundReturnAmount).toBe("50.0000");
+    expect(parsed.coverageSnapshot.freshness).toBe("FRESH");
+  });
+
+  it("preserves signed Finance reason amounts in a decision case", () => {
+    const parsed = DecisionCaseInputSchema.parse({
+      ...validCase,
+      financeSnapshot: {
+        ...validCase.financeSnapshot,
+        waitingForPackageDeliveryAmount: "-0.4100",
+      },
+    });
+
+    expect(parsed.financeSnapshot.waitingForPackageDeliveryAmount).toBe("-0.4100");
+  });
+
   it.each([
     ["decision", { decision: "STOP", reasonCodes: ["OTHER"] }],
     ["confidence below zero", { decision: "WATCH", confidence: -0.01, reasonCodes: ["OTHER"] }],

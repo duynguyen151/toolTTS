@@ -15,6 +15,8 @@ const validInput: BaselineAiInput = {
     periodStart: "2025-08-14T00:00:00.000Z",
     periodEnd: "2026-08-14T00:00:00.000Z",
     totalOrders: 9,
+    totalPersistedOrders: 9,
+    operationalOrderCount: 9,
     onHoldOrderCount: 9,
     deliveredCount: 8,
     deliveryRate: 8 / 9,
@@ -32,15 +34,23 @@ const validInput: BaselineAiInput = {
     toSettleBalance: "310.1600",
     onHoldBalance: "310.1600",
     officialOnHoldAmount: "310.1600",
+    waitingForCompletedRefundReturnAmount: "42.0000",
     settlementCount: 8,
     onHoldSettlementCount: 8,
   },
   coverageSnapshot: {
-    coverageState: "UNKNOWN",
+    coverageState: "COMPLETE",
     persistedMetricsWindow: "FULL_PERSISTED_HISTORY",
-    provenSourceWindow: null,
-    completeWithinSourceWindow: null,
-    lifetimeHistoryComplete: null,
+    source: "SELLER_CENTER",
+    provenSourceWindow: "ROLLING_12_MONTHS",
+    completeWithinSourceWindow: true,
+    lifetimeHistoryComplete: false,
+    ordersSourceComplete: true,
+    financeRequiredSourceComplete: true,
+    sourceReconciled: true,
+    latestSuccessfulSyncAt: "2026-08-14T00:00:00.000Z",
+    financeCapturedAt: "2026-08-14T00:00:00.000Z",
+    freshness: "FRESH",
   },
   riskSnapshot: {
     policyVersion: "risk-control-policy.v1",
@@ -107,6 +117,47 @@ function config(overrides: NodeJS.ProcessEnv = {}) {
 }
 
 describe("Tool AI runtime v1", () => {
+  it("fails closed before network access when legacy coverage quality facts are omitted", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const client = createBaselineAiClientFromConfig(config(), { fetch: fetchMock });
+
+    await expect(client.recommend({
+      ...validInput,
+      coverageSnapshot: {
+        coverageState: "COMPLETE",
+        persistedMetricsWindow: "FULL_PERSISTED_HISTORY",
+        provenSourceWindow: "ROLLING_12_MONTHS",
+        completeWithinSourceWindow: true,
+        lifetimeHistoryComplete: false,
+      },
+    })).resolves.toMatchObject({
+      status: "UNAVAILABLE",
+      humanReviewRequired: true,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before network access for incomplete or stale verified data", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const client = createBaselineAiClientFromConfig(config(), { fetch: fetchMock });
+
+    await expect(client.recommend({
+      ...validInput,
+      coverageSnapshot: {
+        ...validInput.coverageSnapshot,
+        ordersSourceComplete: false,
+        financeRequiredSourceComplete: true,
+        sourceReconciled: true,
+        freshness: "STALE",
+      },
+    })).resolves.toMatchObject({
+      status: "UNAVAILABLE",
+      errorCode: "INVALID_RESPONSE",
+      humanReviewRequired: true,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("uses LOCAL_NO_AUTH only for exact approved loopback hosts", () => {
     expect(config().authMode).toBe("LOCAL_NO_AUTH");
     expect(config({ TOOL_AI_BASE_URL: "http://localhost:20128/v1" }).authMode)
@@ -348,8 +399,16 @@ describe("Tool AI runtime v1", () => {
     };
     const context = body.messages.find(({ role }) => role === "user")?.content ?? "";
     expect(context).toContain('"officialOnHoldAmount":"310.1600"');
+    expect(context).toContain('"waitingForCompletedRefundReturnAmount":"42.0000"');
     expect(context).toContain('"operationalOrderExposure":"844.6500"');
-    expect(context).toContain('"lifetimeHistoryComplete":null');
+    expect(context).toContain('"lifetimeHistoryComplete":false');
+    expect(context).toContain('"totalPersistedOrders":9');
+    expect(context).toContain('"operationalOrderCount":9');
+    expect(context).not.toContain('"totalOrders"');
+    expect(context).toContain('"dataSufficient":true');
+    expect(context).toContain('"stopByOnHoldValue":false');
+    expect(context).toContain('"stopByDeliveryRate":false');
+    expect(context).toContain('"currentValues"');
     expect(context).not.toMatch(
       /shopId|profileNo|buyer|customer|shippingAddress|phone|email|cookie|token|csrf|proxy|cdp|rawData/i,
     );

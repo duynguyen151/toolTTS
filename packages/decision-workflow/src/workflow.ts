@@ -6,6 +6,7 @@ import {
   mapRiskResultToRuleDecision,
   type DecisionCaseInput,
   type DecisionFinanceSnapshot,
+  type DecisionCoverageSnapshot,
   type DecisionMetricsSnapshot,
   type DecisionRiskSnapshot,
   type DecisionRuleTrigger,
@@ -33,6 +34,7 @@ export interface ReviewStartSource {
   readonly periodEnd: Date;
   readonly facts: readonly RiskOrderFact[];
   readonly financeSnapshot: DecisionFinanceSnapshot;
+  readonly coverageSnapshot?: DecisionCoverageSnapshot;
   readonly sourceSyncRunId: string | null;
   readonly holidayModeCurrentlyEnabled: boolean | null;
   readonly consecutiveSafeCycles: number;
@@ -165,6 +167,8 @@ export function createDecisionWorkflow(dependencies: {
         periodStart: source.periodStart.toISOString(),
         periodEnd: source.periodEnd.toISOString(),
         totalOrders: risk.totalPersistedOrderCount,
+        totalPersistedOrders: risk.totalPersistedOrders,
+        operationalOrderCount: risk.operationalOrderCount,
         onHoldOrderCount: risk.onHoldOrderCount,
         deliveredCount: risk.deliveredCount,
         deliveryRate: risk.deliveryRate,
@@ -196,9 +200,10 @@ export function createDecisionWorkflow(dependencies: {
           metricsSnapshot,
           riskSnapshot,
           financeSnapshot: source.financeSnapshot,
-          coverageSnapshot: {
+          coverageSnapshot: source.coverageSnapshot ?? {
             coverageState: source.shop.dataCoverage,
             persistedMetricsWindow: metricsSnapshot.window,
+            source: null,
             provenSourceWindow: null,
             completeWithinSourceWindow: null,
             lifetimeHistoryComplete: null,

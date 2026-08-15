@@ -739,6 +739,12 @@
   color: var(--color-danger);
 }
 
+@media (max-width: 1500px) {
+  .kpiGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 1180px) {
   .primaryGrid {
     grid-template-columns: minmax(0, 1fr);

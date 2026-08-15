@@ -116,6 +116,13 @@ function review(overrides: Partial<PersistedDecisionReview> = {}): PersistedDeci
   return {
     case: { id: caseId, origin: "DEMO_SANITIZED", observedAt: now, createdAt: now },
     shop: source.shop,
+    coverageSnapshot: {
+      coverageState: "UNKNOWN",
+      persistedMetricsWindow: "FULL_PERSISTED_HISTORY",
+      provenSourceWindow: null,
+      completeWithinSourceWindow: null,
+      lifetimeHistoryComplete: null,
+    },
     metrics: {
       totalOrders: 10,
       onHoldValue: "4400.0000",
@@ -258,6 +265,49 @@ function createStore(): DecisionWorkflowStore & {
 }
 
 describe("decision workflow", () => {
+  test("persists verified source coverage instead of inferring lifetime history", async () => {
+    const store = createStore();
+    store.loadReviewStartSource = async () => ({
+      ...source,
+      shop: { ...source.shop, dataCoverage: "COMPLETE" },
+      coverageSnapshot: {
+        coverageState: "COMPLETE",
+        persistedMetricsWindow: "FULL_PERSISTED_HISTORY",
+        provenSourceWindow: "ROLLING_12_MONTHS",
+        completeWithinSourceWindow: true,
+        lifetimeHistoryComplete: false,
+        ordersSourceComplete: true,
+        financeRequiredSourceComplete: true,
+        sourceReconciled: true,
+        latestSuccessfulSyncAt: now.toISOString(),
+        financeCapturedAt: now.toISOString(),
+        freshness: "FRESH",
+      },
+    });
+    const workflow = createDecisionWorkflow({
+      store,
+      aiClient: { recommend: async () => unavailableResult },
+      now: () => now,
+    });
+
+    await workflow.startReview({ profileNo: "DEMO-001" });
+
+    expect(store.created[0]).toMatchObject({
+      decisionCase: {
+        coverageSnapshot: {
+          provenSourceWindow: "ROLLING_12_MONTHS",
+          completeWithinSourceWindow: true,
+          lifetimeHistoryComplete: false,
+          freshness: "FRESH",
+        },
+        metricsSnapshot: {
+          totalPersistedOrders: 10,
+          operationalOrderCount: 10,
+        },
+      },
+    });
+  });
+
   test("starts an immutable case from persisted facts and stores a separate AI result", async () => {
     const store = createStore();
     let receivedAiInput: unknown;

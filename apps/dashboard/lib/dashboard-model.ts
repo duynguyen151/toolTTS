@@ -39,6 +39,10 @@ function formatTimestamp(value: Date | null): string {
   }).format(value);
 }
 
+function formatCount(value: number | null): string {
+  return value === null ? "Unavailable" : value.toLocaleString("en-US");
+}
+
 function coverageTone(status: DashboardSource["selected"]["dataCoverage"]["status"]): DashboardTone {
   if (status === "READY") return "success";
   if (status === "PARTIAL" || status === "STALE") return "warning";
@@ -95,14 +99,14 @@ function buildKpis(source: DashboardSource): DashboardKpi[] {
     {
       id: "orders",
       label: "Orders observed",
-      value: selected.orders.total.toLocaleString("en-US"),
+      value: formatCount(selected.orders.total),
       detail: "Persisted order population",
       tone: "lilac",
     },
     {
       id: "awaiting",
       label: "Awaiting shipment",
-      value: selected.orders.awaitingShipment.toLocaleString("en-US"),
+      value: formatCount(selected.orders.awaitingShipment),
       detail: "Orders requiring fulfilment attention",
       tone: "amber",
     },
@@ -137,20 +141,20 @@ function buildDecisionTrace(source: DashboardSource): DashboardPresentation["dec
   const { rule, ai, ba, execution } = source.selected;
 
   const ruleStage = rule.status === "READY"
-    ? stage("rule", "Rule", "Ready", "A persisted deterministic rule result is available.", "primary")
+    ? stage("rule", "Rule Result", "Ready", rule.detail ?? "A persisted deterministic rule result is available.", "primary")
     : rule.status === "NOT_VERIFIED"
-      ? stage("rule", "Rule", "Not verified", "No persisted decision case is available for this shop.", "warning")
-      : stage("rule", "Rule", "Unavailable", "Rule evidence is unavailable.", "danger");
+      ? stage("rule", "Rule Result", "Not verified", "No persisted decision case is available for this shop.", "warning")
+      : stage("rule", "Rule Result", "Unavailable", "Rule evidence is unavailable.", "danger");
   const aiStage = ai.status === "READY"
-    ? stage("ai", "AI", "Ready", ai.detail ?? "A recorded AI recommendation is available.", "lilac")
-    : stage("ai", "AI", "Unavailable", ai.detail === "NOT_RECORDED" ? "No AI recommendation has been recorded." : (ai.detail ?? "AI recommendation is unavailable."), "neutral");
+    ? stage("ai", "AI Recommendation", "Ready", ai.detail ?? "A recorded AI recommendation is available.", "lilac")
+    : stage("ai", "AI Recommendation", "Unavailable", ai.detail === "NOT_RECORDED" ? "No AI recommendation has been recorded." : (ai.detail ?? "AI recommendation is unavailable."), "neutral");
   const baStage = ba.status === "REVIEWED"
-    ? stage("ba", "BA review", "Reviewed", "A business analyst decision is recorded.", "success")
+    ? stage("ba", "BA Decision", "Reviewed", ba.detail ?? "A business analyst decision is recorded.", "success")
     : ba.status === "NOT_REVIEWED"
-      ? stage("ba", "BA review", "Not reviewed", "Business analyst review has not been completed.", "warning")
-      : stage("ba", "BA review", "Unavailable", "BA review state is unavailable.", "neutral");
+      ? stage("ba", "BA Decision", "Not reviewed", "Business analyst review has not been completed.", "warning")
+      : stage("ba", "BA Decision", "Unavailable", "BA review state is unavailable.", "neutral");
   const executionStage = execution.status === "EXECUTED"
-    ? stage("execution", "Execution", "Executed", "An audited execution record exists.", "success")
+    ? stage("execution", "Execution", "Executed", execution.detail ?? "An audited execution record exists.", "success")
     : execution.status === "NOT_REQUESTED"
       ? stage("execution", "Execution", "Not requested", "No action has been requested.", "neutral")
       : stage("execution", "Execution", "Unavailable", "Execution state is unavailable.", "neutral");
@@ -190,11 +194,17 @@ export function buildDashboardPresentation(source: DashboardSource): DashboardPr
       tone: coverageTone(source.selected.dataCoverage.status),
     },
     freshness: {
-      label: selectedShop.lastOrdersSyncedAt !== null && selectedShop.lastFinanceSyncedAt !== null
+      label: selectedShop.dataOrigin === "UNAVAILABLE"
+        ? "Unavailable"
+        : selectedShop.lastOrdersSyncedAt !== null && selectedShop.lastFinanceSyncedAt !== null
         ? "Orders and finance"
         : "Partial freshness",
-      detail: "Timestamps reflect the latest persisted collector updates.",
-      tone: selectedShop.lastOrdersSyncedAt !== null && selectedShop.lastFinanceSyncedAt !== null ? "sky" : "warning",
+      detail: selectedShop.dataOrigin === "UNAVAILABLE"
+        ? "No persisted live timestamps are available."
+        : "Timestamps reflect the latest persisted collector updates.",
+      tone: selectedShop.dataOrigin === "UNAVAILABLE"
+        ? "danger"
+        : selectedShop.lastOrdersSyncedAt !== null && selectedShop.lastFinanceSyncedAt !== null ? "sky" : "warning",
       ordersUpdatedAt: formatTimestamp(selectedShop.lastOrdersSyncedAt),
       financeUpdatedAt: formatTimestamp(selectedShop.lastFinanceSyncedAt),
     },
@@ -205,10 +215,10 @@ export function buildDashboardPresentation(source: DashboardSource): DashboardPr
     },
     profile: { ...profileView, status: source.selected.profileState },
     orderHealth: {
-      total: source.selected.orders.total.toLocaleString("en-US"),
-      awaiting: source.selected.orders.awaitingShipment.toLocaleString("en-US"),
-      delivered: source.selected.orders.delivered.toLocaleString("en-US"),
-      canceled: source.selected.orders.canceled.toLocaleString("en-US"),
+      total: formatCount(source.selected.orders.total),
+      awaiting: formatCount(source.selected.orders.awaitingShipment),
+      delivered: formatCount(source.selected.orders.delivered),
+      canceled: formatCount(source.selected.orders.canceled),
     },
     decisionTrace: buildDecisionTrace(source),
   };

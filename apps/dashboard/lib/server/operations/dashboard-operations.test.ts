@@ -23,6 +23,44 @@ const shops: DashboardOperationsShop[] = [
   },
 ];
 
+function completeSync(kind: "orders" | "finance") {
+  return kind === "orders"
+    ? {
+        status: "SUCCEEDED" as const,
+        complete: true,
+        sourceCoverage: {
+          source: "SELLER_CENTER" as const,
+          window: "ROLLING_12_MONTHS" as const,
+          completeWithinSourceWindow: true,
+          lifetimeHistoryComplete: false as const,
+        },
+      }
+    : {
+        status: "SUCCEEDED" as const,
+        complete: true,
+        financeProof: {
+          capturedAt: new Date("2026-08-15T00:00:00.000Z"),
+          officialOnHoldAmount: "1200.0000",
+          reasonTotalsReconcileToOfficialOnHold: true as const,
+        },
+      };
+}
+
+const completeDecisionCoverage = {
+  coverageState: "COMPLETE" as const,
+  persistedMetricsWindow: "FULL_PERSISTED_HISTORY",
+  source: "SELLER_CENTER" as const,
+  provenSourceWindow: "ROLLING_12_MONTHS" as const,
+  completeWithinSourceWindow: true,
+  lifetimeHistoryComplete: false,
+  ordersSourceComplete: true,
+  financeRequiredSourceComplete: true,
+  sourceReconciled: true,
+  latestSuccessfulSyncAt: "2026-08-15T00:00:00.000Z",
+  financeCapturedAt: "2026-08-15T00:00:00.000Z",
+  freshness: "FRESH" as const,
+};
+
 function adapters(overrides: Partial<DashboardOperationsAdapters> = {}): DashboardOperationsAdapters {
   return {
     listAdsPowerProfiles: async () => profiles,
@@ -34,8 +72,8 @@ function adapters(overrides: Partial<DashboardOperationsAdapters> = {}): Dashboa
       checkedAt: new Date(),
       detail: null,
     }),
-    runSync: async () => ({ status: "SUCCEEDED", complete: true }),
-    evaluateRisk: async () => undefined,
+    runSync: async (_profileNo, kind) => completeSync(kind),
+    evaluateRisk: async () => completeDecisionCoverage,
     ...overrides,
   };
 }
@@ -108,9 +146,9 @@ describe("DashboardOperations", () => {
       openReady: async () => { calls.push("open"); },
       runSync: async (_profileNo, kind) => {
         calls.push(kind);
-        return { status: "SUCCEEDED", complete: true };
+        return completeSync(kind);
       },
-      evaluateRisk: async () => { calls.push("risk"); },
+      evaluateRisk: async () => { calls.push("risk"); return completeDecisionCoverage; },
     }));
 
     const events = await collectUpdate(operations);
@@ -152,9 +190,9 @@ describe("DashboardOperations", () => {
       },
       runSync: async (_profileNo, kind) => {
         calls.push(kind);
-        return { status: "SUCCEEDED", complete: true };
+        return completeSync(kind);
       },
-      evaluateRisk: async () => { calls.push("risk"); },
+      evaluateRisk: async () => { calls.push("risk"); return completeDecisionCoverage; },
     })), "958");
 
     expect(calls).toEqual(["ensure", "open", "health", "orders", "finance", "risk"]);
@@ -206,11 +244,22 @@ describe("DashboardOperations", () => {
     expect(events.at(-1)?.message).not.toContain("private upstream detail");
   });
 
+  it("maps structurally typed sync failures across the server bundle boundary", async () => {
+    const events = await collectUpdate(createDashboardOperations(adapters({
+      runSync: async () => { throw { failureType: "LOGIN_REQUIRED" }; },
+    })));
+
+    expect(events.at(-1)).toMatchObject({
+      state: "HUMAN_ACTION_REQUIRED",
+      error: { code: "LOGIN_REQUIRED" },
+    });
+  });
+
   it("preserves completed orders when finance encounters a layout change", async () => {
     const events = await collectUpdate(createDashboardOperations(adapters({
       runSync: async (_profileNo, kind) => {
         if (kind === "finance") throw new SellerCenterError("LAYOUT_CHANGED", "private selector detail");
-        return { status: "SUCCEEDED", complete: true };
+        return completeSync(kind);
       },
     })));
 
@@ -246,12 +295,12 @@ describe("DashboardOperations", () => {
           sourceCoverage: {
             source: "SELLER_CENTER" as const,
             window: "ROLLING_12_MONTHS" as const,
-            completeWithinWindow: false,
+            completeWithinSourceWindow: false,
             lifetimeHistoryComplete: false as const,
           },
         };
       },
-      evaluateRisk: async () => { calls.push("risk"); },
+      evaluateRisk: async () => { calls.push("risk"); return completeDecisionCoverage; },
     })));
 
     expect(calls).toEqual(["orders"]);
@@ -264,14 +313,33 @@ describe("DashboardOperations", () => {
     expect(events.at(-1)?.message).toContain("incomplete");
   });
 
+  it("requires typed source-window coverage before accepting a complete orders sync", async () => {
+    const calls: string[] = [];
+    const events = await collectUpdate(createDashboardOperations(adapters({
+      runSync: async (_profileNo, kind) => {
+        calls.push(kind);
+        return { status: "SUCCEEDED", complete: true };
+      },
+      evaluateRisk: async () => { calls.push("risk"); return completeDecisionCoverage; },
+    })));
+
+    expect(calls).toEqual(["orders"]);
+    expect(events.at(-1)).toMatchObject({
+      state: "PARTIAL",
+      terminal: true,
+      completedKinds: [],
+      error: { code: "SYNC_PARTIAL" },
+    });
+  });
+
   it("does not reconcile risk when finance sync is incomplete", async () => {
     const calls: string[] = [];
     const events = await collectUpdate(createDashboardOperations(adapters({
       runSync: async (_profileNo, kind) => {
         calls.push(kind);
-        return { status: "SUCCEEDED", complete: kind === "orders" };
+        return kind === "orders" ? completeSync(kind) : { status: "SUCCEEDED", complete: false };
       },
-      evaluateRisk: async () => { calls.push("risk"); },
+      evaluateRisk: async () => { calls.push("risk"); return completeDecisionCoverage; },
     })));
 
     expect(calls).toEqual(["orders", "finance"]);
@@ -282,6 +350,25 @@ describe("DashboardOperations", () => {
       error: { code: "SYNC_PARTIAL" },
     });
     expect(events.at(-1)?.message).toContain("incomplete");
+  });
+
+  it("requires official captured and reconciled Finance evidence before success", async () => {
+    const calls: string[] = [];
+    const events = await collectUpdate(createDashboardOperations(adapters({
+      runSync: async (_profileNo, kind) => {
+        calls.push(kind);
+        return kind === "orders" ? completeSync(kind) : { status: "SUCCEEDED", complete: true };
+      },
+      evaluateRisk: async () => { calls.push("risk"); return completeDecisionCoverage; },
+    })));
+
+    expect(calls).toEqual(["orders", "finance"]);
+    expect(events.at(-1)).toMatchObject({
+      state: "PARTIAL",
+      terminal: true,
+      completedKinds: ["orders"],
+      error: { code: "SYNC_PARTIAL" },
+    });
   });
 
   it.each([
@@ -358,6 +445,36 @@ describe("DashboardOperations", () => {
     expect(events.at(-1)?.message).not.toContain("private database detail");
   });
 
+  it("requires persisted Decision Case coverage before reporting success", async () => {
+    const events = await collectUpdate(createDashboardOperations(adapters({
+      evaluateRisk: async () => ({
+        ...completeDecisionCoverage,
+        coverageState: "PARTIAL",
+        sourceReconciled: false,
+      }),
+    })));
+
+    expect(events.at(-1)).toMatchObject({
+      state: "PARTIAL",
+      terminal: true,
+      completedKinds: ["orders", "finance"],
+      error: { code: "SYNC_PARTIAL" },
+    });
+  });
+
+  it("treats historical Decision Cases without coverage as partial", async () => {
+    const events = await collectUpdate(createDashboardOperations(adapters({
+      evaluateRisk: async () => undefined,
+    })));
+
+    expect(events.at(-1)).toMatchObject({
+      state: "PARTIAL",
+      terminal: true,
+      completedKinds: ["orders", "finance"],
+      error: { code: "SYNC_PARTIAL" },
+    });
+  });
+
   it.each([
     [new SellerCenterError("ADSPOWER_UNAVAILABLE", "private API detail"), "ADSPOWER_NOT_RUNNING"],
     [new SellerCenterError("PROFILE_START_FAILED", "private start detail"), "PROFILE_OPEN_FAILED"],
@@ -370,5 +487,13 @@ describe("DashboardOperations", () => {
 
     expect(result).toMatchObject({ ok: false, error: { code: expectedCode } });
     expect(JSON.stringify(result)).not.toContain(failure.message);
+  });
+
+  it("maps structurally typed CDP failures across the server bundle boundary", async () => {
+    const result = await createDashboardOperations(adapters({
+      openReady: async () => { throw { failureType: "BROWSER_DISCONNECTED" }; },
+    })).openProfile("957");
+
+    expect(result).toMatchObject({ ok: false, error: { code: "PROFILE_NOT_READY" } });
   });
 });

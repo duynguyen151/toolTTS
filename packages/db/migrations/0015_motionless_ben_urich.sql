@@ -1,0 +1,1 @@
+ALTER TABLE "sync_runs" ADD CONSTRAINT "sync_runs_source_coverage_object" CHECK ("sync_runs"."source_coverage" is null or jsonb_typeof("sync_runs"."source_coverage") = 'object');

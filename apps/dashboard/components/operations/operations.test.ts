@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -7,6 +8,11 @@ import type { DashboardPresentation } from "../../lib/dashboard-contract.js";
 import { OperationsControls } from "./operations-controls.js";
 import { OperationsProvider, preflightUpdateState } from "./operations-provider.js";
 import { ProfileOperationState } from "./profile-operation-state.js";
+
+const operationsCss = readFileSync(
+  new URL("./operations.module.css", import.meta.url),
+  "utf8",
+);
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn() }),
@@ -163,5 +169,15 @@ describe("dashboard operations controls", () => {
     expect(html).toContain('title="Ready for operator action"');
     expect(html).toContain("Ready for operator action");
     expect(html).not.toMatch(/\d+%/);
+  });
+
+  it("keeps profile operations keyboard-native and stacks their controls on narrow screens", () => {
+    const html = renderOperations("957");
+
+    expect(html).toContain('<select aria-label="AdsPower profile"');
+    expect(html).toMatch(/<button[^>]*>.*Open profile/s);
+    expect(html).toMatch(/<button[^>]*>.*Update data/s);
+    expect(operationsCss).toContain(".profileSelect select:focus-visible");
+    expect(operationsCss).toMatch(/@media \(max-width: 460px\)[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/);
   });
 });

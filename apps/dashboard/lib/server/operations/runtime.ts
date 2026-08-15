@@ -109,19 +109,32 @@ export function createDashboardOperationsRuntime(
         getSource(),
       ]);
       const result = await runShopSync({ context, source: sellerCenterSource, shop, kind });
-      return result.sourceCoverage === undefined
-        ? { status: result.status, complete: result.complete }
-        : {
-            status: result.status,
-            complete: result.complete,
-            sourceCoverage: result.sourceCoverage,
-          };
+      return {
+        status: result.status,
+        complete: result.complete,
+        ...(result.sourceCoverage === undefined ? {} : { sourceCoverage: result.sourceCoverage }),
+        ...(result.financeProof === undefined ? {} : { financeProof: result.financeProof }),
+      };
     }),
     evaluateRisk: (profileNo) => withDatabase(databaseUrl, async (context) => {
       const shop = await findShopByProfileNo(context.db, profileNo);
       if (shop === null) throw new Error("Linked shop was not found");
-      const { evaluateAndStoreRiskControl } = await import("@shop-health/sync");
+      const [
+        { createBaselineAiClientFromConfig, readBaselineAiConfig },
+        { createPersistedDecisionWorkflow },
+        { evaluateAndStoreRiskControl },
+      ] = await Promise.all([
+        import("@shop-health/decision-ai"),
+        import("@shop-health/decision-workflow"),
+        import("@shop-health/sync"),
+      ]);
       await evaluateAndStoreRiskControl(context, shop);
+      const workflow = createPersistedDecisionWorkflow({
+        context,
+        aiClient: createBaselineAiClientFromConfig(readBaselineAiConfig(environment as NodeJS.ProcessEnv)),
+      });
+      const review = await workflow.startReview({ profileNo });
+      return review.coverageSnapshot;
     }),
   };
 

@@ -59,6 +59,7 @@ function currentSyncState(shop: ShopRow, run: SyncRunRow | null): DashboardSyncS
   if (shop.syncState === "DISABLED") return "DISABLED";
   if (shop.syncState !== "ACTIVE") return "FAILED";
   if (run === null) return "IDLE";
+  if (run.status === "SUCCEEDED" && run.sourceComplete !== true) return "FAILED";
   if (run.status === "RUNNING" || run.status === "SUCCEEDED" || run.status === "FAILED") {
     return run.status;
   }
@@ -97,26 +98,73 @@ function decisionStages(review: DecisionReviewRecord | null): Pick<DashboardSour
     };
   }
 
+  const operationalExposure = review.metrics.onHoldValue === null
+    ? "unavailable"
+    : `${review.metrics.onHoldValue} ${review.metrics.currency}`;
+  const ruleDetail = [
+    `Result: ${review.rule.decision}.`,
+    `Triggers: ${review.rule.triggers.join(", ") || "none"}.`,
+    `Operational order-derived exposure: ${operationalExposure}.`,
+    "Official Finance On Hold is shown separately in the KPI.",
+    `Policy: ${review.rule.policyVersion}.`,
+  ].join(" ");
+  const aiDetail = review.ai === null
+    ? "NOT_RECORDED"
+    : review.ai.status === "AVAILABLE"
+      ? [
+          `Recommendation: ${review.ai.recommendation}.`,
+          `Risk: ${review.ai.riskLevel ?? "not assessed"}.`,
+          `Confidence: ${review.ai.confidence}.`,
+          `Reasons: ${review.ai.reasonCodes.join(", ") || "none"}.`,
+          `Supporting factors: ${review.ai.supportingFactors?.join("; ") || "none"}.`,
+          `Risk factors: ${review.ai.riskFactors?.join("; ") || "none"}.`,
+          `What would change decision: ${review.ai.whatWouldChangeDecision?.join("; ") || "not provided"}.`,
+          `Human review required: ${review.ai.humanReviewRequired ? "yes" : "no"}.`,
+          `Provider: ${review.ai.provider}.`,
+          `Requested model: ${review.ai.requestedModel ?? "not reported"}.`,
+          `Reported model: ${review.ai.reportedModel ?? "not reported"}.`,
+          `Actual model: ${review.ai.actualModelUsed ?? review.ai.model ?? "not reported"}.`,
+        ].join(" ")
+    : `AI unavailable: ${review.ai.failureCode}. Human review required. Provider: ${review.ai.provider}. Requested model: ${review.ai.requestedModel ?? "not reported"}. Reported model: ${review.ai.reportedModel ?? "not reported"}. Actual model: ${review.ai.actualModelUsed ?? review.ai.model ?? "not reported"}.`;
+
   return {
-    rule: { status: "READY" },
+    rule: { status: "READY", detail: ruleDetail },
     ai: review.ai?.status === "AVAILABLE"
-      ? { status: "READY", detail: review.ai.recommendation }
-      : { status: "UNAVAILABLE", detail: review.ai?.failureCode ?? "NOT_RECORDED" },
-    ba: review.ba === null ? { status: "NOT_REVIEWED" } : { status: "REVIEWED" },
-    execution: review.execution === null ? { status: "NOT_REQUESTED" } : { status: "EXECUTED" },
+      ? { status: "READY", detail: aiDetail }
+      : { status: "UNAVAILABLE", detail: aiDetail },
+    ba: review.ba === null
+      ? { status: "NOT_REVIEWED" }
+      : { status: "REVIEWED", detail: `Decision: ${review.ba.decision}. Confidence: ${review.ba.confidence ?? "not recorded"}. Reasons: ${review.ba.reasonCodes.join(", ") || "none"}.` },
+    execution: review.execution === null
+      ? { status: "NOT_REQUESTED" }
+      : { status: "EXECUTED", detail: `${review.execution.requestedAction} is ${review.execution.status} in ${review.execution.mode}; Seller Center was not called.` },
   };
 }
 
-function sanitizedFallbackSource(now = new Date()): DashboardSource {
+function hasCompleteProvenSourceWindow(review: DecisionReviewRecord | null): boolean {
+  const coverage = review?.coverageSnapshot;
+  return review?.shop.dataCoverage === "COMPLETE"
+    && coverage?.coverageState === "COMPLETE"
+    && coverage.source === "SELLER_CENTER"
+    && coverage.provenSourceWindow === "ROLLING_12_MONTHS"
+    && coverage.completeWithinSourceWindow === true
+    && coverage.lifetimeHistoryComplete === false
+    && coverage.ordersSourceComplete === true
+    && coverage.financeRequiredSourceComplete === true
+    && coverage.sourceReconciled === true
+    && coverage.freshness === "FRESH";
+}
+
+function unavailableSource(now = new Date()): DashboardSource {
   const shop: DashboardShopSource = {
-    id: "demo-sanitized-fallback",
-    profileNo: "DEMO-001",
-    displayName: "Sanitized Demo Shop",
+    id: "dashboard-unavailable",
+    profileNo: "UNAVAILABLE",
+    displayName: "Live data unavailable",
     currency: "USD",
-    dataOrigin: "DEMO_SANITIZED",
+    dataOrigin: "UNAVAILABLE",
     enabled: false,
     syncState: "DISABLED",
-    pauseReason: "Sanitized visual checkpoint data; never synced",
+    pauseReason: "Live dashboard data is unavailable.",
     lastOrdersSyncedAt: null,
     lastFinanceSyncedAt: null,
   };
@@ -126,16 +174,16 @@ function sanitizedFallbackSource(now = new Date()): DashboardSource {
     shops: [shop],
     selected: {
       shopId: shop.id,
-      orders: { total: 6, awaitingShipment: 1, delivered: 2, canceled: 1 },
+      orders: { total: null, awaitingShipment: null, delivered: null, canceled: null },
       finance: { officialOnHoldAmount: null, currency: "USD", capturedAt: null },
       deliveryRate: { status: "UNAVAILABLE", reason: "DEMO_METRIC_NOT_VERIFIED" },
       grossValidSales: { status: "UNAVAILABLE", reason: "DEMO_METRIC_NOT_VERIFIED" },
       dataCoverage: {
-        status: "PARTIAL",
-        label: "DEMO_SANITIZED",
-        reason: "Sanitized fallback data is shown because a LIVE database read is unavailable.",
+        status: "UNAVAILABLE",
+        label: "Live data unavailable",
+        reason: "Live dashboard data is unavailable. Configure the database and retry.",
       },
-      latestSync: { status: "DISABLED", startedAt: null },
+      latestSync: { status: "FAILED", startedAt: null, sourceComplete: null },
       profileState: "NOT_VERIFIED",
       rule: { status: "NOT_VERIFIED" },
       ai: { status: "UNAVAILABLE", detail: "NOT_RECORDED" },
@@ -150,8 +198,10 @@ async function readLiveSource(databaseUrl: string): Promise<DashboardSource | nu
   try {
     const shops = await listShops(context.db);
     const liveShops = shops.filter((shop) => shop.dataOrigin === "LIVE");
-    const selectedShop = liveShops.find((shop) => shop.profileNo === "957")
-      ?? liveShops.find((shop) => shop.enabled)
+    const dashboardShops = liveShops;
+    const selectedShop = dashboardShops.find((shop) => shop.profileNo === "957")
+      ?? dashboardShops.find((shop) => shop.enabled)
+      ?? dashboardShops[0]
       ?? null;
     if (selectedShop === null) return null;
 
@@ -183,10 +233,11 @@ async function readLiveSource(databaseUrl: string): Promise<DashboardSource | nu
     const salesAmount = stringField(salesMetric, "value");
     const salesCurrency = stringField(salesMetric, "currency") ?? selectedShop.currency;
     const latestReview = decisionPage.items[0] ?? null;
+    const coverageComplete = hasCompleteProvenSourceWindow(latestReview);
 
     return {
       generatedAt: new Date(),
-      shops: liveShops.map((shop) => shopSource(shop, shop.id === selectedShop.id ? latestRun : null)),
+      shops: dashboardShops.map((shop) => shopSource(shop, shop.id === selectedShop.id ? latestRun : null)),
       selected: {
         shopId: selectedShop.id,
         orders: { total, awaitingShipment, delivered, canceled },
@@ -202,14 +253,17 @@ async function readLiveSource(databaseUrl: string): Promise<DashboardSource | nu
           ? { status: "UNAVAILABLE", reason: "SALES_METRIC_NOT_CAPTURED" }
           : { status: "AVAILABLE", amount: salesAmount, currency: salesCurrency },
         dataCoverage: {
-          status: "PARTIAL",
-          label: "Rolling 12 months",
-          reason: "Seller Center collection is bounded to its rolling source window; lifetime history is not verified.",
+          status: coverageComplete ? "READY" : "PARTIAL",
+          label: coverageComplete ? "Complete within proven source window" : "Last 12 months",
+          reason: coverageComplete
+            ? "History window: Last 12 months. Lifetime history: not proven."
+            : "Seller Center collection is bounded to its rolling source window; lifetime history is not verified.",
         },
         latestSync: {
           status: currentSyncState(selectedShop, latestRun),
           startedAt: latestRun?.startedAt
             ?? latestTimestamp(selectedShop.lastOrdersSyncedAt, selectedShop.lastFinanceSyncedAt),
+          sourceComplete: latestRun?.sourceComplete ?? null,
           failureType: latestRun?.failureType ?? selectedShop.syncState,
         },
         profileState: "NOT_VERIFIED",
@@ -223,12 +277,12 @@ async function readLiveSource(databaseUrl: string): Promise<DashboardSource | nu
 
 export async function loadDashboardPresentation(): Promise<DashboardPresentation> {
   const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) return buildDashboardPresentation(sanitizedFallbackSource());
+  if (!databaseUrl) return buildDashboardPresentation(unavailableSource());
 
   try {
     const source = await readLiveSource(databaseUrl);
-    return buildDashboardPresentation(source ?? sanitizedFallbackSource());
+    return buildDashboardPresentation(source ?? unavailableSource());
   } catch {
-    return buildDashboardPresentation(sanitizedFallbackSource());
+    return buildDashboardPresentation(unavailableSource());
   }
 }

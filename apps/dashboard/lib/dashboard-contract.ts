@@ -1,4 +1,4 @@
-export type DashboardDataOrigin = "LIVE" | "DEMO_SANITIZED";
+export type DashboardDataOrigin = "LIVE" | "DEMO_SANITIZED" | "UNAVAILABLE";
 export type DashboardSyncState = "IDLE" | "RUNNING" | "SUCCEEDED" | "FAILED" | "PAUSED_LAYOUT" | "DISABLED";
 export type DashboardProfileState = "OPEN" | "CLOSED" | "ERROR" | "NOT_VERIFIED";
 
@@ -21,10 +21,10 @@ export interface DashboardSource {
   selected: {
     shopId: string;
     orders: {
-      total: number;
-      awaitingShipment: number;
-      delivered: number;
-      canceled: number;
+      total: number | null;
+      awaitingShipment: number | null;
+      delivered: number | null;
+      canceled: number | null;
     };
     finance: {
       officialOnHoldAmount: string | null;
@@ -45,13 +45,14 @@ export interface DashboardSource {
     latestSync: {
       status: DashboardSyncState;
       startedAt: Date | null;
+      sourceComplete: boolean | null;
       failureType?: string | null;
     };
     profileState: DashboardProfileState;
-    rule: { status: "READY" | "NOT_VERIFIED" | "UNAVAILABLE" };
+    rule: { status: "READY" | "NOT_VERIFIED" | "UNAVAILABLE"; detail?: string | null };
     ai: { status: "READY" | "UNAVAILABLE"; detail?: string | null };
-    ba: { status: "REVIEWED" | "NOT_REVIEWED" | "UNAVAILABLE" };
-    execution: { status: "EXECUTED" | "NOT_REQUESTED" | "UNAVAILABLE" };
+    ba: { status: "REVIEWED" | "NOT_REVIEWED" | "UNAVAILABLE"; detail?: string | null };
+    execution: { status: "EXECUTED" | "NOT_REQUESTED" | "UNAVAILABLE"; detail?: string | null };
   };
 }
 

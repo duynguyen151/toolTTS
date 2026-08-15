@@ -1,0 +1,1 @@
+ALTER TABLE "settlement_records" DROP CONSTRAINT "settlements_expected_nonnegative";

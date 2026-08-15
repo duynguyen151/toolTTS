@@ -12,6 +12,6 @@ export async function loadProfileOperationsPresentation(
   presentation: Pick<DashboardPresentation, "dataOrigin">,
   listProfiles: () => Promise<ProfileOperationsPresentation>,
 ): Promise<ProfileOperationsPresentation> {
-  if (presentation.dataOrigin === "DEMO_SANITIZED") return DEMO_OPERATIONS_PRESENTATION;
+  if (presentation.dataOrigin !== "LIVE") return DEMO_OPERATIONS_PRESENTATION;
   return listProfiles();
 }

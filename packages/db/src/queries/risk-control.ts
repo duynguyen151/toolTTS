@@ -37,7 +37,7 @@ export async function saveRiskControlEvaluation(
         decision: input.decision,
         policyVersion: input.policyVersion,
         lastEvaluatedAt: input.evaluatedAt,
-        updatedAt: sql`greatest(${riskControlStates.updatedAt}, ${input.evaluatedAt})`
+        updatedAt: sql`greatest(${riskControlStates.updatedAt}, ${input.evaluatedAt.toISOString()})`
       },
       setWhere: lt(riskControlStates.lastEvaluatedAt, input.evaluatedAt)
     })
@@ -82,12 +82,12 @@ export async function recordHolidayModeObservation(
         input.observedHolidayModeEnabled === false
           ? false
           : sql`${riskControlStates.automationOwned}`,
-      updatedAt: sql`greatest(${riskControlStates.updatedAt}, ${input.observedAt})`
+      updatedAt: sql`greatest(${riskControlStates.updatedAt}, ${input.observedAt.toISOString()})`
     })
     .where(
       and(
         eq(riskControlStates.shopId, input.shopId),
-        sql`${riskControlStates.lastObservedAt} is null or ${riskControlStates.lastObservedAt} < ${input.observedAt}`
+        sql`${riskControlStates.lastObservedAt} is null or ${riskControlStates.lastObservedAt} < ${input.observedAt.toISOString()}`
       )
     )
     .returning();
@@ -120,13 +120,13 @@ export async function recordRiskControlAction(
       observedHolidayModeEnabled: input.observedHolidayModeEnabled,
       lastObservedAt: input.actionAt,
       automationOwned: input.automationOwned,
-      updatedAt: sql`greatest(${riskControlStates.updatedAt}, ${input.actionAt})`
+      updatedAt: sql`greatest(${riskControlStates.updatedAt}, ${input.actionAt.toISOString()})`
     })
     .where(
       and(
         eq(riskControlStates.shopId, input.shopId),
-        sql`${riskControlStates.lastActionAt} is null or ${riskControlStates.lastActionAt} < ${input.actionAt}`,
-        sql`${riskControlStates.lastObservedAt} is null or ${riskControlStates.lastObservedAt} <= ${input.actionAt}`
+        sql`${riskControlStates.lastActionAt} is null or ${riskControlStates.lastActionAt} < ${input.actionAt.toISOString()}`,
+        sql`${riskControlStates.lastObservedAt} is null or ${riskControlStates.lastObservedAt} <= ${input.actionAt.toISOString()}`
       )
     )
     .returning();

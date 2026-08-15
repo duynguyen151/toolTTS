@@ -26,7 +26,7 @@ const source: DashboardSource = {
     deliveryRate: { status: "AVAILABLE", value: 1, coverage: 1 / 3 },
     grossValidSales: { status: "AVAILABLE", amount: "186.9200", currency: "USD" },
     dataCoverage: { status: "PARTIAL", label: "Rolling 12 months", reason: "Lifetime history is not verified." },
-    latestSync: { status: "FAILED", startedAt: new Date("2026-08-14T13:56:00.000Z"), failureType: "LAYOUT_CHANGED" },
+    latestSync: { status: "FAILED", startedAt: new Date("2026-08-14T13:56:00.000Z"), sourceComplete: null, failureType: "LAYOUT_CHANGED" },
     profileState: "NOT_VERIFIED",
     rule: { status: "NOT_VERIFIED" },
     ai: { status: "UNAVAILABLE", detail: "NOT_RECORDED" },
@@ -39,7 +39,12 @@ describe("buildDashboardPresentation", () => {
   it("keeps operational stages separate and preserves partial coverage", () => {
     const view = buildDashboardPresentation(source);
 
-    expect(view.decisionTrace.map((stage) => stage.label)).toEqual(["Rule", "AI", "BA review", "Execution"]);
+    expect(view.decisionTrace.map((stage) => stage.label)).toEqual([
+      "Rule Result",
+      "AI Recommendation",
+      "BA Decision",
+      "Execution",
+    ]);
     expect(view.decisionTrace.map((stage) => stage.value)).toEqual([
       "Not verified",
       "Unavailable",

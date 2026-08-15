@@ -207,7 +207,10 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
     expect(retriedAfterFactsChanged.id).toBe(firstCase.id);
     await expect(getDecisionAiInput(context.db, firstCase.id)).resolves.toEqual({
       metricsSnapshot: caseInput.metricsSnapshot,
-      financeSnapshot: caseInput.financeSnapshot,
+      financeSnapshot: {
+        ...caseInput.financeSnapshot,
+        waitingForCompletedRefundReturnAmount: null,
+      },
       coverageSnapshot: caseInput.coverageSnapshot,
       riskSnapshot: caseInput.riskSnapshot,
       ruleDecision: "PAUSE",
@@ -368,7 +371,8 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
     `).rejects.toMatchObject({
       constraint_name: "decision_executions_ba_case_decision_fk",
     });
-    await expect(getDecisionReview(context.db, olderCase.id)).resolves.toMatchObject({
+    const persistedAvailableReview = await getDecisionReview(context.db, olderCase.id);
+    expect(persistedAvailableReview).toMatchObject({
       ai: {
         status: "AVAILABLE",
         recommendation: "WATCH",
@@ -380,6 +384,14 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
         policyVersion: "risk-control-policy.v1",
       },
     });
+    const restartedContext = createDatabase(databaseUrl!);
+    try {
+      const restartedReview = await getDecisionReview(restartedContext.db, olderCase.id);
+      expect(restartedReview?.rule).toEqual(persistedAvailableReview?.rule);
+      expect(restartedReview?.ai).toEqual(persistedAvailableReview?.ai);
+    } finally {
+      await closeDatabase(restartedContext);
+    }
     const history = await listDecisionHistory(context.db, { profileNo, limit: 1 });
     expect(history.items).toHaveLength(1);
     expect(history.items[0]?.case.id).toBe(firstCase.id);

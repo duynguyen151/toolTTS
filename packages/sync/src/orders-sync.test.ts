@@ -44,6 +44,16 @@ describe("orders sync coverage", () => {
         lifetimeHistoryComplete: false,
       },
     });
+    expect(db.completeSyncRun).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      sourceComplete: true,
+      sourceCapturedAt: expect.any(Date),
+      sourceCoverage: expect.objectContaining({
+        source: "SELLER_CENTER",
+        window: "ROLLING_12_MONTHS",
+        completeWithinSourceWindow: true,
+        lifetimeHistoryComplete: false,
+      }),
+    }));
   });
 });
 

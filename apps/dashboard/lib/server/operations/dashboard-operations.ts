@@ -1,9 +1,8 @@
 import {
   type AdsPowerProfileSummary,
 } from "@shop-health/seller-center/adspower";
-import { SellerCenterError } from "@shop-health/seller-center/errors";
 import type { SyncResult } from "@shop-health/sync";
-import type { SourceHealth } from "@shop-health/domain";
+import type { DecisionCoverageSnapshot, SourceHealth } from "@shop-health/domain";
 
 import {
   isTerminalUpdateState,
@@ -31,8 +30,8 @@ export interface DashboardOperationsAdapters {
   runSync(
     profileNo: string,
     kind: "orders" | "finance",
-  ): Promise<Pick<SyncResult, "status" | "complete" | "sourceCoverage">>;
-  evaluateRisk(profileNo: string): Promise<void>;
+  ): Promise<Pick<SyncResult, "status" | "complete" | "sourceCoverage" | "financeProof">>;
+  evaluateRisk(profileNo: string): Promise<DecisionCoverageSnapshot | undefined>;
 }
 
 export type UpdateDataEmitter = (event: UpdateDataEvent) => void | Promise<void>;
@@ -47,33 +46,29 @@ function error(code: OperationError["code"], message: string): OperationError {
   return { code, message };
 }
 
+function failureTypeOf(cause: unknown): string | undefined {
+  if (typeof cause !== "object" || cause === null || !("failureType" in cause)) return undefined;
+  return typeof cause.failureType === "string" ? cause.failureType : undefined;
+}
+
 function profileOperationError(cause: unknown, wasOpen = false): OperationError {
-  if (typeof cause === "object" && cause !== null && "failureType" in cause) {
-    const failureType = (cause as { failureType?: unknown }).failureType;
-    if (failureType === "ADSPOWER_NOT_RUNNING") {
-      return error("ADSPOWER_NOT_RUNNING", "AdsPower is not running. Start the application and retry.");
-    }
-    if (failureType === "ADSPOWER_LAUNCH_TIMEOUT") {
-      return error("ADSPOWER_LAUNCH_TIMEOUT", "AdsPower did not become ready before the launch deadline.");
-    }
+  const failureType = failureTypeOf(cause);
+  if (failureType === "ADSPOWER_NOT_RUNNING") {
+    return error("ADSPOWER_NOT_RUNNING", "AdsPower is not running. Start the application and retry.");
   }
-  if (cause instanceof SellerCenterError) {
-    if (cause.failureType === "ADSPOWER_UNAVAILABLE") {
-      return error("ADSPOWER_NOT_RUNNING", "AdsPower is not running. Start the application and retry.");
-    }
-    if (cause.failureType === "PROFILE_START_FAILED") {
-      return error("PROFILE_OPEN_FAILED", "AdsPower could not open the selected profile.");
-    }
-    if (cause.failureType === "SOURCE_TIMEOUT") {
-      return wasOpen
-        ? error("CDP_UNAVAILABLE", "The selected profile could not provide a browser connection.")
-        : error("PROFILE_NOT_READY", "The selected profile did not become ready before the deadline.");
-    }
-    if (cause.failureType === "BROWSER_DISCONNECTED") {
-      return wasOpen
-        ? error("CDP_UNAVAILABLE", "The selected profile could not provide a browser connection.")
-        : error("PROFILE_NOT_READY", "The selected profile did not become ready before the deadline.");
-    }
+  if (failureType === "ADSPOWER_LAUNCH_TIMEOUT") {
+    return error("ADSPOWER_LAUNCH_TIMEOUT", "AdsPower did not become ready before the launch deadline.");
+  }
+  if (failureType === "ADSPOWER_UNAVAILABLE") {
+    return error("ADSPOWER_NOT_RUNNING", "AdsPower is not running. Start the application and retry.");
+  }
+  if (failureType === "PROFILE_START_FAILED") {
+    return error("PROFILE_OPEN_FAILED", "AdsPower could not open the selected profile.");
+  }
+  if (failureType === "SOURCE_TIMEOUT" || failureType === "BROWSER_DISCONNECTED") {
+    return wasOpen
+      ? error("CDP_UNAVAILABLE", "The selected profile could not provide a browser connection.")
+      : error("PROFILE_NOT_READY", "The selected profile did not become ready before the deadline.");
   }
   return error("UNEXPECTED_ERROR", "The profile operation could not be completed.");
 }
@@ -85,28 +80,27 @@ function applicationReadinessError(cause: unknown): OperationError {
 }
 
 function syncFailure(cause: unknown): { state: UpdateDataState; error: OperationError; message: string } {
-  if (cause instanceof SellerCenterError) {
-    if (cause.failureType === "LOGIN_REQUIRED") {
-      return {
-        state: "HUMAN_ACTION_REQUIRED",
-        error: error("LOGIN_REQUIRED", "Seller Center login is required."),
-        message: "Open the profile and complete Seller Center login, then retry Update Data.",
-      };
-    }
-    if (cause.failureType === "CHALLENGE_REQUIRED") {
-      return {
-        state: "HUMAN_ACTION_REQUIRED",
-        error: error("SECURITY_CHALLENGE_REQUIRED", "Seller Center requires a security check."),
-        message: "Open the profile and complete the security check, then retry Update Data.",
-      };
-    }
-    if (cause.failureType === "LAYOUT_CHANGED") {
-      return {
-        state: "ERROR",
-        error: error("LAYOUT_CHANGED", "Seller Center layout verification failed."),
-        message: "Collection paused because the Seller Center layout could not be verified.",
-      };
-    }
+  const failureType = failureTypeOf(cause);
+  if (failureType === "LOGIN_REQUIRED") {
+    return {
+      state: "HUMAN_ACTION_REQUIRED",
+      error: error("LOGIN_REQUIRED", "Seller Center login is required."),
+      message: "Open the profile and complete Seller Center login, then retry Update Data.",
+    };
+  }
+  if (failureType === "CHALLENGE_REQUIRED") {
+    return {
+      state: "HUMAN_ACTION_REQUIRED",
+      error: error("SECURITY_CHALLENGE_REQUIRED", "Seller Center requires a security check."),
+      message: "Open the profile and complete the security check, then retry Update Data.",
+    };
+  }
+  if (failureType === "LAYOUT_CHANGED") {
+    return {
+      state: "ERROR",
+      error: error("LAYOUT_CHANGED", "Seller Center layout verification failed."),
+      message: "Collection paused because the Seller Center layout could not be verified.",
+    };
   }
   return {
     state: "ERROR",
@@ -116,9 +110,29 @@ function syncFailure(cause: unknown): { state: UpdateDataState; error: Operation
 }
 
 function syncResultIsComplete(
-  result: Pick<SyncResult, "complete" | "sourceCoverage">,
+  kind: "orders" | "finance",
+  result: Pick<SyncResult, "complete" | "sourceCoverage" | "financeProof">,
 ): boolean {
-  return result.complete && result.sourceCoverage?.completeWithinWindow !== false;
+  if (!result.complete) return false;
+  if (kind === "finance") return result.financeProof !== undefined;
+  return result.sourceCoverage?.source === "SELLER_CENTER" &&
+    result.sourceCoverage.window === "ROLLING_12_MONTHS" &&
+    result.sourceCoverage.completeWithinSourceWindow === true &&
+    result.sourceCoverage.lifetimeHistoryComplete === false;
+}
+
+function decisionCoverageIsComplete(coverage: DecisionCoverageSnapshot | undefined): boolean {
+  return coverage?.coverageState === "COMPLETE" &&
+    coverage.source === "SELLER_CENTER" &&
+    coverage.provenSourceWindow === "ROLLING_12_MONTHS" &&
+    coverage.completeWithinSourceWindow === true &&
+    coverage.lifetimeHistoryComplete === false &&
+    coverage.ordersSourceComplete === true &&
+    coverage.financeRequiredSourceComplete === true &&
+    coverage.sourceReconciled === true &&
+    coverage.latestSuccessfulSyncAt !== null &&
+    coverage.financeCapturedAt !== null &&
+    coverage.freshness === "FRESH";
 }
 
 function updateEvent(
@@ -328,7 +342,7 @@ export function createDashboardOperations(adapters: DashboardOperationsAdapters)
             ));
             return;
           }
-          if (!syncResultIsComplete(result)) {
+          if (!syncResultIsComplete(kind, result)) {
             const operationError = error("SYNC_PARTIAL", "Synchronization completed with incomplete source coverage; risk reconciliation was skipped.");
             await emit(updateEvent(
               "PARTIAL",
@@ -348,10 +362,20 @@ export function createDashboardOperations(adapters: DashboardOperationsAdapters)
       }
 
       await emit(updateEvent("RECONCILING", "Re-evaluating deterministic risk from persisted data.", completedKinds));
+      let decisionCoverage: DecisionCoverageSnapshot | undefined;
       try {
-        await adapters.evaluateRisk(linkedShop.profileNo);
+        decisionCoverage = await adapters.evaluateRisk(linkedShop.profileNo);
       } catch {
         const operationError = error("UNEXPECTED_ERROR", "Data synchronized, but risk reconciliation did not complete.");
+        await emit(updateEvent("PARTIAL", operationError.message, completedKinds, operationError));
+        return;
+      }
+
+      if (!decisionCoverageIsComplete(decisionCoverage)) {
+        const operationError = error(
+          "SYNC_PARTIAL",
+          "Persisted decision coverage is incomplete or stale; Update Data cannot report success.",
+        );
         await emit(updateEvent("PARTIAL", operationError.message, completedKinds, operationError));
         return;
       }

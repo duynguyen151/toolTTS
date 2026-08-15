@@ -22,7 +22,7 @@ const icons: Record<Stage["id"], HeroIcon> = {
 const stageRoles: Record<Stage["id"], string> = {
   rule: "Deterministic policy",
   ai: "Advisory recommendation",
-  ba: "Human review",
+  ba: "Human decision",
   execution: "Audited action",
 };
 

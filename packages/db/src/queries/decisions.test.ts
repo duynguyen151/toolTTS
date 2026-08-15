@@ -51,6 +51,7 @@ const input: CaptureBaDecisionInput = {
       toSettleBalance: "800.0000",
       onHoldBalance: "1200.0000",
       officialOnHoldAmount: "1200.0000",
+      waitingForCompletedRefundReturnAmount: "200.0000",
       settlementCount: 40,
       onHoldSettlementCount: 6,
     },
@@ -192,6 +193,7 @@ describe("decision workflow persistence boundaries", () => {
       financeSnapshot: {
         ...input.decisionCase.financeSnapshot,
         officialOnHoldAmount: undefined,
+        waitingForCompletedRefundReturnAmount: undefined,
       },
       coverageSnapshot: null,
       riskSnapshot: input.decisionCase.riskSnapshot,
@@ -223,6 +225,7 @@ describe("decision workflow persistence boundaries", () => {
         financeSnapshot: {
           ...input.decisionCase.financeSnapshot,
           officialOnHoldAmount: null,
+          waitingForCompletedRefundReturnAmount: null,
         },
         coverageSnapshot: {
           coverageState: "COMPLETE",

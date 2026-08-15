@@ -59,6 +59,24 @@ export function createBaselineAiClientFromConfig(
 
       if (!config.enabled) return unavailable("FEATURE_DISABLED");
       if (config.authMode === "CONFIG_MISSING") return unavailable("CONFIG_MISSING");
+      const quality = parsedInput.coverageSnapshot;
+      if (
+        quality.coverageState !== "COMPLETE" ||
+        quality.source !== "SELLER_CENTER" ||
+        quality.provenSourceWindow !== "ROLLING_12_MONTHS" ||
+        quality.completeWithinSourceWindow !== true ||
+        quality.lifetimeHistoryComplete !== false ||
+        quality.ordersSourceComplete !== true ||
+        quality.financeRequiredSourceComplete !== true ||
+        quality.sourceReconciled !== true ||
+        quality.latestSuccessfulSyncAt === null ||
+        quality.latestSuccessfulSyncAt === undefined ||
+        quality.financeCapturedAt === null ||
+        quality.financeCapturedAt === undefined ||
+        quality.freshness !== "FRESH"
+      ) {
+        return unavailable("INVALID_RESPONSE");
+      }
 
       let lastError: AiUnavailableErrorCode = "PROVIDER_UNAVAILABLE";
       let lastModel = config.registry.defaultModel;

@@ -180,9 +180,12 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
       });
       assertOnHoldReconciled(stat, collected.rows);
       const capturedAt = new Date();
+      const snapshot = normalizeFinancialSnapshot(stat, request.shop.shopId, capturedAt);
       return NormalizedFinancialBatchSchema.parse({
         settlements: collected.rows.map((row) => normalizeSettlementRecord(row, request.shop.shopId)),
-        snapshot: normalizeFinancialSnapshot(stat, request.shop.shopId, capturedAt),
+        snapshot: snapshot === null
+          ? null
+          : { ...snapshot, reasonTotalsReconcileToOfficialOnHold: true },
         checkpoint: null,
         complete: true,
       });
@@ -286,6 +289,7 @@ async function navigateToFinance(page: Page, timeoutMs: number): Promise<void> {
   ) {
     throw new SellerCenterError("LAYOUT_CHANGED", "Finance On hold route changed");
   }
+  await page.getByRole("tab", { name: /^on hold$/i }).click();
 }
 
 async function waitForResponse(

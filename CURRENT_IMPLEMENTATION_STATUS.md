@@ -6,13 +6,15 @@
 ## Repository
 
 ```text
-C:\DUY - DoWorks\Tool_TTS
+C:\DUY - DoWorks\Tool_TTS-integration
 ```
 
-- Git branch: `codex/dashboard-presentation`
-- Baseline commit: `273573b baseline: V1 decision capture foundation`
+- Git branch: `codex/v1-integration`
+- Frozen AI commit: `3fa4b58 feat: complete V1 baseline AI runtime`
+- Frozen Dashboard commit: `72faddc feat: complete dashboard AdsPower update workflow`
+- Integration merge commits: `973aa13` (AI), `33514f3` (Dashboard)
 - Stable Seller Center extraction commit: `49cad57 feat: lock down live seller data coverage`
-- No Git remote or push is configured for this wave.
+- No push or merge to master was performed for this wave.
 
 ## Verified LIVE extraction milestone
 
@@ -48,10 +50,11 @@ UNKNOWN: 0
 ### Finance
 
 - Required V1 Finance scope: complete
-- Official Finance On Hold: `$310.16`
-- Waiting for package delivery: `$177.33`
-- Delivered awaiting settlement: `$132.83`
-- Reconciliation: `$177.33 + $132.83 = $310.16` (`PASS`)
+- Official Finance On Hold: `$277.80`
+- Waiting for package delivery: `$145.38`
+- Delivered awaiting settlement: `$132.42`
+- Completed refund/return adjustment: `$0.00`
+- Reconciliation: `$145.38 + $132.42 + $0.00 = $277.80` (`PASS`)
 - On Hold detail: `8/8`
 - Finance to Orders linkage: `8/8`
 - Payouts source total: `0`
@@ -276,55 +279,48 @@ rules or workflow persistence.
 - Holiday Mode live route/state/write remains outside this extraction milestone;
   all execution behavior remains DRY_RUN.
 
-## Verification
+## V1 integration verification
 
-Historical extraction-wave verification recorded on 2026-08-14 (before the
-current 9Router baseline-AI configuration), followed by Dashboard Checkpoint A
-verification on 2026-08-15:
+Completed on 2026-08-15 with the ignored local `.env` loaded privately. Database
+connection strings and credentials were not printed or committed.
 
 ```text
-Focused Dashboard/AdsPower/Seller Center tests: PASS (92/92)
+Development and test migrations 0014-0017: PASS
+PostgreSQL-backed integration tests: PASS (9/9, no DB skips)
+Full test suite: PASS (367/367)
 pnpm typecheck: PASS
-pnpm test: PASS (294 passed, 4 PostgreSQL integration tests skipped)
 pnpm build: PASS
 pnpm exec drizzle-kit check --config packages/db/drizzle.config.ts: PASS
 git diff --check: PASS
+pnpm shop-health doctor --json: Node / baseline AI / AdsPower / PostgreSQL OK
 desktop/mobile visual verification: PASS
 accessibility/keyboard verification: PASS
 reviewer-luna final independent review: APPROVE (no findings)
 ```
 
-Current V1 baseline-AI verification:
-Exact full-workspace verification commands:
-
-```powershell
-pnpm typecheck
-pnpm test
-pnpm build
-pnpm exec drizzle-kit check --config packages/db/drizzle.config.ts
-git diff --check
-```
-
-The four skipped tests require the ignored local PostgreSQL integration-test
-configuration. The production build retains accepted non-blocking warnings for
-optional Playwright modules.
-
-Visual verification covered 1440x900 desktop and 390x844 mobile layouts with no
-horizontal overflow. Keyboard verification covered visible focus, the skip
-link, logical tab order, mobile navigation, and 44px primary mobile targets.
-
-Independent built-CLI PostgreSQL E2E passed:
+Sanitized profile `957` live E2E passed through the real Dashboard
+`/api/update-data` application path:
 
 ```text
-Targeted tests: PASS (101 passed, 2 PostgreSQL tests skipped)
-pnpm test: PASS (214 passed, 4 PostgreSQL tests skipped)
-pnpm typecheck: PASS
-pnpm build: PASS
-pnpm exec drizzle-kit check --config packages/db/drizzle.config.ts: PASS
-pnpm shop-health doctor --json: Node / baseline AI / AdsPower OK; PostgreSQL SKIP without DATABASE_URL
-Sanitized loopback smoke: AVAILABLE via 9Router with LOCAL_NO_AUTH and verified requested, reported, and actual model provenance
+AdsPower ready -> existing authenticated profile reused
+Orders sync -> complete rolling 12-month source window -> persisted
+Finance sync -> complete and reconciled -> persisted
+Deterministic Rule -> Decision Case -> 9Router AI -> persisted AI Decision
+Dashboard terminal state -> SUCCESS
+Fresh CLI process and restarted Next process -> identical persisted Rule/AI data
 ```
 
-The skipped PostgreSQL tests remain a residual verification risk when ignored
-local database configuration is not loaded. Reviewer-luna verdict: `APPROVE`,
-with those DB skips recorded as the residual risk.
+Persisted coverage is `COMPLETE` only within `ROLLING_12_MONTHS`;
+`lifetimeHistoryComplete=false`. The live AI decision is `AVAILABLE` with:
+
+```text
+provider = 9router
+requestedModel = oc/deepseek-v4-flash-free
+reportedModel = deepseek-v4-flash-free
+actualModelUsed = deepseek-v4-flash-free
+authMode = LOCAL_NO_AUTH
+```
+
+Official Finance On Hold remains separate from operational order-derived
+exposure. No LIVE-to-DEMO fallback, paid/cx/auto-router fallback, completeness
+gate weakening, CAPTCHA bypass, or Seller Center write action was introduced.

@@ -41,6 +41,21 @@ function order(
 }
 
 describe("evaluateRiskControl", () => {
+  it("publishes persisted and operational order counts separately", () => {
+    const result = evaluateRiskControl({
+      orders: [
+        order("awaiting", "AWAITING_SHIPMENT", "100.0000"),
+        order("delivered", "DELIVERED", "200.0000"),
+        order("canceled", "CANCELED", "50.0000"),
+      ],
+    });
+
+    expect(result.totalPersistedOrders).toBe(3);
+    expect(result.operationalOrderCount).toBe(2);
+    expect(result.deliveredCount).toBe(1);
+    expect(result.deliveryRate).toBe(0.5);
+  });
+
   it("uses the exact BA total, delivered, and operational Onhold Value sets", () => {
     const result = evaluateRiskControl({
       orders: [

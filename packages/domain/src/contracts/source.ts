@@ -54,3 +54,13 @@ export interface SellerDataSource {
     request: SyncRequest,
   ): AsyncIterable<NormalizedFinancialBatch>;
 }
+
+export const SourceCoverageProofSchema = z.object({
+  source: z.literal("SELLER_CENTER"),
+  window: z.literal("ROLLING_12_MONTHS"),
+  completeWithinSourceWindow: z.boolean(),
+  completeWithinWindow: z.boolean().optional(),
+  lifetimeHistoryComplete: z.literal(false),
+});
+
+export type SourceCoverageProof = z.infer<typeof SourceCoverageProofSchema>;

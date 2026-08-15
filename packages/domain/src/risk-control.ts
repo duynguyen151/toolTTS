@@ -84,6 +84,7 @@ export interface RiskOrderFact {
   readonly currency: string;
   readonly orderCount: number;
   readonly totalValue: string;
+  readonly firstObservedAt?: Date | null;
   readonly lastObservedAt?: Date | null;
 }
 
@@ -93,6 +94,7 @@ export const RiskControlDecisionSchema = z.object({
   historyMode: z.literal("FULL_PERSISTED_HISTORY"),
   dataCoverage: z.literal("UNKNOWN"),
   totalPersistedOrderCount: z.number().int().nonnegative(),
+  totalPersistedOrders: z.number().int().nonnegative(),
   totalPersistedValue: z.string().regex(/^\d+(?:\.\d+)?$/).nullable(),
   lastSuccessfulObservationAt: z.date().nullable(),
   onHoldValue: z.string().regex(/^\d+(?:\.\d+)?$/).nullable(),
@@ -105,6 +107,7 @@ export const RiskControlDecisionSchema = z.object({
     "OPERATIONAL_ONHOLD_COUNT_AND_TOTAL_COUNT_USE_THE_SAME_STATUS_SET",
   ),
   deliveredCount: z.number().int().nonnegative().nullable(),
+  operationalOrderCount: z.number().int().nonnegative().nullable(),
   totalCount: z.number().int().nonnegative().nullable(),
   deliveryRate: z.number().min(0).max(1).nullable(),
   rateRuleApplied: z.boolean(),
@@ -370,6 +373,7 @@ export function evaluateRiskControlFacts(
     historyMode: "FULL_PERSISTED_HISTORY",
     dataCoverage: "UNKNOWN",
     totalPersistedOrderCount,
+    totalPersistedOrders: totalPersistedOrderCount,
     totalPersistedValue,
     lastSuccessfulObservationAt,
     onHoldValue:
@@ -385,6 +389,7 @@ export function evaluateRiskControlFacts(
     onHoldRateUnavailableReason:
       "OPERATIONAL_ONHOLD_COUNT_AND_TOTAL_COUNT_USE_THE_SAME_STATUS_SET",
     deliveredCount,
+    operationalOrderCount: totalCount,
     totalCount,
     deliveryRate,
     rateRuleApplied,

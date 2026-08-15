@@ -66,10 +66,15 @@ describe("SellerCenterBrowserDataSource.collectFinancials", () => {
     expect(pageTwoUrl.searchParams.get("token")).toBeNull();
     expect(pageTwoUrl.searchParams.get("sign")).toBeNull();
     expect(batches).toHaveLength(1);
+    expect(page.onHoldTabClicks).toBe(1);
     expect(batches[0]).toMatchObject({
       complete: true,
       checkpoint: null,
-      snapshot: { onHoldBalance: "310.16", currency: "USD" },
+      snapshot: {
+        onHoldBalance: "310.16",
+        currency: "USD",
+        reasonTotalsReconcileToOfficialOnHold: true,
+      },
     });
     expect(batches[0]?.settlements).toHaveLength(8);
     expect(new Set(batches[0]?.settlements.map((row) => row.sourceStatementDetailId)).size).toBe(8);
@@ -109,6 +114,62 @@ describe("SellerCenterBrowserDataSource.collectFinancials", () => {
 
     expect(batches[0]).toMatchObject({ complete: true });
     expect(batches[0]?.settlements).toHaveLength(2);
+  });
+
+  it("accepts a signed settlement amount from the live Finance response", async () => {
+    const page = new FakeFinancePage({
+      statBody: statResponse({
+        totalAmount: "0.00",
+        reasons: [{ reason: 1, amount: "0.00" }],
+      }),
+      firstPageBody: pageResponseRows([
+        statementRow(0, "-0.41"),
+        statementRow(1, "0.41"),
+        statementRow(2, "0.00"),
+        statementRow(3, "0.00"),
+        statementRow(4, "0.00"),
+        statementRow(5, "0.00"),
+        statementRow(6, "0.00"),
+        statementRow(7, "0.00"),
+      ], 8, false),
+    });
+    connectOverCDP.mockResolvedValue(browserFor(page));
+    const source = sourceFor(page);
+
+    const batches = [];
+    for await (const batch of source.collectFinancials(syncRequest())) batches.push(batch);
+
+    expect(batches[0]).toMatchObject({
+      complete: true,
+      snapshot: {
+        officialOnHoldAmount: "0.00",
+        reasonTotalsReconcileToOfficialOnHold: true,
+      },
+    });
+    expect(batches[0]?.settlements).toHaveLength(8);
+    expect(batches[0]?.settlements[0]?.expectedSettlementAmount).toBe("-0.41");
+  });
+
+  it("normalizes reason code 2 from the live Finance statement response", async () => {
+    const page = new FakeFinancePage({
+      statBody: statResponse({
+        totalAmount: "0.30",
+        reasons: [{ reason: 2, amount: "0.30" }],
+      }),
+      firstPageBody: pageResponseRows([
+        statementRow(0, "0.30", 2),
+      ], 1, false),
+    });
+    connectOverCDP.mockResolvedValue(browserFor(page));
+    const source = sourceFor(page);
+
+    const batches = [];
+    for await (const batch of source.collectFinancials(syncRequest())) batches.push(batch);
+
+    expect(batches[0]).toMatchObject({ complete: true });
+    expect(batches[0]?.settlements[0]?.onHoldReason).toBe(
+      "WAITING_FOR_COMPLETED_REFUND_RETURN",
+    );
   });
 
   it("fails closed when collected On hold rows do not reconcile to the official breakdown", async () => {
@@ -177,7 +238,12 @@ class FakeFinancePage {
   });
   readonly close = vi.fn().mockResolvedValue(undefined);
   readonly fetchUrls: string[] = [];
+  private holdTabClickCount = 0;
   private currentUrl = "about:blank";
+
+  get onHoldTabClicks(): number {
+    return this.holdTabClickCount;
+  }
 
   constructor(private readonly options: FakeFinancePageOptions = {}) {}
 
@@ -206,6 +272,18 @@ class FakeFinancePage {
   } {
     if (selector === "body") return { innerText: async () => "Finance On hold" };
     throw new Error(`Unexpected locator ${selector}`);
+  }
+
+  getByRole(role: string, options?: { readonly name?: RegExp }): { click(): Promise<void> } {
+    if (role !== "tab" || options?.name?.test("On hold") !== true) {
+      throw new Error("Unexpected role locator");
+    }
+    return {
+      click: async () => {
+        this.holdTabClickCount += 1;
+        this.currentUrl = "https://seller-us.tiktok.com/finance/bills?tab=statement&subTab=on-hold";
+      },
+    };
   }
 
   async evaluate(_callback: unknown, url: string): Promise<unknown> {
@@ -259,7 +337,7 @@ function syncRequest(): SyncRequest {
 function statResponse(options: {
   readonly totalAmount?: string;
   readonly currency?: string;
-  readonly reasons?: ReadonlyArray<{ readonly reason: 1 | 3; readonly amount: string }>;
+  readonly reasons?: ReadonlyArray<{ readonly reason: 1 | 2 | 3; readonly amount: string }>;
 } = {}): Record<string, unknown> {
   const currency = options.currency ?? "USD";
   return {
@@ -307,8 +385,8 @@ function pageResponseRows(
   };
 }
 
-function statementRow(index: number, amount?: string): Record<string, unknown> {
-  const reason = index < 5 ? 1 : 3;
+function statementRow(index: number, amount?: string, reasonOverride?: 1 | 2 | 3): Record<string, unknown> {
+  const reason = reasonOverride ?? (index < 5 ? 1 : 3);
   const settlementAmount = amount ?? (reason === 1
     ? (index === 4 ? "37.33" : "35.00")
     : (index === 7 ? "44.83" : "44.00"));

@@ -82,11 +82,11 @@ function addAmount(target: Map<string, ExactDecimal>, key: string, value: string
 }
 
 function parseDecimal(value: string): ExactDecimal {
-  const match = /^(\d+)(?:\.(\d+))?$/.exec(value);
-  if (!match) reconciliationFailed("amount is not a non-negative decimal");
-  const fraction = match[2] ?? "";
+  const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(value);
+  if (!match) reconciliationFailed("amount is not a decimal");
+  const fraction = match[3] ?? "";
   return {
-    coefficient: BigInt(`${match[1]}${fraction}`),
+    coefficient: (match[1] === "-" ? -1n : 1n) * BigInt(`${match[2]}${fraction}`),
     scale: fraction.length,
   };
 }

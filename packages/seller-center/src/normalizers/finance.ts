@@ -13,6 +13,7 @@ import { stableHash, timestamp } from "./shared.js";
 
 const ON_HOLD_REASONS = {
   "1": "WAITING_FOR_PACKAGE_DELIVERY",
+  "2": "WAITING_FOR_COMPLETED_REFUND_RETURN",
   "3": "DELIVERED_AWAITING_SETTLEMENT",
 } as const;
 
@@ -77,7 +78,7 @@ export function normalizeSettlementRecord(
     currency,
     sourceSettlementStatus: String(raw.settlement_status),
     settlementState: "ON_HOLD",
-    onHoldReason: ON_HOLD_REASONS[reasonCode],
+    onHoldReason: ON_HOLD_REASONS[reasonCode] ?? null,
     sourceHash: stableHash(rawData),
     sourceSchemaVersion: "seller-center-us-finance.v2",
     rawData,

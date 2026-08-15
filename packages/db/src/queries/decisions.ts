@@ -150,12 +150,17 @@ export interface DecisionReviewRecord {
   ba: {
     id: string;
     decision: BaDecision;
+    reasonCode: BaDecisionReasonCode;
     confidence: number | null;
     reasonCodes: BaDecisionReasonCode[];
     note: string | null;
+    notes: string | null;
+    actor: string;
     decidedAt: Date;
   } | null;
   execution: {
+    id: string;
+    baDecisionId: string;
     requestedAction: "HOLIDAY_MODE_ON";
     mode: "DRY_RUN";
     status: "SIMULATED";
@@ -187,6 +192,26 @@ export interface ListDecisionHistoryInput {
   caseOrigin?: DecisionDataOrigin;
   limit?: number;
   cursor?: string;
+}
+
+function requireBaActor(): string {
+  const actor = process.env.TOOL_BA_ACTOR?.trim();
+  if (!actor) throw new Error("TOOL_BA_ACTOR is required to record a new BA decision");
+  return actor;
+}
+
+function normalizeBaInput(input: RecordBaDecisionForCaseInput["baDecision"]): {
+  reasonCode: BaDecisionReasonCode;
+  reasonCodes: BaDecisionReasonCode[];
+  note: string | undefined;
+} {
+  const reasonCode = input.reasonCode;
+  if (!reasonCode) throw new Error("BA reasonCode is required");
+  return {
+    reasonCode,
+    reasonCodes: input.reasonCodes ?? [reasonCode],
+    note: input.notes ?? input.note,
+  };
 }
 
 const ListDecisionHistoryInputSchema = z.object({
@@ -309,21 +334,26 @@ export async function recordBaDecisionForCase(
   input: RecordBaDecisionForCaseInput,
 ): Promise<BaDecisionRow> {
   const parsed = RecordBaDecisionForCaseInputSchema.parse(input);
+  const actor = requireBaActor();
+  const ba = normalizeBaInput(parsed.baDecision);
   const [created] = await db.insert(baDecisions).values({
     requestId: parsed.requestId,
     decisionCaseId: parsed.decisionCaseId,
     decision: parsed.baDecision.decision,
+    reasonCode: ba.reasonCode,
     confidence: parsed.baDecision.confidence === undefined
       ? null
       : parsed.baDecision.confidence.toString(),
-    reasonCodes: parsed.baDecision.reasonCodes,
-    note: parsed.baDecision.note ?? null,
+    reasonCodes: ba.reasonCodes,
+    note: ba.note ?? null,
+    notes: ba.note ?? null,
+    actor,
   }).onConflictDoNothing({ target: baDecisions.requestId }).returning();
   if (created) return created;
 
   const [existing] = await db.select().from(baDecisions)
     .where(eq(baDecisions.requestId, parsed.requestId)).limit(1);
-  if (!existing) throw new Error("A BA decision already exists for this decision case");
+  if (!existing) throw new Error("Failed to record BA decision");
   if (
     existing.decisionCaseId !== parsed.decisionCaseId ||
     existing.decision !== parsed.baDecision.decision ||
@@ -497,12 +527,17 @@ function makeReview(
     ba: !baDecision ? null : {
       id: baDecision.id,
       decision: baDecision.decision,
+      reasonCode: baDecision.reasonCode,
       confidence: baDecision.confidence === null ? null : Number(baDecision.confidence),
       reasonCodes: baDecision.reasonCodes,
       note: baDecision.note,
+      notes: baDecision.notes,
+      actor: baDecision.actor,
       decidedAt: baDecision.createdAt,
     },
     execution: !execution ? null : {
+      id: execution.id,
+      baDecisionId: execution.baDecisionId,
       requestedAction: execution.requestedAction,
       mode: execution.executionMode,
       status: execution.executionStatus,
@@ -526,8 +561,12 @@ export async function getDecisionReview(
 
   const [[aiDecision], [baDecision], [execution]] = await Promise.all([
     db.select().from(aiDecisions).where(eq(aiDecisions.decisionCaseId, parsedCaseId)).limit(1),
-    db.select().from(baDecisions).where(eq(baDecisions.decisionCaseId, parsedCaseId)).limit(1),
-    db.select().from(decisionExecutions).where(eq(decisionExecutions.decisionCaseId, parsedCaseId)).limit(1),
+    db.select().from(baDecisions)
+      .where(eq(baDecisions.decisionCaseId, parsedCaseId))
+      .orderBy(desc(baDecisions.createdAt), desc(baDecisions.id)).limit(1),
+    db.select().from(decisionExecutions)
+      .where(eq(decisionExecutions.decisionCaseId, parsedCaseId))
+      .orderBy(desc(decisionExecutions.createdAt), desc(decisionExecutions.id)).limit(1),
   ]);
   return makeReview(base.decisionCase, base.shop, aiDecision, baDecision, execution);
 }
@@ -572,12 +611,18 @@ export async function listDecisionHistory(
 
   const [aiRows, baRows, executionRows] = await Promise.all([
     db.select().from(aiDecisions).where(inArray(aiDecisions.decisionCaseId, ids)),
-    db.select().from(baDecisions).where(inArray(baDecisions.decisionCaseId, ids)),
-    db.select().from(decisionExecutions).where(inArray(decisionExecutions.decisionCaseId, ids)),
+    db.select().from(baDecisions)
+      .where(inArray(baDecisions.decisionCaseId, ids))
+      .orderBy(desc(baDecisions.createdAt), desc(baDecisions.id)),
+    db.select().from(decisionExecutions)
+      .where(inArray(decisionExecutions.decisionCaseId, ids))
+      .orderBy(desc(decisionExecutions.createdAt), desc(decisionExecutions.id)),
   ]);
   const aiByCase = new Map(aiRows.map((row) => [row.decisionCaseId, row]));
-  const baByCase = new Map(baRows.map((row) => [row.decisionCaseId, row]));
-  const executionByCase = new Map(executionRows.map((row) => [row.decisionCaseId, row]));
+  const baByCase = new Map<string, BaDecisionRow>();
+  for (const row of baRows) if (!baByCase.has(row.decisionCaseId)) baByCase.set(row.decisionCaseId, row);
+  const executionByCase = new Map<string, DecisionExecutionRow>();
+  for (const row of executionRows) if (!executionByCase.has(row.decisionCaseId)) executionByCase.set(row.decisionCaseId, row);
   const last = pageRows.at(-1)?.decisionCase;
   return {
     items: pageRows.map(({ decisionCase, shop }) => makeReview(
@@ -596,6 +641,8 @@ export async function captureBaDecision(
   input: CaptureBaDecisionInput,
 ): Promise<CapturedBaDecision> {
   const parsed = CaptureBaDecisionInputSchema.parse(input);
+  const actor = requireBaActor();
+  const ba = normalizeBaInput(parsed.baDecision);
   return db.transaction(async (transaction) => {
     const [decisionCase] = await transaction.insert(decisionCases)
       .values(parsed.decisionCase).returning();
@@ -604,11 +651,14 @@ export async function captureBaDecision(
     const [baDecision] = await transaction.insert(baDecisions).values({
       decisionCaseId: decisionCase.id,
       decision: parsed.baDecision.decision,
+      reasonCode: ba.reasonCode,
       confidence: parsed.baDecision.confidence === undefined
         ? null
         : parsed.baDecision.confidence.toString(),
-      reasonCodes: parsed.baDecision.reasonCodes,
-      note: parsed.baDecision.note ?? null,
+      reasonCodes: ba.reasonCodes,
+      note: ba.note ?? null,
+      notes: ba.note ?? null,
+      actor,
     }).returning();
     if (!baDecision) throw new Error("Failed to create BA decision");
     return { decisionCase, baDecision };

@@ -65,6 +65,7 @@ describe("review commands", () => {
     expect(workflow.decide).toHaveBeenCalledWith({
       caseId,
       decision: "PAUSE",
+      reasonCode: "HIGH_ABSOLUTE_EXPOSURE",
       reasonCodes: ["HIGH_ABSOLUTE_EXPOSURE", "DATA_INCOMPLETE"],
       confidence: 0.85,
       note: "Review complete",

@@ -67,6 +67,22 @@ const validCase = {
 };
 
 describe("decision contracts", () => {
+  it("accepts the singular BA reasonCode and requires notes for OTHER", () => {
+    expect(BaDecisionInputSchema.safeParse({
+      decision: "WATCH",
+      reasonCode: "DATA_INCOMPLETE",
+      notes: "Coverage is incomplete",
+    }).success).toBe(true);
+    expect(BaDecisionInputSchema.safeParse({
+      decision: "WATCH",
+      reasonCode: "OTHER",
+    }).success).toBe(false);
+    expect(BaDecisionInputSchema.safeParse({
+      decision: "WATCH",
+      reasonCodes: ["DATA_INCOMPLETE"],
+    }).success).toBe(false);
+  });
+
   it.each(["SCALE", "CONTINUE", "WATCH", "PAUSE"] as const)(
     "accepts the BA decision %s",
     (decision) => {
@@ -79,6 +95,7 @@ describe("decision contracts", () => {
       decisionCase: validCase,
       baDecision: {
         decision: "WATCH",
+        reasonCode: "HIGH_ABSOLUTE_EXPOSURE",
         confidence: 0.75,
         reasonCodes: ["HIGH_ABSOLUTE_EXPOSURE", "RECOVERY_TREND"],
         note: "  Monitor the next settlement cycle.  ",

@@ -48,6 +48,29 @@ export const shopSyncStateEnum = pgEnum("shop_sync_state", [
   "DISABLED"
 ]);
 
+export const shopVerificationStatusEnum = pgEnum("shop_verification_status", [
+  "NOT_VERIFIED",
+  "VERIFIED",
+  "FAILED",
+]);
+
+export const shopEligibilityStatusEnum = pgEnum("shop_eligibility_status", [
+  "ELIGIBLE",
+  "INELIGIBLE",
+  "UNSUPPORTED_REGION",
+]);
+
+export const adspowerProfileVerificationStateEnum = pgEnum("adspower_profile_verification_state", [
+  "UNVERIFIED",
+  "LOGIN_REQUIRED",
+  "HUMAN_ACTION_REQUIRED",
+  "NOT_TIKTOK_SELLER",
+  "UNSUPPORTED_REGION",
+  "SHOP_SELECTION_REQUIRED",
+  "SHOP_IDENTITY_CHANGED",
+  "READY",
+]);
+
 export const syncModeEnum = pgEnum("sync_mode", [
   "ORDERS",
   "FINANCE",
@@ -145,9 +168,16 @@ export const shops = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     profileId: text("profile_id").notNull(),
     profileNo: text("profile_no").notNull(),
+    tiktokShopId: text("tiktok_shop_id"),
     displayName: text("display_name"),
     region: text("region").notNull(),
     locale: text("locale").notNull(),
+    verificationStatus: shopVerificationStatusEnum("verification_status")
+      .notNull()
+      .default("NOT_VERIFIED"),
+    eligibilityStatus: shopEligibilityStatusEnum("eligibility_status")
+      .notNull()
+      .default("ELIGIBLE"),
     currency: text("currency").notNull().default("USD"),
     dataOrigin: decisionDataOriginEnum("data_origin").notNull().default("LIVE"),
     enabled: boolean("enabled").notNull().default(true),
@@ -162,16 +192,70 @@ export const shops = pgTable(
   (table) => [
     uniqueIndex("shops_profile_id_unique").on(table.profileId),
     uniqueIndex("shops_profile_no_unique").on(table.profileNo),
+    uniqueIndex("shops_tiktok_shop_id_unique").on(table.tiktokShopId),
     unique("shops_id_data_origin_unique").on(table.id, table.dataOrigin),
     index("shops_enabled_idx").on(table.enabled),
     check("shops_profile_id_not_blank", sql`length(btrim(${table.profileId})) > 0`),
     check("shops_profile_no_not_blank", sql`length(btrim(${table.profileNo})) > 0`),
+    check(
+      "shops_tiktok_shop_id_not_blank",
+      sql`${table.tiktokShopId} is null or length(btrim(${table.tiktokShopId})) > 0`
+    ),
+    check(
+      "shops_region_eligibility_consistent",
+      sql`(${table.region} = 'US' and ${table.locale} = 'en-US') or ${table.eligibilityStatus} = 'UNSUPPORTED_REGION'`
+    ),
     check("shops_currency_format", sql`${table.currency} ~ '^[A-Z]{3}$'`),
     check(
       "shops_demo_disabled",
       sql`${table.dataOrigin} <> 'DEMO_SANITIZED' or (not ${table.enabled} and ${table.syncState} = 'DISABLED')`
     )
   ]
+);
+
+export const adspowerProfiles = pgTable(
+  "adspower_profiles",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    profileId: text("profile_id").notNull(),
+    profileNo: text("profile_no").notNull(),
+    verificationState: adspowerProfileVerificationStateEnum("verification_state")
+      .notNull()
+      .default("UNVERIFIED"),
+    eligibilityStatus: shopEligibilityStatusEnum("eligibility_status")
+      .notNull()
+      .default("INELIGIBLE"),
+    lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
+    verifiedTiktokShopId: text("verified_tiktok_shop_id"),
+    verifiedShopDisplayName: text("verified_shop_display_name"),
+    activeShopId: uuid("active_shop_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("adspower_profiles_profile_id_unique").on(table.profileId),
+    uniqueIndex("adspower_profiles_profile_no_unique").on(table.profileNo),
+    uniqueIndex("adspower_profiles_active_shop_id_unique").on(table.activeShopId),
+    foreignKey({
+      columns: [table.activeShopId],
+      foreignColumns: [shops.id],
+      name: "adspower_profiles_active_shop_id_shops_id_fk",
+    }).onDelete("restrict").onUpdate("cascade"),
+    check("adspower_profiles_profile_id_not_blank", sql`length(btrim(${table.profileId})) > 0`),
+    check("adspower_profiles_profile_no_not_blank", sql`length(btrim(${table.profileNo})) > 0`),
+    check(
+      "adspower_profiles_verified_tiktok_shop_id_not_blank",
+      sql`${table.verifiedTiktokShopId} is null or length(btrim(${table.verifiedTiktokShopId})) > 0`,
+    ),
+    check(
+      "adspower_profiles_active_shop_requires_proven_identity",
+      sql`${table.activeShopId} is null or (
+        ${table.verificationState} = 'READY'
+        and ${table.eligibilityStatus} = 'ELIGIBLE'
+        and ${table.verifiedTiktokShopId} is not null
+      )`,
+    ),
+  ],
 );
 
 export const orders = pgTable(
@@ -506,14 +590,16 @@ export const baDecisions = pgTable(
       .notNull()
       .references(() => decisionCases.id, { onDelete: "restrict", onUpdate: "cascade" }),
     decision: baDecisionEnum("decision").notNull(),
+    reasonCode: text("reason_code").$type<BaDecisionReasonCode>().notNull().default("OTHER"),
     confidence: numeric("confidence", { precision: 7, scale: 6 }),
     reasonCodes: jsonb("reason_codes").$type<BaDecisionReasonCode[]>().notNull(),
     note: text("note"),
+    notes: text("notes"),
+    actor: text("actor").notNull().default("LEGACY_UNATTRIBUTED"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => [
     uniqueIndex("ba_decisions_request_id_unique").on(table.requestId),
-    unique("ba_decisions_case_unique").on(table.decisionCaseId),
     unique("ba_decisions_id_case_unique").on(table.id, table.decisionCaseId),
     unique("ba_decisions_id_case_decision_unique").on(
       table.id,
@@ -526,7 +612,13 @@ export const baDecisions = pgTable(
       sql`${table.confidence} is null or (${table.confidence} >= 0 and ${table.confidence} <= 1)`
     ),
     check("ba_decisions_reason_codes_array", sql`jsonb_typeof(${table.reasonCodes}) = 'array'`),
-    check("ba_decisions_note_not_blank", sql`${table.note} is null or length(btrim(${table.note})) > 0`)
+    check("ba_decisions_note_not_blank", sql`${table.note} is null or length(btrim(${table.note})) > 0`),
+    check("ba_decisions_notes_not_blank", sql`${table.notes} is null or length(btrim(${table.notes})) > 0`),
+    check("ba_decisions_actor_not_blank", sql`length(btrim(${table.actor})) > 0`),
+    check(
+      "ba_decisions_other_requires_notes",
+      sql`${table.reasonCode} <> 'OTHER' or coalesce(${table.notes}, ${table.note}) is not null or ${table.actor} = 'LEGACY_UNATTRIBUTED'`
+    )
   ]
 );
 
@@ -661,7 +753,6 @@ export const decisionExecutions = pgTable(
   },
   (table) => [
     uniqueIndex("decision_executions_request_id_unique").on(table.requestId),
-    unique("decision_executions_case_unique").on(table.decisionCaseId),
     index("decision_executions_ba_decision_idx").on(table.baDecisionId),
     foreignKey({
       columns: [table.baDecisionId, table.decisionCaseId, table.baDecision],
@@ -682,6 +773,7 @@ export const decisionExecutions = pgTable(
 );
 
 export type ShopRow = typeof shops.$inferSelect;
+export type AdsPowerProfileRow = typeof adspowerProfiles.$inferSelect;
 export type OrderRow = typeof orders.$inferSelect;
 export type SettlementRecordRow = typeof settlementRecords.$inferSelect;
 export type FinancialSnapshotRow = typeof financialSnapshots.$inferSelect;

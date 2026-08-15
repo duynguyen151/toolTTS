@@ -17,6 +17,8 @@ export { seedSanitizedDemoData, type DemoSeedResult } from "./seed-demo.js";
 export {
   aiDecisionStatusEnum,
   aiDecisions,
+  adspowerProfileVerificationStateEnum,
+  adspowerProfiles,
   baDecisionEnum,
   baDecisions,
   canonicalOrderStatusEnum,
@@ -39,11 +41,14 @@ export {
   settlementRecords,
   settlementStateEnum,
   shops,
+  shopEligibilityStatusEnum,
+  shopVerificationStatusEnum,
   shopSyncStateEnum,
   syncModeEnum,
   syncRuns,
   syncRunStatusEnum,
   type AiDecisionRow,
+  type AdsPowerProfileRow,
   type BaDecisionRow,
   type DecisionCaseRow,
   type DecisionExecutionRow,
@@ -125,15 +130,26 @@ export {
   type SaveRiskControlEvaluationInput
 } from "./queries/risk-control.js";
 export {
+  createAdsPowerProfile,
+  getAdsPowerProfile,
+  linkAdsPowerProfileToShop,
+  setAdsPowerProfileVerification,
+  type CreateAdsPowerProfileInput,
+  type SetAdsPowerProfileVerificationInput,
+} from "./queries/adspower-profiles.js";
+export {
   createShop,
   findShopById,
   findShopByProfileNo,
+  findShopByTikTokShopId,
   listEnabledShops,
   listShops,
   markShopSynced,
   requestShopSync,
   setShopSyncState,
+  setShopVerificationState,
   type CreateShopInput,
+  type SetShopVerificationStateInput,
   type ShopSyncState
 } from "./queries/shops.js";
 export {

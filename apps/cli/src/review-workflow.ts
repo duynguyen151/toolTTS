@@ -225,6 +225,7 @@ export function createDbDecisionWorkflowStore(
         decisionCaseId: input.decisionCaseId,
         baDecision: {
           decision: input.decision,
+          reasonCode: input.reasonCode,
           reasonCodes: [...input.reasonCodes],
           ...(input.confidence === undefined ? {} : { confidence: input.confidence }),
           ...(input.note === undefined ? {} : { note: input.note }),

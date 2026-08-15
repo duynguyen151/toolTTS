@@ -57,6 +57,7 @@ export interface DecisionWorkflowStore {
   recordBaDecision(input: {
     readonly decisionCaseId: string;
     readonly decision: BaDecision;
+    readonly reasonCode: BaDecisionReasonCode;
     readonly confidence?: number;
     readonly reasonCodes: readonly BaDecisionReasonCode[];
     readonly note?: string;
@@ -98,8 +99,10 @@ export interface DecisionWorkflow {
     readonly caseId: string;
     readonly decision: BaDecision;
     readonly confidence?: number;
-    readonly reasonCodes: readonly BaDecisionReasonCode[];
+    readonly reasonCodes?: readonly BaDecisionReasonCode[];
+    readonly reasonCode: BaDecisionReasonCode;
     readonly note?: string;
+    readonly notes?: string;
     readonly requestId?: string;
   }): Promise<DecisionReviewView>;
   execute(input: { readonly caseId: string; readonly confirm: boolean; readonly requestId?: string }): Promise<DecisionReviewView>;
@@ -228,15 +231,19 @@ export function createDecisionWorkflow(dependencies: {
       const parsed = BaDecisionInputSchema.parse({
         decision: input.decision,
         confidence: input.confidence,
+        reasonCode: input.reasonCode,
         reasonCodes: input.reasonCodes,
         note: input.note,
+        notes: input.notes,
       });
+      const reasonCodes = parsed.reasonCodes ?? [parsed.reasonCode];
       await dependencies.store.recordBaDecision({
         requestId: input.requestId ?? newRequestId(),
         decisionCaseId: input.caseId,
         decision: parsed.decision,
+        reasonCode: parsed.reasonCode,
         ...(parsed.confidence === undefined ? {} : { confidence: parsed.confidence }),
-        reasonCodes: parsed.reasonCodes,
+        reasonCodes,
         ...(parsed.note === undefined ? {} : { note: parsed.note }),
       });
       return toDecisionReviewView(await dependencies.store.getDecisionReview(input.caseId));

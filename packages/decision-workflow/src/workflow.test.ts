@@ -369,6 +369,7 @@ describe("decision workflow", () => {
     const result = await workflow.decide({
       caseId,
       decision: "WATCH",
+      reasonCode: "DATA_INCOMPLETE",
       reasonCodes: ["DATA_INCOMPLETE"],
       note: "Needs a larger sample",
       requestId: "9f45eef4-d10f-4392-9b23-3dbefad2991c",
@@ -394,6 +395,7 @@ describe("decision workflow", () => {
     await workflow.decide({
       caseId,
       decision: "WATCH",
+      reasonCode: "DATA_INCOMPLETE",
       reasonCodes: ["DATA_INCOMPLETE"],
     });
     await expect(workflow.execute({ caseId, confirm: true })).rejects.toEqual(
@@ -404,6 +406,7 @@ describe("decision workflow", () => {
     await workflow.decide({
       caseId,
       decision: "PAUSE",
+      reasonCode: "HIGH_ABSOLUTE_EXPOSURE",
       reasonCodes: ["HIGH_ABSOLUTE_EXPOSURE"],
     });
     await workflow.execute({
@@ -439,6 +442,7 @@ describe("decision workflow", () => {
     await workflow.decide({
       caseId,
       decision: "WATCH",
+      reasonCode: "DATA_INCOMPLETE",
       reasonCodes: ["DATA_INCOMPLETE"],
     });
 

@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+process.env.TOOL_BA_ACTOR = "test-ba";
+
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 
@@ -55,7 +57,6 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
   let context: DatabaseContext;
   const profileNo = `TEST-${randomUUID()}`;
   const demoProfileNo = `DEMO-${randomUUID()}`;
-  const shopIds: string[] = [];
 
   beforeAll(async () => {
     context = createDatabase(databaseUrl!);
@@ -64,15 +65,7 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
 
   afterAll(async () => {
     if (!context) return;
-    for (const shopId of shopIds) {
-      await context.sql`delete from decision_executions where decision_case_id in (select id from decision_cases where shop_id = ${shopId})`;
-      await context.sql`delete from ai_decisions where decision_case_id in (select id from decision_cases where shop_id = ${shopId})`;
-      await context.sql`delete from ba_decisions where decision_case_id in (select id from decision_cases where shop_id = ${shopId})`;
-      await context.sql`delete from decision_cases where shop_id = ${shopId}`;
-      await context.sql`delete from sync_runs where shop_id = ${shopId}`;
-      await context.sql`delete from orders where shop_id = ${shopId}`;
-      await context.sql`delete from shops where id = ${shopId}`;
-    }
+    // BA decisions are immutable, so integration audit records intentionally remain in TEST_DATABASE_URL.
     await closeDatabase(context);
   });
 
@@ -85,7 +78,6 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
       locale: "en-US",
       currency: "USD",
     }).returning();
-    shopIds.push(shop!.id);
     await context.db.insert(orders).values([
       {
         shopId: shop!.id,
@@ -244,20 +236,31 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
       decisionCaseId: firstCase.id,
       baDecision: {
         decision: "PAUSE",
+        reasonCode: "LOW_DELIVERY_RATE",
         reasonCodes: ["LOW_DELIVERY_RATE"],
         note: "Confirm dry run only",
       },
     });
+    await expect(context.sql`
+      update ba_decisions set note = 'attempted overwrite' where id = ${baDecision.id}
+    `).rejects.toThrow("ba_decisions is append-only");
+    await expect(context.sql`
+      delete from ba_decisions where id = ${baDecision.id}
+    `).rejects.toThrow("ba_decisions is append-only");
     await expect(recordBaDecisionForCase(context.db, {
       requestId: baRequestId,
       decisionCaseId: firstCase.id,
-      baDecision: { decision: "WATCH", reasonCodes: ["OTHER"] },
+      baDecision: { decision: "WATCH", reasonCode: "OTHER", reasonCodes: ["OTHER"], notes: "Different retry input" },
     })).rejects.toThrow("different input");
-    await expect(recordBaDecisionForCase(context.db, {
+    const latestBaDecision = await recordBaDecisionForCase(context.db, {
       requestId: randomUUID(),
       decisionCaseId: firstCase.id,
-      baDecision: { decision: "WATCH", reasonCodes: ["OTHER"] },
-    })).rejects.toThrow();
+      baDecision: { decision: "WATCH", reasonCode: "OTHER", reasonCodes: ["OTHER"], notes: "Other reason" },
+    });
+    expect((await getDecisionReview(context.db, firstCase.id))?.ba).toMatchObject({
+      id: latestBaDecision.id,
+      decision: "WATCH",
+    });
 
     const executionRequestId = randomUUID();
     const execution = await recordDryRunExecution(context.db, {
@@ -287,7 +290,7 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
         },
       },
       ai: { status: "UNAVAILABLE", failureCode: "CONFIG_MISSING" },
-      ba: { id: baDecision.id, decision: "PAUSE" },
+      ba: { id: latestBaDecision.id, decision: "WATCH" },
       execution: {
         requestedAction: "HOLIDAY_MODE_ON",
         mode: "DRY_RUN",
@@ -301,6 +304,28 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
       "BA_DECIDED",
       "DRY_RUN_EXECUTED",
     ]);
+    const revisionCreatedAt = new Date("2027-01-01T00:00:00.000Z");
+    const revisionIds = [randomUUID(), randomUUID()].sort();
+    const legacyRevisionId = revisionIds[0]!;
+    const currentRevisionId = revisionIds[1]!;
+    await context.sql`
+      insert into ba_decisions (id, request_id, decision_case_id, decision, reason_codes, created_at)
+      values (
+        ${legacyRevisionId}, ${randomUUID()}, ${firstCase.id}, 'PAUSE',
+        ${JSON.stringify(["LOW_DELIVERY_RATE"])}::jsonb, ${revisionCreatedAt.toISOString()}
+      )
+    `;
+    await context.sql`
+      insert into ba_decisions (id, request_id, decision_case_id, decision, reason_codes, created_at)
+      values (
+        ${currentRevisionId}, ${randomUUID()}, ${firstCase.id}, 'PAUSE',
+        ${JSON.stringify(["LOW_DELIVERY_RATE"])}::jsonb, ${revisionCreatedAt.toISOString()}
+      )
+    `;
+    expect((await getDecisionReview(context.db, firstCase.id))?.ba).toMatchObject({
+      id: currentRevisionId,
+      actor: "LEGACY_UNATTRIBUTED",
+    });
 
     const olderCase = await createDecisionCase(context.db, {
       ...caseInput,
@@ -358,7 +383,7 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
     const watchBaDecision = await recordBaDecisionForCase(context.db, {
       requestId: randomUUID(),
       decisionCaseId: olderCase.id,
-      baDecision: { decision: "WATCH", reasonCodes: ["DATA_INCOMPLETE"] },
+      baDecision: { decision: "WATCH", reasonCode: "DATA_INCOMPLETE", reasonCodes: ["DATA_INCOMPLETE"] },
     });
     await expect(context.sql`
       insert into decision_executions (
@@ -452,7 +477,6 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
       enabled: false,
       syncState: "DISABLED",
     }).returning();
-    shopIds.push(shop!.id);
     await expect(context.db.update(shops).set({
       dataOrigin: "LIVE",
       enabled: true,

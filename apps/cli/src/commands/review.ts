@@ -91,6 +91,7 @@ export function registerReviewCommands(
       const view = await workflow.decide({
         caseId: uuid(caseId),
         decision: options.decision,
+        reasonCode: options.reasonCode[0]!,
         reasonCodes: options.reasonCode,
         ...(options.confidence === undefined ? {} : { confidence: options.confidence }),
         ...(options.note === undefined ? {} : { note: options.note }),

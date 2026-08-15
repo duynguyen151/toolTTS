@@ -200,17 +200,39 @@ export const DecisionCaseInputSchema = z
     }
   });
 
-export const BaDecisionInputSchema = z.object({
-  decision: BaDecisionSchema,
-  confidence: z.number().min(0).max(1).optional(),
-  reasonCodes: z
-    .array(BaDecisionReasonCodeSchema)
-    .min(1)
-    .refine((values) => new Set(values).size === values.length, {
-      message: "BA reason codes must not contain duplicates",
-    }),
-  note: z.string().trim().min(1).optional(),
-});
+const BaReasonCodesInputSchema = z
+  .array(BaDecisionReasonCodeSchema)
+  .min(1)
+  .refine((values) => new Set(values).size === values.length, {
+    message: "BA reason codes must not contain duplicates",
+  });
+
+export const BaDecisionInputSchema = z
+  .object({
+    decision: BaDecisionSchema,
+    confidence: z.number().min(0).max(1).optional(),
+    // reasonCodes/note are retained as a compatibility input for existing V1 callers.
+    reasonCode: BaDecisionReasonCodeSchema,
+    reasonCodes: BaReasonCodesInputSchema.optional(),
+    notes: z.string().trim().min(1).optional(),
+    note: z.string().trim().min(1).optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const reasonCode = value.reasonCode ?? value.reasonCodes?.[0];
+    if (reasonCode === undefined) {
+      context.addIssue({ code: "custom", path: ["reasonCode"], message: "BA reasonCode is required" });
+    }
+    if (value.reasonCode !== undefined && value.reasonCodes !== undefined && value.reasonCodes[0] !== value.reasonCode) {
+      context.addIssue({ code: "custom", path: ["reasonCodes"], message: "BA reasonCode must match the first legacy reason code" });
+    }
+    if (reasonCode === "OTHER" && value.notes === undefined && value.note === undefined) {
+      context.addIssue({ code: "custom", path: ["notes"], message: "BA notes are required for OTHER" });
+    }
+    if (value.notes !== undefined && value.note !== undefined && value.notes !== value.note) {
+      context.addIssue({ code: "custom", path: ["notes"], message: "BA notes must match note" });
+    }
+  })
 
 export const CaptureBaDecisionInputSchema = z.object({
   decisionCase: DecisionCaseInputSchema,

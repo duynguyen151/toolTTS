@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { ZodError } from "zod";
 
+process.env.TOOL_BA_ACTOR = "test-ba";
+
 import type { Database } from "../client.js";
 import { baDecisions, decisionCases } from "../schema.js";
 import {
@@ -69,6 +71,7 @@ const input: CaptureBaDecisionInput = {
   },
   baDecision: {
     decision: "WATCH",
+    reasonCode: "HIGH_ABSOLUTE_EXPOSURE",
     confidence: 0.75,
     reasonCodes: ["HIGH_ABSOLUTE_EXPOSURE"],
     note: "Monitor settlement",
@@ -149,9 +152,12 @@ describe("captureBaDecision", () => {
       values: {
         decisionCaseId: "00000000-0000-4000-8000-000000000010",
         decision: "WATCH",
+        reasonCode: "HIGH_ABSOLUTE_EXPOSURE",
         confidence: "0.75",
         reasonCodes: ["HIGH_ABSOLUTE_EXPOSURE"],
         note: "Monitor settlement",
+        notes: "Monitor settlement",
+        actor: "test-ba",
       },
     });
     expect(result.decisionCase.id).toBe("00000000-0000-4000-8000-000000000010");
@@ -278,5 +284,19 @@ describe("decision workflow persistence boundaries", () => {
         executionMode: "DRY_RUN",
       }),
     ).rejects.toBeInstanceOf(ZodError);
+  });
+
+  it("fails closed when TOOL_BA_ACTOR is missing", async () => {
+    const previous = process.env.TOOL_BA_ACTOR;
+    delete process.env.TOOL_BA_ACTOR;
+    try {
+      await expect(recordBaDecisionForCase(rejectingDb, {
+        requestId: "00000000-0000-4000-8000-000000000020",
+        decisionCaseId: "00000000-0000-4000-8000-000000000021",
+        baDecision: input.baDecision,
+      })).rejects.toThrow("TOOL_BA_ACTOR is required");
+    } finally {
+      process.env.TOOL_BA_ACTOR = previous;
+    }
   });
 });

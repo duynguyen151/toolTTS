@@ -127,6 +127,13 @@
       "when": 1786771656696,
       "tag": "0017_stiff_lord_tyger",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1786810609202,
+      "tag": "0018_light_celestials",
+      "breakpoints": true
     }
   ]
 }

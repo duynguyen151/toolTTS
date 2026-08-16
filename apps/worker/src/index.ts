@@ -4,7 +4,7 @@ import {
   abortStaleSyncRuns,
   closeDatabase,
   createDatabase,
-  listEnabledShops,
+  listReadyAdsPowerProfileShops,
   type ShopRow
 } from "@shop-health/db";
 import { createSellerCenterDataSource } from "@shop-health/seller-center";
@@ -57,7 +57,7 @@ async function workerLoop(): Promise<void> {
 
   while (!stopping) {
     try {
-      const shops = await listEnabledShops(context.db);
+      const shops = await listReadyAdsPowerProfileShops(context.db);
       const now = Date.now();
       for (const shop of shops) {
         if (stopping) break;

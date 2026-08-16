@@ -13,6 +13,10 @@ export {
   SellerCenterBrowserDataSource,
 } from "./source/browser-source.js";
 export type { SellerCenterDataSourceOptions } from "./source/browser-source.js";
+export {
+  sellerIdentityFromFinanceRequestUrl,
+  type SellerIdentityResult,
+} from "./source/profile-verification.js";
 export { captureSellerCenterNetworkInventory } from "./source/network-inventory.js";
 export type {
   CaptureSellerCenterNetworkInventoryOptions,

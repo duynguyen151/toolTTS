@@ -33,6 +33,10 @@ import { normalizeOrder } from "../normalizers/orders.js";
 import { stableHash } from "../normalizers/shared.js";
 import { collectFinanceStatementPages } from "./finance-pagination.js";
 import { assertOnHoldReconciled } from "./finance-reconciliation.js";
+import {
+  sellerIdentityFromFinanceRequestUrl,
+  type SellerIdentityResult,
+} from "./profile-verification.js";
 
 const SELLER_ORIGIN = "https://seller-us.tiktok.com";
 const ORDER_ROUTE = `${SELLER_ORIGIN}/order`;
@@ -97,6 +101,39 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
       const failure = classifyFailure(error);
       return { status: failure.status, checkedAt: new Date(), detail: failure.detail };
     }
+  }
+
+  /** Reads the active Seller Center identity without writing to Seller Center. */
+  async verifyProfile(config: Pick<ShopSourceConfig, "profileId">): Promise<SellerIdentityResult> {
+    return this.withPage(config, async (page) => {
+      const responseResult = captureJsonResponseWithRequest(
+        page,
+        STATEMENT_LIST_PATH,
+        "GET",
+        this.responseTimeoutMs,
+        isOnHoldFinancePageOne,
+      );
+      await page.goto(FINANCE_ON_HOLD_ROUTE, { waitUntil: "domcontentloaded", timeout: this.responseTimeoutMs });
+      const currentUrl = new URL(page.url());
+      if (currentUrl.origin !== SELLER_ORIGIN) {
+        void responseResult.catch(() => undefined);
+        return currentUrl.hostname.startsWith("seller-")
+          ? { status: "UNSUPPORTED_REGION", tiktokShopId: null }
+          : { status: "NOT_TIKTOK_SELLER", tiktokShopId: null };
+      }
+      await assertHealthyPage(page);
+      if (
+        currentUrl.pathname !== "/finance/bills"
+        || currentUrl.searchParams.get("tab") !== "overview"
+        || currentUrl.searchParams.get("subTab") !== "on-hold"
+      ) {
+        throw new SellerCenterError("LAYOUT_CHANGED", "Finance On hold route changed");
+      }
+      await page.getByRole("tab", { name: /^on hold$/i }).click();
+      const captured = await responseResult;
+      if (!captured.ok) throw captured.error;
+      return sellerIdentityFromFinanceRequestUrl(captured.requestUrl);
+    });
   }
 
   async probe(config: ShopSourceConfig): Promise<SourceFingerprint> {
@@ -193,7 +230,7 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
     yield batch;
   }
 
-  private async withPage<T>(shop: ShopSourceConfig, operation: (page: Page) => Promise<T>): Promise<T> {
+  private async withPage<T>(shop: Pick<ShopSourceConfig, "profileId">, operation: (page: Page) => Promise<T>): Promise<T> {
     const connection = await this.adsPower.open(shop.profileId);
     let browser: Browser | undefined;
     let page: Page | undefined;

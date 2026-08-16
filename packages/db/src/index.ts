@@ -133,6 +133,8 @@ export {
 export {
   createAdsPowerProfile,
   getAdsPowerProfile,
+  listAdsPowerProfiles,
+  listReadyAdsPowerProfileShops,
   linkAdsPowerProfileToShop,
   setAdsPowerProfileVerification,
   type CreateAdsPowerProfileInput,
@@ -141,6 +143,7 @@ export {
 export {
   createShop,
   findShopById,
+  findShopByProfileId,
   findShopByProfileNo,
   findShopByTikTokShopId,
   listEnabledShops,

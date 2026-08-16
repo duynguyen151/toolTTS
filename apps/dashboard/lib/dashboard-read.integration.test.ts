@@ -19,7 +19,6 @@ const describeWithDatabase = testDatabaseUrl === undefined ? describe.skip : des
 describeWithDatabase("dashboard persisted decision read", () => {
   let context: DatabaseContext;
   const profileNo = `DASHBOARD-${randomUUID()}`;
-  let shopId: string | undefined;
   const originalDatabaseUrl = process.env.DATABASE_URL;
 
   beforeAll(async () => {
@@ -28,13 +27,7 @@ describeWithDatabase("dashboard persisted decision read", () => {
   });
 
   afterAll(async () => {
-    if (context !== undefined && shopId !== undefined) {
-      await context.sql`delete from ai_decisions where decision_case_id in (select id from decision_cases where shop_id = ${shopId})`;
-      await context.sql`delete from ba_decisions where decision_case_id in (select id from decision_cases where shop_id = ${shopId})`;
-      await context.sql`delete from decision_executions where decision_case_id in (select id from decision_cases where shop_id = ${shopId})`;
-      await context.sql`delete from decision_cases where shop_id = ${shopId}`;
-      await context.sql`delete from shops where id = ${shopId}`;
-    }
+    // Decision Cases are immutable audit history, including in TEST_DATABASE_URL.
     if (context !== undefined) await closeDatabase(context);
     if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = originalDatabaseUrl;
@@ -54,8 +47,6 @@ describeWithDatabase("dashboard persisted decision read", () => {
       syncState: "ACTIVE",
     }).returning();
     if (shop === undefined) throw new Error("Dashboard integration shop was not created");
-    shopId = shop.id;
-
     const decisionCase = await createDecisionCase(context.db, {
       requestId: randomUUID(),
       caseOrigin: "LIVE",

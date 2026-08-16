@@ -3,6 +3,7 @@ import {
   findLatestSuccessfulSyncRun,
   findShopByProfileNo,
   getDecisionAiInput,
+  getLatestDecisionContext,
   getDecisionReview,
   getDecisionReviewByRequestId,
   getFinanceSummary,
@@ -161,11 +162,12 @@ export function createDbDecisionWorkflowStore(
     async loadReviewStartSource(profileNo) {
       const shop = await findShopByProfileNo(db, profileNo);
       if (shop === null) throw notFound("shop", profileNo);
-      const [facts, finance, latestSuccessfulSync, riskState] = await Promise.all([
+      const [facts, finance, latestSuccessfulSync, riskState, previousDecisionContext] = await Promise.all([
         getFullPersistedRiskOrderFacts(db, shop.id),
         getFinanceSummary(db, shop.id),
         findLatestSuccessfulSyncRun(db, shop.id),
         getRiskControlState(db, shop.id),
+        getLatestDecisionContext(db, shop.id),
       ]);
       const normalizedFacts = normalizeRiskFacts(facts);
       const period = resolveFullHistoryPeriod(normalizedFacts, now());
@@ -200,6 +202,13 @@ export function createDbDecisionWorkflowStore(
           : latestSuccessfulSync?.id ?? null,
         holidayModeCurrentlyEnabled: riskState?.observedHolidayModeEnabled ?? null,
         consecutiveSafeCycles: riskState?.consecutiveSafeCycles ?? 0,
+        decisionIdentity: {
+          profileId: shop.profileId,
+          tiktokShopId: shop.tiktokShopId,
+          region: "US",
+          locale: "en-US",
+        },
+        previousDecisionContext,
       };
     },
 

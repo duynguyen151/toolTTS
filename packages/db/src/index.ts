@@ -64,6 +64,7 @@ export {
   captureBaDecision,
   createDecisionCase,
   getDecisionAiInput,
+  getLatestDecisionContext,
   getDecisionReview,
   getDecisionReviewByRequestId,
   listDecisionHistory,

@@ -27,7 +27,7 @@ import {
   type RecordDryRunExecutionInput,
 } from "@shop-health/domain";
 import { isDeepStrictEqual } from "node:util";
-import { and, desc, eq, inArray, lt, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, lt, or } from "drizzle-orm";
 import { z } from "zod";
 
 import type { Database } from "../client.js";
@@ -341,6 +341,18 @@ export async function getDecisionAiInput(
     ruleTriggers: decisionCase.ruleTriggers,
     decisionContextSnapshot: parseDecisionContextSnapshot(decisionCase.decisionContextSnapshot),
   };
+}
+
+export async function getLatestDecisionContext(
+  db: Database,
+  shopId: string,
+): Promise<AiDecisionContext | null> {
+  const [row] = await db.select({ context: decisionCases.decisionContextSnapshot })
+    .from(decisionCases)
+    .where(and(eq(decisionCases.shopId, shopId), isNotNull(decisionCases.decisionContextSnapshot)))
+    .orderBy(desc(decisionCases.observedAt), desc(decisionCases.id))
+    .limit(1);
+  return parseDecisionContextSnapshot(row?.context);
 }
 
 export async function recordBaDecisionForCase(

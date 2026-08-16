@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  buildDecisionAiMessages,
   createBaselineAiClientFromConfig,
   readBaselineAiConfig,
   type BaselineAiInput,
@@ -80,6 +81,14 @@ function config(overrides: NodeJS.ProcessEnv = {}) {
 }
 
 describe("baseline AI technical failures", () => {
+  it("sends the frozen sanitized decision context when available", () => {
+    const context = { schemaVersion: "ai-decision-context.v1", safe: "context-only" };
+    const messages = buildDecisionAiMessages({
+      ...validInput,
+      decisionContextSnapshot: context as never,
+    });
+    expect(JSON.parse(messages[1].content)).toMatchObject({ decisionContext: context });
+  });
   it("does not call the provider without a verified Seller Center source identity", async () => {
     const fetchMock = vi.fn<typeof fetch>();
     const client = createBaselineAiClientFromConfig(config(), { fetch: fetchMock });

@@ -56,6 +56,13 @@ const source: ReviewStartSource = {
   sourceSyncRunId: null,
   holidayModeCurrentlyEnabled: null,
   consecutiveSafeCycles: 0,
+  decisionIdentity: {
+    profileId: "safe-profile-demo-001",
+    tiktokShopId: null,
+    region: "US",
+    locale: "en-US",
+  },
+  previousDecisionContext: null,
 };
 
 const persistedAiInput: BaselineAiInput = {
@@ -304,6 +311,11 @@ describe("decision workflow", () => {
           totalPersistedOrders: 10,
           operationalOrderCount: 10,
         },
+        decisionContextSnapshot: expect.objectContaining({
+          schemaVersion: "ai-decision-context.v1",
+          comparisons: expect.any(Array),
+          trends: expect.any(Array),
+        }),
       },
     });
   });

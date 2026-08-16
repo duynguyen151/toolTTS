@@ -11,6 +11,7 @@ import {
   type DecisionRiskSnapshot,
   type DecisionRuleTrigger,
   type RiskOrderFact,
+  type AiDecisionContext,
 } from "@shop-health/domain";
 import type {
   BaselineAiClient,
@@ -27,6 +28,7 @@ import {
   type DecisionReviewView,
   type PersistedDecisionReview,
 } from "./presentation.js";
+import { buildDecisionIntelligence } from "./decision-intelligence.js";
 
 export interface ReviewStartSource {
   readonly shop: PersistedDecisionReview["shop"];
@@ -38,6 +40,13 @@ export interface ReviewStartSource {
   readonly sourceSyncRunId: string | null;
   readonly holidayModeCurrentlyEnabled: boolean | null;
   readonly consecutiveSafeCycles: number;
+  readonly decisionIdentity: {
+    readonly profileId: string;
+    readonly tiktokShopId: string | null;
+    readonly region: "US";
+    readonly locale: "en-US";
+  };
+  readonly previousDecisionContext: AiDecisionContext | null;
 }
 
 export interface DecisionWorkflowStore {
@@ -194,6 +203,32 @@ export function createDecisionWorkflow(dependencies: {
       };
       const ruleDecision = mapRiskResultToRuleDecision(risk.ruleResult);
       const triggers = ruleTriggers(risk.trigger);
+      const decisionContextSnapshot = buildDecisionIntelligence({
+        observedAt,
+        profile: { profileId: source.decisionIdentity.profileId, profileNo: source.shop.profileNo },
+        shop: {
+          shopId: source.shop.id,
+          tiktokShopId: source.decisionIdentity.tiktokShopId,
+          displayName: source.shop.displayName,
+          region: source.decisionIdentity.region,
+          locale: source.decisionIdentity.locale,
+          currency: "USD",
+        },
+        metrics: metricsSnapshot,
+        finance: source.financeSnapshot,
+        coverage: source.coverageSnapshot ?? {
+          coverageState: source.shop.dataCoverage,
+          persistedMetricsWindow: metricsSnapshot.window,
+          source: null,
+          provenSourceWindow: null,
+          completeWithinSourceWindow: null,
+          lifetimeHistoryComplete: null,
+        },
+        risk: riskSnapshot,
+        ruleDecision,
+        ruleTriggers: triggers,
+        previous: source.previousDecisionContext,
+      }).context;
       const created = await dependencies.store.createDecisionCase({
         requestId,
         caseOrigin: source.shop.dataOrigin,
@@ -215,6 +250,7 @@ export function createDecisionWorkflow(dependencies: {
           ruleTriggers: triggers,
           dataCoverage: source.shop.dataCoverage,
           sourceSyncRunId: source.sourceSyncRunId,
+          decisionContextSnapshot,
         },
       });
       const persisted = await dependencies.store.getDecisionReview(created.caseId);

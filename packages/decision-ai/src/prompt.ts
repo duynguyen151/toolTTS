@@ -7,6 +7,17 @@ export const DECISION_AI_POLICY_VERSION = "decision-ai-policy.v1" as const;
 export const DECISION_AI_OUTPUT_SCHEMA_VERSION = "decision-ai-output.v1" as const;
 
 export function buildDecisionAiMessages(input: BaselineAiInput) {
+  const outputSchema = {
+    recommendation: BaDecisionSchema.options,
+    riskLevel: ["LOW", "MEDIUM", "HIGH"],
+    confidence: "number from 0 to 1",
+    reasonCodes: BaDecisionReasonCodeSchema.options,
+    supportingFactors: "up to 5 concise evidence strings",
+    riskFactors: "up to 5 concise risk strings",
+    whatWouldChangeDecision: "up to 5 concise conditions",
+    reason: "concise rationale, maximum 500 characters",
+    humanReviewRequired: "boolean",
+  };
   return [
     {
       role: "system" as const,
@@ -24,6 +35,10 @@ export function buildDecisionAiMessages(input: BaselineAiInput) {
     {
       role: "user" as const,
       content: JSON.stringify({
+        ...(input.decisionContextSnapshot === undefined || input.decisionContextSnapshot === null
+          ? {}
+          : { decisionContext: input.decisionContextSnapshot }),
+        ...(input.decisionContextSnapshot === undefined || input.decisionContextSnapshot === null ? {
         operationalMetrics: {
           totalPersistedOrders: input.metricsSnapshot.totalPersistedOrders ?? null,
           operationalOrderCount: input.metricsSnapshot.operationalOrderCount ?? null,
@@ -65,17 +80,8 @@ export function buildDecisionAiMessages(input: BaselineAiInput) {
             minimumOrdersForRateRule: input.riskSnapshot.minimumOrdersForRateRule,
           },
         },
-        outputSchema: {
-          recommendation: BaDecisionSchema.options,
-          riskLevel: ["LOW", "MEDIUM", "HIGH"],
-          confidence: "number from 0 to 1",
-          reasonCodes: BaDecisionReasonCodeSchema.options,
-          supportingFactors: "up to 5 concise evidence strings",
-          riskFactors: "up to 5 concise risk strings",
-          whatWouldChangeDecision: "up to 5 concise conditions",
-          reason: "concise rationale, maximum 500 characters",
-          humanReviewRequired: "boolean",
-        },
+        } : {}),
+        outputSchema,
       }),
     },
   ];

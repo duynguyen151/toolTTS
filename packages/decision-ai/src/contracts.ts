@@ -1,6 +1,7 @@
 import {
   BaDecisionReasonCodeSchema,
   BaDecisionSchema,
+  AiDecisionContextSchema,
   DecisionCoverageSnapshotSchema,
   DecisionFinanceSnapshotSchema,
   DecisionMetricsSnapshotSchema,
@@ -35,6 +36,7 @@ export const BaselineAiInputSchema = z
     riskSnapshot: DecisionRiskSnapshotSchema,
     ruleDecision: DecisionRuleResultSchema,
     ruleTriggers: UniqueRuleTriggersSchema,
+    decisionContextSnapshot: AiDecisionContextSchema.nullable().optional(),
   })
   .strict();
 

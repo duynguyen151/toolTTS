@@ -12,6 +12,7 @@
     "@shop-health/db": "workspace:*",
     "@shop-health/decision-ai": "workspace:*",
     "@shop-health/domain": "workspace:*",
+    "decimal.js": "^10.6.0",
     "zod": "^4.0.0"
   }
 }

@@ -4,6 +4,7 @@ import {
   findLatestSuccessfulSyncRun,
   findShopByProfileNo,
   getDecisionAiInput,
+  getLatestDecisionContext,
   getDecisionReview,
   getDecisionReviewByRequestId,
   getFinanceSummary,
@@ -192,12 +193,13 @@ export function createPersistedDecisionWorkflow(
     async loadReviewStartSource(profileNo): Promise<ReviewStartSource> {
       const shop = await findShopByProfileNo(db, profileNo);
       if (shop === null) throw new Error(`Shop not found: ${profileNo}`);
-      const [facts, latestOrdersRun, latestFinanceRun, latestProvenFinanceRun, riskState] = await Promise.all([
+      const [facts, latestOrdersRun, latestFinanceRun, latestProvenFinanceRun, riskState, previousDecisionContext] = await Promise.all([
         getFullPersistedRiskOrderFacts(db, shop.id),
         findLatestSuccessfulSyncRun(db, shop.id, "ORDERS"),
         findLatestSuccessfulSyncRun(db, shop.id, "FINANCE"),
         findLatestSuccessfulSyncRun(db, shop.id, "FINANCE", true),
         getRiskControlState(db, shop.id),
+        getLatestDecisionContext(db, shop.id),
       ]);
       const financeCaptureAt = resolveVerifiedFinanceCaptureAt(latestFinanceRun, latestProvenFinanceRun);
       const financeSummary = await getFinanceSummary(db, shop.id, financeCaptureAt);
@@ -285,6 +287,13 @@ export function createPersistedDecisionWorkflow(
         sourceSyncRunId: latestOrdersRun?.id ?? null,
         holidayModeCurrentlyEnabled: riskState?.observedHolidayModeEnabled ?? null,
         consecutiveSafeCycles: riskState?.consecutiveSafeCycles ?? 0,
+        decisionIdentity: {
+          profileId: shop.profileId,
+          tiktokShopId: shop.tiktokShopId,
+          region: "US",
+          locale: "en-US",
+        },
+        previousDecisionContext,
       };
     },
     async createDecisionCase(input) {

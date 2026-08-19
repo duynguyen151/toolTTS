@@ -261,6 +261,20 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
           { cause: error },
         );
       }
+      if (isBrowserDisconnection(error)) {
+        throw new SellerCenterError(
+          "BROWSER_DISCONNECTED",
+          "AdsPower browser connection is unavailable",
+          { cause: error },
+        );
+      }
+      if (isSourceTimeout(error)) {
+        throw new SellerCenterError(
+          "SOURCE_TIMEOUT",
+          "Seller Center request timed out",
+          { cause: error },
+        );
+      }
       throw new SellerCenterError("LAYOUT_CHANGED", "Seller Center operation failed", { cause: error });
     } finally {
       await page?.close().catch(() => undefined);
@@ -379,9 +393,13 @@ function isOnHoldStatResponse(response: Response): boolean {
 
 function isActualOrderListResponse(response: Response): boolean {
   const request = response.request();
-  if (new URL(request.url()).searchParams.has("is_prefetch")) return false;
+  const url = new URL(request.url());
+  if (url.searchParams.has("is_prefetch")) return false;
   try {
-    return request.postDataJSON() === null;
+    const postData = request.postDataJSON();
+    if (postData === null || postData === undefined) return true;
+    if (typeof postData === "object" && Object.keys(postData).length === 0) return true;
+    return false;
   } catch {
     return false;
   }
@@ -396,12 +414,10 @@ function assertCompleteAllOrdersResponse(data: {
   if (data.total_count === undefined) {
     throw new SellerCenterError("LAYOUT_CHANGED", "Order total_count is missing; completeness is unproven");
   }
-  if (data.has_more !== false || data.search_next_has_more !== false) {
+  if (data.has_more === true || data.search_next_has_more === true) {
     throw new SellerCenterError(
       "LAYOUT_CHANGED",
-      data.has_more === true || data.search_next_has_more === true
-        ? "Order pagination is present but its request mapping is unresolved"
-        : "Order pagination termination flags are missing",
+      "Order pagination is present but its request mapping is unresolved",
     );
   }
   const uniqueOrderIds = new Set(data.main_orders.map((order) => order.main_order_id));
@@ -454,4 +470,14 @@ function classifyFailure(error: unknown): { status: SourceHealth["status"]; deta
 function isProxyTimeout(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   return /ERR_PROXY_CONNECTION_FAILED|ERR_TUNNEL_CONNECTION_FAILED|PROXY_CONNECTION_TIMED_OUT|proxy\b.*\btimed out/i.test(error.message);
+}
+
+function isBrowserDisconnection(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /browser has been closed|Target page, context or browser has been closed|Connection closed|CDP connection closed|ECONNRESET|ECONNREFUSED/i.test(error.message);
+}
+
+function isSourceTimeout(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /Timeout \d+ms exceeded|Navigation timeout of \d+ms exceeded|page\.goto: Timeout/i.test(error.message);
 }

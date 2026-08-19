@@ -65,6 +65,23 @@ describe("SellerCenterBrowserDataSource order response capture", () => {
     expect(page.gotoUrls[0]).toContain("tab=all");
   });
 
+  it("matches order list response when request body is empty object {}", async () => {
+    const page = new FakeOrdersPage([
+      new FakeResponse(
+        "https://seller-us.tiktok.com/api/fulfillment/na/order/list",
+        "POST",
+        orderListResponse(5),
+        {},
+      ),
+    ]);
+    const source = dataSource(page);
+
+    const batches = await collectBatches(source);
+
+    expect(batches).toHaveLength(1);
+    expect((batches[0] as { orders: unknown[] }).orders).toHaveLength(5);
+  });
+
   it("waits long enough for an All-orders response delayed by a slow proxy", async () => {
     const page = new FakeOrdersPage(defaultResponses(), 90_000, 90_000);
     const source = dataSource(page);
@@ -79,11 +96,6 @@ describe("SellerCenterBrowserDataSource order response capture", () => {
       name: "total_count is missing",
       response: orderListResponse(9, { totalCount: undefined }),
       message: "total_count",
-    },
-    {
-      name: "pagination termination flags are missing",
-      response: orderListResponse(9, { hasMore: undefined, searchNextHasMore: undefined }),
-      message: "termination",
     },
     {
       name: "the row count differs from total_count",

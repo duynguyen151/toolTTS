@@ -87,6 +87,9 @@ export async function setShopVerificationState(
       ...(input.tiktokShopId === undefined ? {} : { tiktokShopId: input.tiktokShopId }),
       verificationStatus: input.verificationStatus,
       eligibilityStatus: input.eligibilityStatus,
+      ...(input.verificationStatus === "VERIFIED" && input.eligibilityStatus === "ELIGIBLE"
+        ? { syncState: "ACTIVE", pauseReason: null }
+        : {}),
       updatedAt: new Date(),
     })
     .where(eq(shops.id, shopId))
@@ -152,6 +155,8 @@ export async function markShopSynced(
       ...(kind === "orders"
         ? { lastOrdersSyncedAt: syncedAt }
         : { lastFinanceSyncedAt: syncedAt }),
+      syncState: "ACTIVE",
+      pauseReason: null,
       syncRequestedAt: null,
       updatedAt: syncedAt
     })

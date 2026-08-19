@@ -9,6 +9,7 @@ import {
   DecisionRuleResultSchema,
   DecisionRuleTriggerSchema,
 } from "@shop-health/domain";
+import type { AiDecisionContext } from "@shop-health/domain";
 import { z } from "zod";
 
 const UniqueReasonCodesSchema = z
@@ -36,7 +37,7 @@ export const BaselineAiInputSchema = z
     riskSnapshot: DecisionRiskSnapshotSchema,
     ruleDecision: DecisionRuleResultSchema,
     ruleTriggers: UniqueRuleTriggersSchema,
-    decisionContextSnapshot: AiDecisionContextSchema.nullable().optional(),
+    decisionContextSnapshot: AiDecisionContextSchema,
   })
   .strict();
 
@@ -68,6 +69,9 @@ export const AiUnavailableErrorCodeSchema = z.enum([
 ]);
 
 export type BaselineAiInput = z.infer<typeof BaselineAiInputSchema>;
+export type BaselineAiInputRecord = Omit<BaselineAiInput, "decisionContextSnapshot"> & {
+  readonly decisionContextSnapshot: AiDecisionContext | null;
+};
 export type BaselineAiOutput = z.infer<typeof BaselineAiOutputSchema>;
 export type AiUnavailableErrorCode = z.infer<typeof AiUnavailableErrorCodeSchema>;
 export type AiRiskLevel = BaselineAiOutput["riskLevel"];
@@ -104,5 +108,5 @@ export type BaselineAiUnavailable = Readonly<{
 export type BaselineAiResult = BaselineAiAvailable | BaselineAiUnavailable;
 
 export interface BaselineAiClient {
-  recommend(input: BaselineAiInput): Promise<BaselineAiResult>;
+  recommend(input: BaselineAiInputRecord): Promise<BaselineAiResult>;
 }

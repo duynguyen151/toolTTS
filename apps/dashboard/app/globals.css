@@ -228,6 +228,22 @@ button:disabled {
   border-top: 1px solid var(--color-border);
 }
 
+.sidebar-log-slot {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  margin-top: 18px;
+  overflow: hidden;
+}
+
+.sidebar-log-slot > * {
+  flex: 1 1 auto;
+}
+
+#mobile-log-slot {
+  display: none;
+}
+
 .sidebar-note__eyebrow {
   color: var(--color-primary);
   font-size: 0.58rem;
@@ -638,6 +654,19 @@ button:disabled {
 
   .sidebar {
     display: none;
+  }
+
+  #mobile-log-slot {
+    position: fixed;
+    z-index: 40;
+    inset: 0;
+    display: block;
+    pointer-events: none;
+  }
+
+  #mobile-log-slot > * {
+    height: 100%;
+    pointer-events: auto;
   }
 
   .topbar {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { BaselineAiInput } from "@shop-health/decision-ai";
+import type { BaselineAiInputRecord } from "@shop-health/decision-ai";
 
 import {
   createDecisionWorkflow,
@@ -65,7 +65,7 @@ const source: ReviewStartSource = {
   previousDecisionContext: null,
 };
 
-const persistedAiInput: BaselineAiInput = {
+const persistedAiInput: BaselineAiInputRecord = {
   metricsSnapshot: {
     window: "FULL_PERSISTED_HISTORY",
     periodStart: "2026-08-01T00:00:00.000Z",
@@ -101,6 +101,7 @@ const persistedAiInput: BaselineAiInput = {
   },
   ruleDecision: "PAUSE",
   ruleTriggers: ["ONHOLD_VALUE"],
+  decisionContextSnapshot: null,
 };
 
 const unavailableResult = {
@@ -517,7 +518,7 @@ describe("decision workflow", () => {
     store.loadReviewStartSource = async () => {
       throw new Error("persisted facts must not be reloaded for an incomplete retry");
     };
-    let receivedAiInput: BaselineAiInput | undefined;
+    let receivedAiInput: BaselineAiInputRecord | undefined;
     const workflow = createDecisionWorkflow({
       store,
       aiClient: {

@@ -1,4 +1,5 @@
 import { Decimal } from "decimal.js";
+import { assertFrozenDecisionContext } from "@shop-health/domain";
 import type {
   AiDecisionContext,
   DecisionCoverageSnapshot,
@@ -68,6 +69,8 @@ function comparable(
 
 function compatible(previous: AiDecisionContext | null, input: DecisionIntelligenceInput): boolean {
   return previous !== null
+    && previous.profile.profileId === input.profile.profileId
+    && previous.profile.profileNo === input.profile.profileNo
     && previous.shop.shopId === input.shop.shopId
     && previous.shop.currency === input.shop.currency
     && previous.policyVersions.metricDefinitionVersion === "decision-metrics.v1";
@@ -80,7 +83,7 @@ function dataQuality(coverage: DecisionCoverageSnapshot): AiDecisionContext["dat
   if (coverage.ordersSourceComplete !== true) blockers.push("ORDERS_SOURCE_INCOMPLETE");
   if (coverage.financeRequiredSourceComplete !== true) blockers.push("FINANCE_SOURCE_INCOMPLETE");
   if (coverage.sourceReconciled !== true) blockers.push("FINANCE_NOT_RECONCILED");
-  if (coverage.freshness !== "FRESH") blockers.push(`FRESHNESS_${coverage.freshness}`);
+  if ((coverage.freshness ?? "UNKNOWN") !== "FRESH") blockers.push(`FRESHNESS_${coverage.freshness ?? "UNKNOWN"}`);
   return {
     coverage: coverage.coverageState, source: coverage.source ?? null,
     provenSourceWindow: coverage.provenSourceWindow, completeWithinSourceWindow: coverage.completeWithinSourceWindow,
@@ -144,7 +147,21 @@ export function buildDecisionIntelligence(input: DecisionIntelligenceInput): { r
     schemaVersion: "ai-decision-context.v1", profile: input.profile, shop: input.shop,
     metrics: {
       observedAt: input.observedAt.toISOString(),
-      decision: { ...input.metrics, operationalExposure: exposure },
+      decision: {
+        window: input.metrics.window,
+        periodStart: input.metrics.periodStart,
+        periodEnd: input.metrics.periodEnd,
+        totalOrders: input.metrics.totalOrders,
+        totalPersistedOrders: input.metrics.totalPersistedOrders,
+        operationalOrderCount: input.metrics.operationalOrderCount,
+        onHoldOrderCount: input.metrics.onHoldOrderCount,
+        deliveredCount: input.metrics.deliveredCount,
+        deliveryRate: input.metrics.deliveryRate,
+        cancellationRate: input.metrics.cancellationRate,
+        refundRate: input.metrics.refundRate,
+        currency: input.metrics.currency,
+        operationalExposure: exposure,
+      },
       finance: {
         capturedAt: input.finance.capturedAt, currency: input.finance.currency,
         availableBalance: input.finance.availableBalance, frozenBalance: input.finance.frozenBalance,
@@ -159,7 +176,18 @@ export function buildDecisionIntelligence(input: DecisionIntelligenceInput): { r
       },
     },
     comparisons, trends: trendSignals(comparisons, input.trendPolicy), dataQuality: dataQuality(input.coverage),
-    risk: { ...input.risk, operationalExposure: input.risk.onHoldValue },
+    risk: {
+      policyVersion: input.risk.policyVersion,
+      evaluatedAt: input.risk.evaluatedAt,
+      deliveryRate: input.risk.deliveryRate,
+      stopByOnHoldValue: input.risk.stopByOnHoldValue,
+      stopByDeliveryRate: input.risk.stopByDeliveryRate,
+      dataSufficient: input.risk.dataSufficient,
+      stopOnHoldValueAt: input.risk.stopOnHoldValueAt,
+      stopDeliveryRateBelow: input.risk.stopDeliveryRateBelow,
+      minimumOrdersForRateRule: input.risk.minimumOrdersForRateRule,
+      operationalExposure: input.risk.onHoldValue,
+    },
     rule: {
       result: input.ruleDecision, policyVersion: input.risk.policyVersion,
       checks: [
@@ -167,10 +195,36 @@ export function buildDecisionIntelligence(input: DecisionIntelligenceInput): { r
         { metric: "deliveryRate", observedValue: input.metrics.deliveryRate, threshold: input.risk.stopDeliveryRateBelow, operator: "LT", result: input.metrics.deliveryRate === null || !input.risk.dataSufficient ? "NOT_EVALUATED" : rateFailed ? "FAIL" : "PASS", triggeredReason: rateFailed ? "DELIVERY_RATE_BELOW_LIMIT" : null },
       ],
       triggers: [...(exposureFailed ? ["OPERATIONAL_EXPOSURE" as const] : []), ...(rateFailed ? ["DELIVERY_RATE" as const] : [])],
-      expression: "operationalExposure >= 3500 USD OR deliveryRate < 70%", evaluatedAt: input.observedAt.toISOString(),
+      expression: `operationalExposure >= ${new Decimal(input.risk.stopOnHoldValueAt).toString()} ${input.shop.currency} OR deliveryRate < ${new Decimal(input.risk.stopDeliveryRateBelow).times(100).toString()}%`,
+      evaluatedAt: input.observedAt.toISOString(),
     },
-    previousCompatibleSnapshot: prior === null ? null : { observedAt: prior.metrics.observedAt, metrics: prior.metrics, dataQuality: prior.dataQuality },
+    previousCompatibleSnapshot: prior === null ? null : {
+      observedAt: prior.metrics.observedAt,
+      metrics: prior.metrics,
+      dataQuality: prior.dataQuality,
+      provenance: {
+        shopId: prior.shop.shopId,
+        profileId: prior.profile.profileId,
+        profileNo: prior.profile.profileNo,
+      },
+    },
     policyVersions: { metricDefinitionVersion: "decision-metrics.v1", riskPolicyVersion: input.risk.policyVersion, trendPolicyVersion: input.trendPolicy?.version ?? null },
   };
-  return { context };
+  return {
+    context: assertFrozenDecisionContext({
+      context,
+      metrics: input.metrics,
+      finance: input.finance,
+      coverage: input.coverage,
+      risk: input.risk,
+      ruleDecision: input.ruleDecision,
+      ruleTriggers: input.ruleTriggers,
+      owner: {
+        shopId: input.shop.shopId,
+        profileId: input.profile.profileId,
+        profileNo: input.profile.profileNo,
+      },
+      ...(input.trendPolicy === undefined ? {} : { trendPolicy: input.trendPolicy }),
+    }),
+  };
 }

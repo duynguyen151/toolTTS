@@ -15,6 +15,7 @@ export function AppShell({ children }: AppShellProps) {
       </a>
       <Sidebar />
       <TopBar />
+      <div id="mobile-log-slot" />
       <main id="main-content" className="dashboard-main" tabIndex={-1}>
         {children}
       </main>

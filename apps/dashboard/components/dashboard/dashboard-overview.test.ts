@@ -134,7 +134,10 @@ const operationsPresentation: ProfileOperationsPresentation = {
   error: null,
 };
 
-function renderDashboard(dataOrigin: DashboardPresentation["dataOrigin"] = "DEMO_SANITIZED"): string {
+function renderDashboard(
+  dataOrigin: DashboardPresentation["dataOrigin"] = "DEMO_SANITIZED",
+  operatorProfileNo?: string,
+): string {
   return renderToStaticMarkup(createElement(
     OperationsProvider,
     {
@@ -144,7 +147,10 @@ function renderDashboard(dataOrigin: DashboardPresentation["dataOrigin"] = "DEMO
         displayName: presentation.selectedShop.displayName,
         dataOrigin,
       },
-      children: createElement(DashboardOverview, { presentation: { ...presentation, dataOrigin } }),
+      children: createElement(DashboardOverview, {
+        presentation: { ...presentation, dataOrigin },
+        ...(operatorProfileNo === undefined ? {} : { operatorProfileNo }),
+      }),
     },
   ));
 }
@@ -187,6 +193,22 @@ describe("DashboardOverview", () => {
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>.*Open profile/s);
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>.*Update data/s);
     expect(html).not.toMatch(/profileId|cdpEndpoint|user_id|password|proxy/i);
+  });
+
+  it("mounts the live shop decision center instead of the fixture workspace", () => {
+    const html = renderDashboard("LIVE");
+
+    expect(html).toContain("Shop Decision Center");
+    expect(html).toContain("Live read model");
+    expect(html).not.toContain("TEST / DEV FIXTURE");
+    expect(html).not.toContain("Integration D required");
+  });
+
+  it("distinguishes an operator-selected profile from stale persisted shop data", () => {
+    const html = renderDashboard("LIVE", "987");
+
+    expect(html).toContain("Operator profile 987 selected");
+    expect(html).toContain("Decision Center data below belongs to profile 957 until Verify completes.");
   });
 
   it("enables profile operations only for LIVE dashboard data", () => {

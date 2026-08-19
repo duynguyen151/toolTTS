@@ -65,6 +65,7 @@ function adapters(overrides: Partial<DashboardOperationsAdapters> = {}): Dashboa
   return {
     listAdsPowerProfiles: async () => profiles,
     listShops: async () => shops,
+    listEligibleShops: async () => shops,
     ensureAdsPowerReady: async () => undefined,
     openReady: async () => undefined,
     checkSellerCenterHealth: async () => ({
@@ -88,6 +89,176 @@ async function collectUpdate(
 }
 
 describe("DashboardOperations", () => {
+  it("verifies only the explicitly selected profile", async () => {
+    const verified: string[] = [];
+    const result = await createDashboardOperations(adapters({
+      verifyProfile: async (profile) => {
+        verified.push(profile.profileNo);
+        return { verificationState: "READY", shop: shops[0] ?? null };
+      },
+    })).verifyProfile("958");
+
+    expect(verified).toEqual(["958"]);
+    expect(result).toMatchObject({ ok: true, profileNo: "958", verificationState: "READY" });
+  });
+
+  it("runs selected profiles sequentially and continues after a failure", async () => {
+    const calls: string[] = [];
+    const result = await createDashboardOperations(adapters({
+      runSync: async (profileNo, kind) => {
+        calls.push(`${profileNo}:${kind}`);
+        if (profileNo === "957" && calls.filter((call) => call.endsWith(":orders")).length === 2) {
+          throw new Error("profile unavailable");
+        }
+        return completeSync(kind);
+      },
+    })).syncSelected(["957", "957", "957"]);
+
+    expect(calls).toEqual(["957:orders", "957:finance", "957:orders", "957:orders", "957:finance"]);
+    expect(result).toEqual([
+      { profileNo: "957", status: "SUCCEEDED", error: null },
+      { profileNo: "957", status: "FAILED", error: "Seller Center synchronization failed." },
+      { profileNo: "957", status: "SUCCEEDED", error: null },
+    ]);
+  });
+
+  it("reuses the selected sync inventory instead of immediately re-querying AdsPower", async () => {
+    let inventoryReads = 0;
+    const result = await createDashboardOperations(adapters({
+      listAdsPowerProfiles: async () => {
+        inventoryReads += 1;
+        return profiles;
+      },
+    })).syncSelected(["957"]);
+
+    expect(result).toEqual([{ profileNo: "957", status: "SUCCEEDED", error: null }]);
+    expect(inventoryReads).toBe(1);
+  });
+
+  it("bootstraps an unlinked selected profile through VERIFY before its first sync", async () => {
+    const calls: string[] = [];
+    let verified = false;
+    const selectedShop: DashboardOperationsShop = {
+      id: "shop-958",
+      profileId: "internal-958",
+      profileNo: "958",
+      displayName: "Tool TTS Shop 958",
+    };
+    const result = await createDashboardOperations(adapters({
+      listShops: async () => verified ? [...shops, selectedShop] : shops,
+      listEligibleShops: async () => verified ? [...shops, selectedShop] : shops,
+      verifyProfile: async (profile) => {
+        calls.push(`verify:${profile.profileNo}`);
+        verified = true;
+        return { verificationState: "READY", shop: selectedShop };
+      },
+      openReady: async () => { calls.push("open"); },
+      checkSellerCenterHealth: async () => {
+        calls.push("health");
+        return { status: "HEALTHY", checkedAt: new Date(), detail: null };
+      },
+      runSync: async (_profileNo, kind) => {
+        calls.push(kind);
+        return completeSync(kind);
+      },
+      evaluateRisk: async () => { calls.push("risk"); return completeDecisionCoverage; },
+    })).syncSelected(["958"]);
+
+    expect(calls).toEqual(["verify:958", "open", "health", "orders", "finance", "risk"]);
+    expect(result).toEqual([{ profileNo: "958", status: "SUCCEEDED", error: null }]);
+  });
+
+  it("syncs only dynamically discovered eligible profiles", async () => {
+    const synced: string[] = [];
+    const result = await createDashboardOperations(adapters({
+      listEligibleShops: async () => shops,
+      runSync: async (profileNo, kind) => { if (kind === "orders") synced.push(profileNo); return completeSync(kind); },
+    })).syncAllEligible();
+
+    expect(synced).toEqual(["957"]);
+    expect(result).toEqual([
+      { profileNo: "957", status: "SUCCEEDED", error: null },
+    ]);
+  });
+
+  it("fails closed when the canonical eligible-shop query is unavailable", async () => {
+    const events = await collectUpdate(createDashboardOperations(adapters({
+      listEligibleShops: async () => { throw new Error("private database detail"); },
+    })));
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      state: "ERROR",
+      terminal: true,
+      error: { code: "DATABASE_UNAVAILABLE" },
+    });
+    expect(JSON.stringify(events)).not.toContain("private database detail");
+  });
+
+  it.each([
+    ["unverified", []],
+    ["disabled shop", []],
+    ["paused shop", []],
+    ["ineligible shop", []],
+  ] as const)("rejects Update Data when the canonical query excludes a %s", async (_label, eligibleShops) => {
+    const events = await collectUpdate(createDashboardOperations(adapters({
+      listEligibleShops: async () => eligibleShops,
+    })));
+
+    expect(events.at(-1)).toMatchObject({
+      state: "ERROR",
+      terminal: true,
+      error: { code: "PROFILE_NOT_ELIGIBLE" },
+    });
+  });
+
+  it("revalidates each selected profile against dynamic inventory and isolates failures", async () => {
+    const eligibleByCall = [shops, [], shops];
+    const synced: string[] = [];
+    const result = await createDashboardOperations(adapters({
+      listAdsPowerProfiles: async () => profiles,
+      listShops: async () => [...shops, {
+        id: "shop-958", profileId: "internal-958", profileNo: "958", displayName: "Tool TTS Shop 958",
+      }],
+      listEligibleShops: async () => eligibleByCall.shift() ?? [],
+      runSync: async (profileNo, kind) => {
+        if (kind === "orders") synced.push(profileNo);
+        return completeSync(kind);
+      },
+    })).syncSelected(["957", "958", "957"]);
+
+    expect(synced).toEqual(["957", "957"]);
+    expect(result).toEqual([
+      { profileNo: "957", status: "SUCCEEDED", error: null },
+      { profileNo: "958", status: "FAILED", error: "The selected profile is not READY and ELIGIBLE." },
+      { profileNo: "957", status: "SUCCEEDED", error: null },
+    ]);
+  });
+
+  it("serializes update and batch operations through one global guard", async () => {
+    let active = 0;
+    let maximumActive = 0;
+    let release: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => { release = resolve; });
+    const operations = createDashboardOperations(adapters({
+      listEligibleShops: async () => shops,
+      openReady: async () => {
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        await started;
+        active -= 1;
+      },
+    }));
+    const first = operations.updateData("957", () => undefined);
+    const second = operations.syncSelected(["957"]);
+    const third = operations.syncAllEligible();
+    await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+    expect(maximumActive).toBe(1);
+    release?.();
+    await Promise.all([first, second, third]);
+    expect(maximumActive).toBe(1);
+  });
+
   it("lists all AdsPower profiles and joins linked shops by server-only profile ID", async () => {
     const presentation = await createDashboardOperations(adapters()).listProfiles("958");
 
@@ -169,7 +340,7 @@ describe("DashboardOperations", () => {
     });
   });
 
-  it("ensures readiness, reuses an open session, and checks health before syncing", async () => {
+  it("reuses an open profile without a redundant application readiness probe", async () => {
     const calls: string[] = [];
     const openProfile = profiles[1];
     if (openProfile === undefined) throw new Error("test profile missing");
@@ -182,7 +353,10 @@ describe("DashboardOperations", () => {
     const events = await collectUpdate(createDashboardOperations(adapters({
       listAdsPowerProfiles: async () => [openProfile],
       listShops: async () => [shop],
-      ensureAdsPowerReady: async () => { calls.push("ensure"); },
+      listEligibleShops: async () => [shop],
+      ensureAdsPowerReady: async () => {
+        throw new SellerCenterError("ADSPOWER_UNAVAILABLE", "private readiness request detail");
+      },
       openReady: async () => { calls.push("open"); },
       checkSellerCenterHealth: async () => {
         calls.push("health");
@@ -195,7 +369,7 @@ describe("DashboardOperations", () => {
       evaluateRisk: async () => { calls.push("risk"); return completeDecisionCoverage; },
     })), "958");
 
-    expect(calls).toEqual(["ensure", "open", "health", "orders", "finance", "risk"]);
+    expect(calls).toEqual(["open", "health", "orders", "finance", "risk"]);
     expect(events.map((event) => event.state)).not.toContain("OPENING_PROFILE");
     expect(events.at(-1)).toMatchObject({ state: "SUCCESS", completedKinds: ["orders", "finance"] });
   });
@@ -409,6 +583,30 @@ describe("DashboardOperations", () => {
     });
   });
 
+  it("warns when the selected profile proxy times out before any data sync", async () => {
+    let syncCalls = 0;
+    const events = await collectUpdate(createDashboardOperations(adapters({
+      checkSellerCenterHealth: async () => ({
+        status: "PROXY_TIMEOUT",
+        checkedAt: new Date(),
+        detail: "private-proxy.example:8080",
+      }),
+      runSync: async () => {
+        syncCalls += 1;
+        return completeSync("orders");
+      },
+    })));
+
+    expect(syncCalls).toBe(0);
+    expect(events.at(-1)).toMatchObject({
+      state: "ERROR",
+      terminal: true,
+      error: { code: "PROFILE_PROXY_TIMEOUT" },
+      message: "The selected profile proxy did not respond. Check the profile proxy and retry.",
+    });
+    expect(JSON.stringify(events)).not.toContain("private-proxy.example");
+  });
+
   it("maps an initially open profile timeout to CDP unavailability", async () => {
     const openProfile = profiles[1];
     if (openProfile === undefined) throw new Error("test profile missing");
@@ -421,6 +619,7 @@ describe("DashboardOperations", () => {
     const events = await collectUpdate(createDashboardOperations(adapters({
       listAdsPowerProfiles: async () => [openProfile],
       listShops: async () => [shop],
+      listEligibleShops: async () => [shop],
       openReady: async () => { throw new SellerCenterError("SOURCE_TIMEOUT", "private timeout"); },
     })), "958");
 
@@ -476,7 +675,7 @@ describe("DashboardOperations", () => {
   });
 
   it.each([
-    [new SellerCenterError("ADSPOWER_UNAVAILABLE", "private API detail"), "ADSPOWER_NOT_RUNNING"],
+    [new SellerCenterError("ADSPOWER_UNAVAILABLE", "private API detail"), "ADSPOWER_UNAVAILABLE"],
     [new SellerCenterError("PROFILE_START_FAILED", "private start detail"), "PROFILE_OPEN_FAILED"],
     [new SellerCenterError("SOURCE_TIMEOUT", "private timeout detail"), "PROFILE_NOT_READY"],
     [new SellerCenterError("BROWSER_DISCONNECTED", "private CDP detail"), "PROFILE_NOT_READY"],

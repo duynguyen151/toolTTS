@@ -1,4 +1,5 @@
 import type { BaselineAiConfig } from "./config.js";
+import { validateFrozenDecisionContext } from "@shop-health/domain";
 import {
   BaselineAiInputSchema,
   type AiUnavailableErrorCode,
@@ -33,15 +34,15 @@ export function createBaselineAiClientFromConfig(
 
   return {
     async recommend(input): Promise<BaselineAiResult> {
-      const parsedInput = BaselineAiInputSchema.parse(input);
       const models = [config.registry.defaultModel, ...config.registry.fallbackModels];
+      const parsed = BaselineAiInputSchema.safeParse(input);
       const baseProvenance = {
         provider: config.provider,
         authMode: config.authMode,
         outputSchemaVersion: DECISION_AI_OUTPUT_SCHEMA_VERSION,
         promptVersion: DECISION_AI_PROMPT_VERSION,
         aiPolicyVersion: DECISION_AI_POLICY_VERSION,
-        rulePolicyVersion: parsedInput.riskSnapshot.policyVersion,
+        rulePolicyVersion: parsed.success ? parsed.data.riskSnapshot.policyVersion : "unknown",
         generatedAt: now().toISOString(),
       } as const;
       const unavailable = (
@@ -56,6 +57,19 @@ export function createBaselineAiClientFromConfig(
         actualModelUsed: null,
         ...baseProvenance,
       });
+
+      if (!parsed.success) return unavailable("INVALID_RESPONSE");
+      const parsedInput = parsed.data;
+      const frozenContextValidation = validateFrozenDecisionContext({
+        context: parsedInput.decisionContextSnapshot,
+        metrics: parsedInput.metricsSnapshot,
+        finance: parsedInput.financeSnapshot,
+        coverage: parsedInput.coverageSnapshot,
+        risk: parsedInput.riskSnapshot,
+        ruleDecision: parsedInput.ruleDecision,
+        ruleTriggers: parsedInput.ruleTriggers,
+      });
+      if (!frozenContextValidation.valid) return unavailable("INVALID_RESPONSE");
 
       if (!config.enabled) return unavailable("FEATURE_DISABLED");
       if (config.authMode === "CONFIG_MISSING") return unavailable("CONFIG_MISSING");

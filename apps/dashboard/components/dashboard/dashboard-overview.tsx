@@ -1,15 +1,18 @@
 import type { DashboardPresentation } from "../../lib/dashboard-contract";
+import Link from "next/link";
 import { OperationsControls } from "../operations/operations-controls";
 import { StatusBadge } from "../ui/status-badge";
 import { DataQualityPanel } from "./data-quality-panel";
 import { DecisionTrace } from "./decision-trace";
 import { KpiBand } from "./kpi-band";
+import { LiveDecisionCenter } from "./live-decision-center";
 import { OperationalPanel } from "./operational-panel";
 import { OrderHealth } from "./order-health";
 import styles from "./dashboard-overview.module.css";
 
 type DashboardOverviewProps = {
   presentation: DashboardPresentation;
+  operatorProfileNo?: string;
 };
 
 function formatGeneratedAt(value: string): string {
@@ -28,8 +31,9 @@ function formatGeneratedAt(value: string): string {
   }).format(timestamp);
 }
 
-export function DashboardOverview({ presentation }: DashboardOverviewProps) {
+export function DashboardOverview({ presentation, operatorProfileNo }: DashboardOverviewProps) {
   const generatedAtLabel = formatGeneratedAt(presentation.generatedAt);
+  const operatorProfileDiffers = operatorProfileNo !== undefined && operatorProfileNo !== presentation.selectedShop.profileNo;
 
   return (
     <div className={styles.dashboard}>
@@ -51,6 +55,11 @@ export function DashboardOverview({ presentation }: DashboardOverviewProps) {
             <span aria-hidden="true"> · </span>
             <span>AdsPower profile {presentation.selectedShop.profileNo}</span>
           </p>
+          {operatorProfileDiffers ? (
+            <p>
+              Operator profile {operatorProfileNo} selected. Decision Center data below belongs to profile {presentation.selectedShop.profileNo} until Verify completes.
+            </p>
+          ) : null}
         </div>
 
         <OperationsControls generatedAtLabel={generatedAtLabel} />
@@ -61,11 +70,26 @@ export function DashboardOverview({ presentation }: DashboardOverviewProps) {
         <OperationalPanel profile={presentation.profile} sync={presentation.sync} />
       </div>
 
+      <nav aria-label="Linked LIVE shops">
+        <p>Decision Center shop</p>
+        <ul>
+          {presentation.shops.map((shop) => (
+            <li key={shop.id}>
+              <Link href={`/dashboard?shop=${encodeURIComponent(shop.profileNo)}`} aria-current={shop.selected ? "page" : undefined}>
+                {shop.displayName} · Profile {shop.profileNo}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </nav>
+
       <div className={styles.secondaryGrid}>
         <OrderHealth health={presentation.orderHealth} />
         <DataQualityPanel coverage={presentation.coverage} freshness={presentation.freshness} />
         <DecisionTrace stages={presentation.decisionTrace} />
       </div>
+
+      <LiveDecisionCenter dataOrigin={presentation.dataOrigin} center={presentation.decisionCenter} />
     </div>
   );
 }

@@ -15,7 +15,7 @@ import {
 } from "@shop-health/domain";
 import type {
   BaselineAiClient,
-  BaselineAiInput,
+  BaselineAiInputRecord,
   BaselineAiResult,
 } from "@shop-health/decision-ai";
 import type { BaDecision, BaDecisionReasonCode } from "@shop-health/domain";
@@ -51,7 +51,7 @@ export interface ReviewStartSource {
 
 export interface DecisionWorkflowStore {
   getDecisionReviewByRequestId(requestId: string): Promise<PersistedDecisionReview | null>;
-  getDecisionAiInput(caseId: string): Promise<BaselineAiInput>;
+  getDecisionAiInput(caseId: string): Promise<BaselineAiInputRecord>;
   loadReviewStartSource(profileNo: string): Promise<ReviewStartSource>;
   createDecisionCase(input: {
     readonly requestId: string;

@@ -23,7 +23,7 @@ describe("SellerCenterBrowserDataSource order response capture", () => {
   it("reports browser disconnections as unavailable instead of layout changes", async () => {
     const source = new SellerCenterBrowserDataSource({
       adsPowerClient: {
-        open: vi.fn().mockRejectedValue(new SellerCenterError(
+        openReady: vi.fn().mockRejectedValue(new SellerCenterError(
           "BROWSER_DISCONNECTED",
           "AdsPower browser connection is unavailable",
         )),
@@ -63,6 +63,15 @@ describe("SellerCenterBrowserDataSource order response capture", () => {
     expect(page.matchedMethods).toEqual(["POST"]);
     expect(page.gotoUrls[0]).toContain("selected_sort=6");
     expect(page.gotoUrls[0]).toContain("tab=all");
+  });
+
+  it("waits long enough for an All-orders response delayed by a slow proxy", async () => {
+    const page = new FakeOrdersPage(defaultResponses(), 90_000, 90_000);
+    const source = dataSource(page);
+
+    const batches = await collectBatches(source);
+
+    expect(batches).toHaveLength(1);
   });
 
   it.each([
@@ -119,9 +128,16 @@ class FakeOrdersPage {
   readonly gotoUrls: string[] = [];
   private currentUrl = "about:blank";
 
-  constructor(private readonly responses = defaultResponses()) {}
+  constructor(
+    private readonly responses = defaultResponses(),
+    private readonly minimumResponseTimeoutMs = 0,
+    private readonly minimumNavigationTimeoutMs = 0,
+  ) {}
 
-  async goto(url: string): Promise<void> {
+  async goto(url: string, options?: { timeout?: number }): Promise<void> {
+    if ((options?.timeout ?? 0) < this.minimumNavigationTimeoutMs) {
+      throw new Error("Navigation did not have enough time for the proxy-delayed refresh");
+    }
     this.currentUrl = url;
     this.gotoUrls.push(url);
   }
@@ -132,7 +148,11 @@ class FakeOrdersPage {
 
   async waitForResponse(
     predicate: (response: FakeResponse) => boolean,
+    options?: { timeout?: number },
   ): Promise<FakeResponse> {
+    if ((options?.timeout ?? 0) < this.minimumResponseTimeoutMs) {
+      throw new Error("Response arrived after the previous endpoint scan deadline");
+    }
     const response = this.responses.find(predicate);
     if (!response) throw new Error("No matching fake response");
     this.matchedMethods.push(response.request().method());
@@ -185,7 +205,7 @@ function dataSource(page: FakeOrdersPage): SellerCenterBrowserDataSource {
   });
   return new SellerCenterBrowserDataSource({
     adsPowerClient: {
-      open: vi.fn().mockResolvedValue({
+      openReady: vi.fn().mockResolvedValue({
         profileId: "profile-1",
         status: "Active",
         cdpEndpoint: "ws://127.0.0.1/devtools/browser/test",

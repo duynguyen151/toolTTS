@@ -1,3 +1,10 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
+import {
+  runSequentialProfileQueue,
+  type ProfileQueueResult,
+  type ProfileVerificationResult,
+} from "@shop-health/sync";
 import {
   type AdsPowerProfileSummary,
 } from "@shop-health/seller-center/adspower";
@@ -24,6 +31,8 @@ export interface DashboardOperationsShop {
 export interface DashboardOperationsAdapters {
   listAdsPowerProfiles(): Promise<readonly AdsPowerProfileSummary[]>;
   listShops(): Promise<readonly DashboardOperationsShop[]>;
+  /** Canonical READY/ELIGIBLE profile-and-shop inventory for all sync gates. */
+  listEligibleShops(): Promise<readonly DashboardOperationsShop[]>;
   ensureAdsPowerReady(): Promise<void>;
   openReady(profileId: string): Promise<void>;
   checkSellerCenterHealth(shop: DashboardOperationsShop): Promise<SourceHealth>;
@@ -32,6 +41,10 @@ export interface DashboardOperationsAdapters {
     kind: "orders" | "finance",
   ): Promise<Pick<SyncResult, "status" | "complete" | "sourceCoverage" | "financeProof">>;
   evaluateRisk(profileNo: string): Promise<DecisionCoverageSnapshot | undefined>;
+  /** Verifies one explicitly selected profile; never called for inventory listing. */
+  verifyProfile?(profile: AdsPowerProfileSummary): Promise<Pick<ProfileVerificationResult, "verificationState"> & {
+    readonly shop: DashboardOperationsShop | null;
+  }>;
 }
 
 export type UpdateDataEmitter = (event: UpdateDataEvent) => void | Promise<void>;
@@ -39,8 +52,26 @@ export type UpdateDataEmitter = (event: UpdateDataEvent) => void | Promise<void>
 export interface DashboardOperations {
   listProfiles(selectedProfileNo?: string): Promise<ProfileOperationsPresentation>;
   openProfile(profileNo: string): Promise<OpenProfileResult>;
+  verifyProfile(profileNo: string): Promise<VerifyProfileResult>;
   updateData(profileNo: string, emit: UpdateDataEmitter): Promise<void>;
+  syncSelected(profileNos: readonly string[]): Promise<ProfileQueueResult[]>;
+  syncAllEligible(): Promise<ProfileQueueResult[]>;
 }
+
+export type VerifyProfileResult =
+  | {
+      readonly ok: true;
+      readonly profileNo: string;
+      readonly verificationState: ProfileVerificationResult["verificationState"];
+      readonly shop: DashboardOperationsShop | null;
+    }
+  | {
+      readonly ok: false;
+      readonly profileNo: string;
+      readonly verificationState: "UNVERIFIED";
+      readonly shop: null;
+      readonly error: OperationError;
+    };
 
 function error(code: OperationError["code"], message: string): OperationError {
   return { code, message };
@@ -60,10 +91,13 @@ function profileOperationError(cause: unknown, wasOpen = false): OperationError 
     return error("ADSPOWER_LAUNCH_TIMEOUT", "AdsPower did not become ready before the launch deadline.");
   }
   if (failureType === "ADSPOWER_UNAVAILABLE") {
-    return error("ADSPOWER_NOT_RUNNING", "AdsPower is not running. Start the application and retry.");
+    return error("ADSPOWER_UNAVAILABLE", "Dashboard could not reach the AdsPower Local API. Retry the operation.");
   }
   if (failureType === "PROFILE_START_FAILED") {
     return error("PROFILE_OPEN_FAILED", "AdsPower could not open the selected profile.");
+  }
+  if (failureType === "PROXY_TIMEOUT") {
+    return error("PROFILE_PROXY_TIMEOUT", "The selected profile proxy did not respond. Check the profile proxy and retry.");
   }
   if (failureType === "SOURCE_TIMEOUT" || failureType === "BROWSER_DISCONNECTED") {
     return wasOpen
@@ -74,9 +108,10 @@ function profileOperationError(cause: unknown, wasOpen = false): OperationError 
 }
 
 function applicationReadinessError(cause: unknown): OperationError {
-  return profileOperationError(cause).code === "ADSPOWER_LAUNCH_TIMEOUT"
+  const operationError = profileOperationError(cause);
+  return operationError.code === "ADSPOWER_LAUNCH_TIMEOUT"
     ? error("ADSPOWER_LAUNCH_TIMEOUT", "AdsPower did not become ready before the launch deadline.")
-    : error("ADSPOWER_NOT_RUNNING", "AdsPower is not available from the dashboard.");
+    : operationError;
 }
 
 function syncFailure(cause: unknown): { state: UpdateDataState; error: OperationError; message: string } {
@@ -93,6 +128,13 @@ function syncFailure(cause: unknown): { state: UpdateDataState; error: Operation
       state: "HUMAN_ACTION_REQUIRED",
       error: error("SECURITY_CHALLENGE_REQUIRED", "Seller Center requires a security check."),
       message: "Open the profile and complete the security check, then retry Update Data.",
+    };
+  }
+  if (failureType === "PROXY_TIMEOUT") {
+    return {
+      state: "ERROR",
+      error: error("PROFILE_PROXY_TIMEOUT", "The selected profile proxy did not respond. Check the profile proxy and retry."),
+      message: "The selected profile proxy did not respond. Check the profile proxy and retry.",
     };
   }
   if (failureType === "LAYOUT_CHANGED") {
@@ -169,11 +211,35 @@ function presentProfiles(
 }
 
 export function createDashboardOperations(adapters: DashboardOperationsAdapters): DashboardOperations {
-  return {
+  let syncRunning = false;
+  const syncWaiters: (() => void)[] = [];
+  const syncContext = new AsyncLocalStorage<{ adsPowerProfiles?: readonly AdsPowerProfileSummary[] }>();
+  const serializeSync = async <T>(operation: () => Promise<T>): Promise<T> => {
+    if (syncContext.getStore() !== undefined) return operation();
+    if (syncRunning) {
+      await new Promise<void>((resolve) => { syncWaiters.push(resolve); });
+    }
+    syncRunning = true;
+    try {
+      return await operation();
+    } finally {
+      syncRunning = false;
+      syncWaiters.shift()?.();
+    }
+  };
+  const loadAdsPowerProfiles = async (): Promise<readonly AdsPowerProfileSummary[]> => {
+    const context = syncContext.getStore();
+    if (context?.adsPowerProfiles !== undefined) return context.adsPowerProfiles;
+    const profiles = await adapters.listAdsPowerProfiles();
+    if (context !== undefined) context.adsPowerProfiles = profiles;
+    return profiles;
+  };
+
+  const operations: DashboardOperations = {
     async listProfiles(selectedProfileNo) {
       let adsPowerProfiles: readonly AdsPowerProfileSummary[];
       try {
-        adsPowerProfiles = await adapters.listAdsPowerProfiles();
+        adsPowerProfiles = await loadAdsPowerProfiles();
       } catch (cause) {
         return {
           status: "ERROR",
@@ -211,7 +277,7 @@ export function createDashboardOperations(adapters: DashboardOperationsAdapters)
       }
       let adsPowerProfiles: readonly AdsPowerProfileSummary[];
       try {
-        adsPowerProfiles = await adapters.listAdsPowerProfiles();
+        adsPowerProfiles = await loadAdsPowerProfiles();
       } catch (cause) {
         return { ok: false, profileNo, state: "ERROR", error: profileOperationError(cause) };
       }
@@ -237,20 +303,70 @@ export function createDashboardOperations(adapters: DashboardOperationsAdapters)
       }
     },
 
-    async updateData(profileNo, emit) {
-      const completedKinds: ("orders" | "finance")[] = [];
-
+    async verifyProfile(profileNo) {
       try {
         await adapters.ensureAdsPowerReady();
       } catch (cause) {
-        const operationError = applicationReadinessError(cause);
-        await emit(updateEvent("ERROR", operationError.message, completedKinds, operationError));
-        return;
+        return {
+          ok: false,
+          profileNo,
+          verificationState: "UNVERIFIED",
+          shop: null,
+          error: applicationReadinessError(cause),
+        };
       }
+      let adsPowerProfiles: readonly AdsPowerProfileSummary[];
+      try {
+        adsPowerProfiles = await loadAdsPowerProfiles();
+      } catch (cause) {
+        return {
+          ok: false,
+          profileNo,
+          verificationState: "UNVERIFIED",
+          shop: null,
+          error: profileOperationError(cause),
+        };
+      }
+      const profile = adsPowerProfiles.find((candidate) => candidate.profileNo === profileNo);
+      if (profile === undefined) {
+        return {
+          ok: false,
+          profileNo,
+          verificationState: "UNVERIFIED",
+          shop: null,
+          error: error("PROFILE_NOT_FOUND", "The selected AdsPower profile was not found."),
+        };
+      }
+      if (adapters.verifyProfile === undefined) {
+        return {
+          ok: false,
+          profileNo,
+          verificationState: "UNVERIFIED",
+          shop: null,
+          error: error("UNEXPECTED_ERROR", "Profile verification is not available."),
+        };
+      }
+      try {
+        const result = await adapters.verifyProfile(profile);
+        return { ok: true, profileNo, verificationState: result.verificationState, shop: result.shop };
+      } catch (cause) {
+        return {
+          ok: false,
+          profileNo,
+          verificationState: "UNVERIFIED",
+          shop: null,
+          error: profileOperationError(cause),
+        };
+      }
+    },
+
+    async updateData(profileNo, emit) {
+      return serializeSync(async () => {
+      const completedKinds: ("orders" | "finance")[] = [];
 
       let adsPowerProfiles: readonly AdsPowerProfileSummary[];
       try {
-        adsPowerProfiles = await adapters.listAdsPowerProfiles();
+        adsPowerProfiles = await loadAdsPowerProfiles();
       } catch (cause) {
         const operationError = profileOperationError(cause);
         await emit(updateEvent("ERROR", operationError.message, completedKinds, operationError));
@@ -277,8 +393,31 @@ export function createDashboardOperations(adapters: DashboardOperationsAdapters)
         return;
       }
 
+      let eligibleShop: DashboardOperationsShop | undefined;
+      try {
+        eligibleShop = (await adapters.listEligibleShops())
+          .find((shop) => shop.profileId === profile.profileId);
+      } catch {
+        const operationError = error("DATABASE_UNAVAILABLE", "Profile eligibility could not be verified.");
+        await emit(updateEvent("ERROR", operationError.message, completedKinds, operationError));
+        return;
+      }
+      if (eligibleShop === undefined) {
+        const operationError = error("PROFILE_NOT_ELIGIBLE", "The selected profile is not READY and ELIGIBLE.");
+        await emit(updateEvent("ERROR", operationError.message, completedKinds, operationError));
+        return;
+      }
+      linkedShop = eligibleShop;
+
       if (profile.state !== "OPEN") {
         await emit(updateEvent("OPENING_PROFILE", "Ensuring the selected AdsPower profile is ready.", completedKinds));
+        try {
+          await adapters.ensureAdsPowerReady();
+        } catch (cause) {
+          const operationError = applicationReadinessError(cause);
+          await emit(updateEvent("ERROR", operationError.message, completedKinds, operationError));
+          return;
+        }
       }
       try {
         await adapters.openReady(profile.profileId);
@@ -320,7 +459,9 @@ export function createDashboardOperations(adapters: DashboardOperationsAdapters)
       if (health.status !== "HEALTHY") {
         const operationError = health.status === "LAYOUT_CHANGED"
           ? error("LAYOUT_CHANGED", "Seller Center layout verification failed.")
-          : error("CDP_UNAVAILABLE", "Seller Center could not be verified through the ready profile.");
+          : health.status === "PROXY_TIMEOUT"
+            ? error("PROFILE_PROXY_TIMEOUT", "The selected profile proxy did not respond. Check the profile proxy and retry.")
+            : error("CDP_UNAVAILABLE", "Seller Center could not be verified through the ready profile.");
         await emit(updateEvent("ERROR", operationError.message, completedKinds, operationError));
         return;
       }
@@ -381,6 +522,37 @@ export function createDashboardOperations(adapters: DashboardOperationsAdapters)
       }
 
       await emit(updateEvent("SUCCESS", "Orders, finance, and deterministic risk data are up to date.", completedKinds));
+      });
+    },
+
+    async syncSelected(profileNos) {
+      return serializeSync(() => syncContext.run({}, () =>
+        runSequentialProfileQueue(profileNos, async (profileNo) => {
+          const profilePresentation = await operations.listProfiles(profileNo);
+          const profile = profilePresentation.profiles.find((candidate) => candidate.profileNo === profileNo);
+          if (profile === undefined) throw new Error("The selected AdsPower profile was not found.");
+          if (profile.linkState === "UNLINKED") {
+            const verification = await operations.verifyProfile(profileNo);
+            if (!verification.ok) throw new Error(verification.error.message);
+            if (verification.verificationState !== "READY" || verification.shop === null) {
+              throw new Error(`Profile ${profileNo} requires attention: ${verification.verificationState}.`);
+            }
+          }
+          let terminal: UpdateDataEvent | undefined;
+          await operations.updateData(profileNo, (event) => {
+            if (event.terminal) terminal = event;
+          });
+          if (terminal?.state !== "SUCCESS") {
+            throw new Error(terminal?.error?.message ?? terminal?.message ?? "Profile synchronization failed");
+          }
+        }),
+      ));
+    },
+
+    async syncAllEligible() {
+      const profileNos = (await adapters.listEligibleShops()).map((shop) => shop.profileNo);
+      return operations.syncSelected(profileNos);
     },
   };
+  return operations;
 }

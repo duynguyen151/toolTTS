@@ -6,6 +6,7 @@ import {
   type DatabaseContext,
 } from "@shop-health/db";
 import type { SellerDataSource } from "@shop-health/domain";
+import type { SellerCenterBrowserDataSource } from "@shop-health/seller-center";
 import {
   AdsPowerClient,
   type AdsPowerBrowserConnection,
@@ -85,6 +86,39 @@ export function createDashboardOperationsRuntime(
         profileNo: shop.profileNo,
         displayName: shop.displayName ?? shop.profileNo,
       }))
+    )),
+    verifyProfile: (profile) => withDatabase(databaseUrl, async ({ db }) => {
+      const [{ verifySelectedProfile }, sellerCenterSource] = await Promise.all([
+        import("@shop-health/sync"),
+        getSource(),
+      ]);
+      if (!("verifyProfile" in sellerCenterSource) || typeof sellerCenterSource.verifyProfile !== "function") {
+        throw new Error("Seller Center profile verification is unavailable");
+      }
+      const result = await verifySelectedProfile(
+        db,
+        profile,
+        sellerCenterSource as Pick<SellerCenterBrowserDataSource, "verifyProfile">,
+      );
+      return {
+        verificationState: result.verificationState,
+        shop: result.shop === null
+          ? null
+          : {
+              id: result.shop.id,
+              profileId: result.shop.profileId,
+              profileNo: result.shop.profileNo,
+              displayName: result.shop.displayName ?? result.shop.profileNo,
+            },
+      };
+    }),
+    listEligibleShops: () => withDatabase(databaseUrl, async ({ db }) => (
+      (await import("@shop-health/db")).listReadyAdsPowerProfileShops(db).then((shops) => shops.map((shop) => ({
+        id: shop.id,
+        profileId: shop.profileId,
+        profileNo: shop.profileNo,
+        displayName: shop.displayName ?? shop.profileNo,
+      })))
     )),
     ensureAdsPowerReady: () => applicationLauncher.ensureReady(),
     openReady: async (profileId) => {

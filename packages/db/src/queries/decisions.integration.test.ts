@@ -265,6 +265,10 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
       id: latestBaDecision.id,
       decision: "WATCH",
     });
+    expect((await getDecisionReview(context.db, firstCase.id))?.baHistory.map((revision) => revision.id)).toEqual([
+      latestBaDecision.id,
+      baDecision.id,
+    ]);
 
     const executionRequestId = randomUUID();
     const execution = await recordDryRunExecution(context.db, {

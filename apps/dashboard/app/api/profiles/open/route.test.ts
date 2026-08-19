@@ -10,7 +10,10 @@ function operations(onOpen: (profileNo: string) => void): DashboardOperations {
       onOpen(profileNo);
       return { ok: true, profileNo, state: "OPEN" };
     },
+    verifyProfile: async () => ({ ok: false, profileNo: "", verificationState: "UNVERIFIED", shop: null, error: { code: "UNEXPECTED_ERROR", message: "test" } }),
     updateData: async () => undefined,
+    syncSelected: async () => [],
+    syncAllEligible: async () => [],
   };
 }
 

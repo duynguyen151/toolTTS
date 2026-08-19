@@ -8,10 +8,24 @@ const DEMO_OPERATIONS_PRESENTATION: ProfileOperationsPresentation = {
   error: null,
 };
 
+export function normalizeRequestedShopProfileNo(
+  queryValue: string | readonly string[] | undefined,
+): string | undefined {
+  const value = Array.isArray(queryValue) ? queryValue[0] : queryValue;
+  return value === undefined ? undefined : value.trim();
+}
+
+export function shouldBindPersistedShop(
+  renderedShopProfileNo: string,
+  requestedProfileNo: string | undefined,
+): boolean {
+  return requestedProfileNo === undefined || requestedProfileNo === renderedShopProfileNo;
+}
+
 export async function loadProfileOperationsPresentation(
   presentation: Pick<DashboardPresentation, "dataOrigin">,
   listProfiles: () => Promise<ProfileOperationsPresentation>,
 ): Promise<ProfileOperationsPresentation> {
-  if (presentation.dataOrigin !== "LIVE") return DEMO_OPERATIONS_PRESENTATION;
+  if (presentation.dataOrigin === "DEMO_SANITIZED") return DEMO_OPERATIONS_PRESENTATION;
   return listProfiles();
 }

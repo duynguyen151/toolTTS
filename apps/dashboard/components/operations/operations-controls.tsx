@@ -7,6 +7,7 @@ import {
 } from "@heroicons/react/24/outline";
 
 import { PrimaryButton, SecondaryButton } from "../ui/buttons.js";
+import { OperationLogPanel } from "./operation-log-panel.js";
 import styles from "./operations.module.css";
 import { useDashboardOperations } from "./operations-provider.js";
 
@@ -28,12 +29,15 @@ const updateLabels = {
 export function OperationsControls({ generatedAtLabel }: { generatedAtLabel: string }) {
   const operations = useDashboardOperations();
   const canOpen = operations.liveOperationsEnabled
+    && operations.profileSelectionAligned
     && operations.selectedProfile !== null
     && !operations.isBusy;
   const canUpdate = canOpen && operations.selectedProfile?.linkState === "LINKED";
+  const canSyncSelected = canOpen;
 
   return (
-    <div className={styles.controls}>
+    <>
+      <div className={styles.controls} data-operation-state={operations.operationState}>
       <div className={styles.metaLine}>
         <span className={styles.generatedAt}>Generated {generatedAtLabel}</span>
         <span
@@ -72,6 +76,9 @@ export function OperationsControls({ generatedAtLabel }: { generatedAtLabel: str
         >
           {operations.operationState === "HUMAN_ACTION_REQUIRED" ? "Open profile to continue" : "Open profile"}
         </SecondaryButton>
+        <SecondaryButton disabled={!canOpen} onClick={() => void operations.verifyProfile()}>
+          Verify profile
+        </SecondaryButton>
         <PrimaryButton
           disabled={!canUpdate}
           leadingIcon={<ArrowPathIcon />}
@@ -80,7 +87,27 @@ export function OperationsControls({ generatedAtLabel }: { generatedAtLabel: str
         >
           {updateLabels[operations.operationState]}
         </PrimaryButton>
+        <SecondaryButton disabled={!canSyncSelected} onClick={() => void operations.syncSelected()}>
+          Sync selected
+        </SecondaryButton>
+        <SecondaryButton disabled={!operations.liveOperationsEnabled || operations.isBusy} onClick={() => void operations.syncAllEligible()}>
+          Sync all eligible
+        </SecondaryButton>
+        <SecondaryButton
+          aria-controls="operation-realtime-log"
+          aria-expanded={operations.logOpen}
+          onClick={operations.toggleLog}
+        >
+          Log
+        </SecondaryButton>
       </div>
-    </div>
+      </div>
+      <OperationLogPanel
+        entries={operations.operationLogs}
+        onClear={operations.clearOperationLogs}
+        onClose={operations.toggleLog}
+        open={operations.logOpen}
+      />
+    </>
   );
 }

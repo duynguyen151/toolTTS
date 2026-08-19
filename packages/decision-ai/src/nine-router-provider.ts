@@ -1,7 +1,9 @@
 import { z } from "zod";
+import { validateFrozenDecisionContext } from "@shop-health/domain";
 
 import type { BaselineAiConfig } from "./config.js";
 import {
+  BaselineAiInputSchema,
   BaselineAiOutputSchema,
   type AiUnavailableErrorCode,
   type BaselineAiInput,
@@ -41,6 +43,22 @@ export function createNineRouterDecisionProvider(
   const fetchImpl = dependencies.fetch ?? globalThis.fetch;
   return {
     async recommend(input, requestedModel) {
+      const parsedInput = BaselineAiInputSchema.safeParse(input);
+      if (!parsedInput.success) {
+        return { status: "FAILURE", errorCode: "INVALID_RESPONSE" };
+      }
+      const frozenContextValidation = validateFrozenDecisionContext({
+        context: parsedInput.data.decisionContextSnapshot,
+        metrics: parsedInput.data.metricsSnapshot,
+        finance: parsedInput.data.financeSnapshot,
+        coverage: parsedInput.data.coverageSnapshot,
+        risk: parsedInput.data.riskSnapshot,
+        ruleDecision: parsedInput.data.ruleDecision,
+        ruleTriggers: parsedInput.data.ruleTriggers,
+      });
+      if (!frozenContextValidation.valid) {
+        return { status: "FAILURE", errorCode: "INVALID_RESPONSE" };
+      }
       const controller = new AbortController();
       let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<never>((_resolve, reject) => {
@@ -65,7 +83,7 @@ export function createNineRouterDecisionProvider(
               model: requestedModel,
               temperature: 0,
               response_format: { type: "json_object" },
-              messages: buildDecisionAiMessages(input),
+              messages: buildDecisionAiMessages(parsedInput.data),
             }),
             signal: controller.signal,
           }),

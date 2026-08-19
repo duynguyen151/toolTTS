@@ -189,6 +189,11 @@ export const AiDecisionContextSchema = z.object({
     observedAt: TimestampSchema,
     metrics: MetricSnapshotSchema,
     dataQuality: DataQualitySummarySchema,
+    provenance: z.object({
+      shopId: IdentifierSchema,
+      profileId: IdentifierSchema,
+      profileNo: IdentifierSchema,
+    }).strict(),
   }).strict().nullable(),
   policyVersions: z.object({
     metricDefinitionVersion: z.string().trim().min(1),

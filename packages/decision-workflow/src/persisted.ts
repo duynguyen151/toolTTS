@@ -16,7 +16,7 @@ import {
   recordDryRunExecution,
   type DatabaseContext,
 } from "@shop-health/db";
-import type { BaselineAiClient, BaselineAiResult } from "@shop-health/decision-ai";
+import type { BaselineAiClient, BaselineAiInputRecord, BaselineAiResult } from "@shop-health/decision-ai";
 import {
   type DecisionCoverageSnapshot,
   type DecisionFinanceSnapshot,
@@ -188,7 +188,7 @@ export function createPersistedDecisionWorkflow(
     async getDecisionAiInput(caseId) {
       const input = await getDecisionAiInput(db, caseId);
       if (input === null) throw new Error(`Decision case not found: ${caseId}`);
-      return input;
+      return input satisfies BaselineAiInputRecord;
     },
     async loadReviewStartSource(profileNo): Promise<ReviewStartSource> {
       const shop = await findShopByProfileNo(db, profileNo);

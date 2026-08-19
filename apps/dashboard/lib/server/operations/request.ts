@@ -9,6 +9,10 @@ export type LocalProfileRequestResult =
   | { readonly ok: true; readonly profileNo: string }
   | { readonly ok: false; readonly status: 400 | 403; readonly error: OperationError };
 
+export type LocalJsonRequestResult =
+  | { readonly ok: true; readonly body: Record<string, unknown> }
+  | { readonly ok: false; readonly status: 400 | 403; readonly error: OperationError };
+
 function isLocalHostname(hostname: string): boolean {
   return LOCAL_HOSTNAMES.has(hostname.toLowerCase());
 }
@@ -44,11 +48,23 @@ function effectivePort(url: URL): string {
   return "";
 }
 
-function invalid(status: 400 | 403, message: string): LocalProfileRequestResult {
+function invalid(status: 400 | 403, message: string): { readonly ok: false; readonly status: 400 | 403; readonly error: OperationError } {
   return { ok: false, status, error: { code: "INVALID_REQUEST", message } };
 }
 
 export async function parseLocalProfileRequest(request: Request): Promise<LocalProfileRequestResult> {
+  const parsed = await parseLocalJsonRequest(request);
+  if (!parsed.ok) return parsed;
+
+  const profileNo = parsed.body.profileNo;
+  if (typeof profileNo !== "string" || !PROFILE_NO_PATTERN.test(profileNo)) {
+    return invalid(400, "Profile number must use 1-64 letters, numbers, underscores, or hyphens.");
+  }
+
+  return { ok: true, profileNo };
+}
+
+export async function parseLocalJsonRequest(request: Request): Promise<LocalJsonRequestResult> {
   let requestUrl: URL;
   try {
     requestUrl = new URL(request.url);
@@ -88,14 +104,10 @@ export async function parseLocalProfileRequest(request: Request): Promise<LocalP
     return invalid(400, "Request body must be valid JSON.");
   }
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
-    return invalid(400, "Request body must contain a profile number.");
-  }
-  const profileNo = (body as Record<string, unknown>).profileNo;
-  if (typeof profileNo !== "string" || !PROFILE_NO_PATTERN.test(profileNo)) {
-    return invalid(400, "Profile number must use 1-64 letters, numbers, underscores, or hyphens.");
+    return invalid(400, "Request body must be a JSON object.");
   }
 
-  return { ok: true, profileNo };
+  return { ok: true, body: body as Record<string, unknown> };
 }
 
 export function jsonHeaders(): HeadersInit {

@@ -26,6 +26,23 @@ vi.mock("@shop-health/db", () => db);
 import { runShopSync } from "./index.js";
 
 describe("orders sync coverage", () => {
+  it("does not start or write a sync when the canonical profile identity changed", async () => {
+    const source = {
+      ...ordersSource(orderBatch()),
+      verifyProfile: vi.fn().mockResolvedValue({ status: "IDENTIFIED", tiktokShopId: "seller-other" }),
+    };
+
+    await expect(runShopSync({
+      context: { db: {}, sql: {} } as never,
+      source,
+      shop: shop(),
+      kind: "orders",
+    })).rejects.toMatchObject({ failureType: "SHOP_IDENTITY_CHANGED" });
+
+    expect(db.beginSyncRun).not.toHaveBeenCalled();
+    expect(db.upsertOrderBatch).not.toHaveBeenCalled();
+  });
+
   it("reports completeness only within the proven rolling 12-month source window", async () => {
     const result = await runShopSync({
       context: { db: {}, sql: {} } as never,
@@ -61,6 +78,7 @@ function ordersSource(batch: NormalizedOrderBatch): SellerDataSource {
   return {
     health: vi.fn(),
     probe: vi.fn(),
+    verifyProfile: vi.fn().mockResolvedValue({ status: "IDENTIFIED", tiktokShopId: "seller-957" }),
     collectOrders: async function* () {
       yield batch;
     },
@@ -87,6 +105,7 @@ function shop(): ShopRow {
     id: "00000000-0000-0000-0000-000000000001",
     profileId: "profile-1",
     profileNo: "957",
+    tiktokShopId: "seller-957",
     region: "US",
     locale: "en-US",
   } as ShopRow;

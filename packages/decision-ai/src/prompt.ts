@@ -35,52 +35,7 @@ export function buildDecisionAiMessages(input: BaselineAiInput) {
     {
       role: "user" as const,
       content: JSON.stringify({
-        ...(input.decisionContextSnapshot === undefined || input.decisionContextSnapshot === null
-          ? {}
-          : { decisionContext: input.decisionContextSnapshot }),
-        ...(input.decisionContextSnapshot === undefined || input.decisionContextSnapshot === null ? {
-        operationalMetrics: {
-          totalPersistedOrders: input.metricsSnapshot.totalPersistedOrders ?? null,
-          operationalOrderCount: input.metricsSnapshot.operationalOrderCount ?? null,
-          onHoldOrderCount: input.metricsSnapshot.onHoldOrderCount,
-          deliveredCount: input.metricsSnapshot.deliveredCount,
-          deliveryRate: input.metricsSnapshot.deliveryRate,
-          cancellationRate: input.metricsSnapshot.cancellationRate,
-          refundRate: input.metricsSnapshot.refundRate,
-          operationalOrderExposure: input.metricsSnapshot.onHoldValue,
-          currency: input.metricsSnapshot.currency,
-        },
-        finance: {
-          officialOnHoldAmount: input.financeSnapshot.officialOnHoldAmount,
-          waitingForPackageDeliveryAmount: input.financeSnapshot.waitingForPackageDeliveryAmount ?? null,
-          deliveredAwaitingSettlementAmount: input.financeSnapshot.deliveredAwaitingSettlementAmount ?? null,
-          waitingForCompletedRefundReturnAmount: input.financeSnapshot.waitingForCompletedRefundReturnAmount ?? null,
-          reasonTotalsReconcileToOfficialOnHold: input.financeSnapshot.reasonTotalsReconcileToOfficialOnHold ?? null,
-          missingOnHoldExpectedAmountCount: input.financeSnapshot.missingOnHoldExpectedAmountCount ?? null,
-          onHoldBalance: input.financeSnapshot.onHoldBalance,
-          onHoldSettlementCount: input.financeSnapshot.onHoldSettlementCount,
-          settlementCount: input.financeSnapshot.settlementCount,
-          currency: input.financeSnapshot.currency,
-        },
-        coverage: input.coverageSnapshot,
-        deterministicRule: {
-          result: input.ruleDecision,
-          triggers: input.ruleTriggers,
-          policyVersion: input.riskSnapshot.policyVersion,
-          dataSufficient: input.riskSnapshot.dataSufficient,
-          stopByOnHoldValue: input.riskSnapshot.stopByOnHoldValue,
-          stopByDeliveryRate: input.riskSnapshot.stopByDeliveryRate,
-          currentValues: {
-            onHoldValue: input.riskSnapshot.onHoldValue,
-            deliveryRate: input.riskSnapshot.deliveryRate,
-          },
-          thresholds: {
-            stopOnHoldValueAt: input.riskSnapshot.stopOnHoldValueAt,
-            stopDeliveryRateBelow: input.riskSnapshot.stopDeliveryRateBelow,
-            minimumOrdersForRateRule: input.riskSnapshot.minimumOrdersForRateRule,
-          },
-        },
-        } : {}),
+        decisionContext: input.decisionContextSnapshot,
         outputSchema,
       }),
     },

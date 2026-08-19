@@ -1,6 +1,8 @@
 import {
   AiDecisionInputSchema,
   AiDecisionContextSchema,
+  assertFrozenDecisionContext,
+  validateFrozenDecisionContext,
   CaptureBaDecisionInputSchema,
   CreateDecisionCaseInputSchema,
   DecisionCoverageSnapshotSchema,
@@ -25,6 +27,7 @@ import {
   type DecisionRuleTrigger,
   type RecordBaDecisionForCaseInput,
   type RecordDryRunExecutionInput,
+  type FrozenContextValidationInput,
 } from "@shop-health/domain";
 import { isDeepStrictEqual } from "node:util";
 import { and, desc, eq, inArray, isNotNull, lt, or } from "drizzle-orm";
@@ -57,6 +60,18 @@ export type {
 export interface CapturedBaDecision {
   decisionCase: DecisionCaseRow;
   baDecision: BaDecisionRow;
+}
+
+export interface DecisionBaRevision {
+  id: string;
+  decision: BaDecision;
+  reasonCode: BaDecisionReasonCode;
+  confidence: number | null;
+  reasonCodes: BaDecisionReasonCode[];
+  note: string | null;
+  notes: string | null;
+  actor: string;
+  decidedAt: Date;
 }
 
 export interface DecisionReviewRecord {
@@ -161,6 +176,7 @@ export interface DecisionReviewRecord {
     actor: string;
     decidedAt: Date;
   } | null;
+  baHistory: DecisionBaRevision[];
   execution: {
     id: string;
     baDecisionId: string;
@@ -254,8 +270,82 @@ function assertCaseRetryMatches(existing: DecisionCaseRow, input: CreateDecision
   }
 }
 
-function parseDecisionContextSnapshot(value: unknown | null | undefined): AiDecisionContext | null {
-  return value == null ? null : AiDecisionContextSchema.parse(value);
+function contextCanonicalFacts(
+  context: AiDecisionContext,
+  owner?: { readonly shopId: string; readonly profileId?: string; readonly profileNo?: string },
+): FrozenContextValidationInput {
+  const metrics = context.metrics.decision;
+  const finance = context.metrics.finance;
+  const decimalString = (value: string | number | null): string | null => value === null ? null : typeof value === "number" ? String(value) : value;
+  return {
+    context,
+    metrics: {
+      ...metrics,
+      onHoldValue: decimalString(metrics.operationalExposure),
+    },
+    finance: {
+      ...finance,
+      onHoldBalance: null,
+      officialOnHoldAmount: decimalString(finance.officialFinanceOnHold),
+    },
+    coverage: {
+      coverageState: context.dataQuality.coverage,
+      persistedMetricsWindow: metrics.window,
+      source: context.dataQuality.source,
+      provenSourceWindow: context.dataQuality.provenSourceWindow,
+      completeWithinSourceWindow: context.dataQuality.completeWithinSourceWindow,
+      lifetimeHistoryComplete: context.dataQuality.lifetimeHistoryComplete,
+      ordersSourceComplete: context.dataQuality.ordersSourceComplete,
+      financeRequiredSourceComplete: context.dataQuality.financeRequiredSourceComplete,
+      sourceReconciled: context.dataQuality.sourceReconciled,
+      latestSuccessfulSyncAt: context.dataQuality.latestSuccessfulSyncAt,
+      financeCapturedAt: context.dataQuality.financeCapturedAt,
+      freshness: context.dataQuality.freshness,
+    },
+    risk: {
+      ...context.risk,
+      onHoldValue: decimalString(context.risk.operationalExposure),
+    },
+    ruleDecision: context.rule.result,
+    ruleTriggers: context.rule.triggers.map((trigger) => trigger === "OPERATIONAL_EXPOSURE" ? "ONHOLD_VALUE" : "DELIVERY_RATE"),
+    ...(owner === undefined ? {} : { owner }),
+  };
+}
+
+async function loadContextOwner(db: Database, shopId: string): Promise<{ readonly profileId: string; readonly profileNo: string } | null> {
+  const ownerQuery = db.select({ profileId: shops.profileId, profileNo: shops.profileNo })
+    .from(shops)
+    .where(eq(shops.id, shopId));
+  const limit = (ownerQuery as unknown as { readonly limit?: (count: number) => Promise<Array<{ profileId: string; profileNo: string }>> }).limit;
+  if (typeof limit !== "function") return null;
+  const [owner] = await limit.call(ownerQuery, 1);
+  return owner ?? null;
+}
+
+function parseDecisionContextSnapshot(
+  value: unknown | null | undefined,
+  canonical?: Omit<FrozenContextValidationInput, "context">,
+): AiDecisionContext | null {
+  if (value == null) return null;
+  const parsed = AiDecisionContextSchema.safeParse(value);
+  if (!parsed.success) return null;
+  const facts = canonical === undefined
+    ? contextCanonicalFacts(parsed.data, { shopId: parsed.data.shop.shopId, profileId: parsed.data.profile.profileId, profileNo: parsed.data.profile.profileNo })
+    : { ...canonical, context: parsed.data };
+  const validation = validateFrozenDecisionContext(facts);
+  return validation.valid ? validation.context : null;
+}
+
+function parseDecisionContextSnapshotForWrite(
+  value: unknown | null | undefined,
+  canonical?: Omit<FrozenContextValidationInput, "context">,
+): AiDecisionContext | null {
+  if (value == null) return null;
+  const parsed = AiDecisionContextSchema.parse(value);
+  const facts = canonical === undefined
+    ? contextCanonicalFacts(parsed, { shopId: parsed.shop.shopId, profileId: parsed.profile.profileId, profileNo: parsed.profile.profileNo })
+    : { ...canonical, context: parsed };
+  return assertFrozenDecisionContext(facts);
 }
 
 export async function createDecisionCase(
@@ -263,7 +353,27 @@ export async function createDecisionCase(
   input: CreateDecisionCaseInput,
 ): Promise<DecisionCaseRow> {
   const parsed = CreateDecisionCaseInputSchema.parse(input);
-  const decisionContextSnapshot = parseDecisionContextSnapshot(parsed.decisionContextSnapshot);
+  const owner = parsed.decisionContextSnapshot === null || parsed.decisionContextSnapshot === undefined
+    ? null
+    : await loadContextOwner(db, parsed.shopId);
+  if (parsed.decisionContextSnapshot !== null && parsed.decisionContextSnapshot !== undefined && owner === null) {
+    throw new Error("Decision context owner shop was not found");
+  }
+  const decisionContextSnapshot = parseDecisionContextSnapshotForWrite(
+    parsed.decisionContextSnapshot,
+    {
+      metrics: parsed.metricsSnapshot,
+      finance: parsed.financeSnapshot,
+      coverage: parsed.coverageSnapshot,
+      risk: parsed.riskSnapshot,
+      ruleDecision: parsed.ruleDecision,
+      ruleTriggers: parsed.ruleTriggers,
+      owner: {
+        shopId: parsed.shopId,
+        ...(owner === null ? {} : { profileId: owner.profileId, profileNo: owner.profileNo }),
+      },
+    },
+  );
   const [created] = await db.insert(decisionCases).values({
     ...parsed,
     decisionContextSnapshot,
@@ -310,6 +420,7 @@ export async function getDecisionAiInput(
 ): Promise<DecisionAiInputRecord | null> {
   const parsedCaseId = z.string().uuid().parse(decisionCaseId);
   const [decisionCase] = await db.select({
+    shopId: decisionCases.shopId,
     metricsSnapshot: decisionCases.metricsSnapshot,
     financeSnapshot: decisionCases.financeSnapshot,
     coverageSnapshot: decisionCases.coverageSnapshot,
@@ -320,6 +431,9 @@ export async function getDecisionAiInput(
     decisionContextSnapshot: decisionCases.decisionContextSnapshot,
   }).from(decisionCases).where(eq(decisionCases.id, parsedCaseId)).limit(1);
   if (!decisionCase) return null;
+  const owner = typeof decisionCase.shopId === "string"
+    ? await loadContextOwner(db, decisionCase.shopId)
+    : null;
   const coverageSnapshot = decisionCase.coverageSnapshot ?? {
     coverageState: decisionCase.dataCoverage,
     persistedMetricsWindow: decisionCase.metricsSnapshot.window,
@@ -327,6 +441,25 @@ export async function getDecisionAiInput(
     completeWithinSourceWindow: null,
     lifetimeHistoryComplete: null,
   };
+  const decisionContextSnapshot = parseDecisionContextSnapshot(
+    decisionCase.decisionContextSnapshot,
+    {
+      metrics: DecisionMetricsSnapshotSchema.parse(decisionCase.metricsSnapshot),
+      finance: DecisionFinanceSnapshotSchema.parse({
+        ...decisionCase.financeSnapshot,
+        officialOnHoldAmount: decisionCase.financeSnapshot.officialOnHoldAmount ?? null,
+        waitingForCompletedRefundReturnAmount: decisionCase.financeSnapshot.waitingForCompletedRefundReturnAmount ?? null,
+      }),
+      coverage: DecisionCoverageSnapshotSchema.parse(coverageSnapshot),
+      risk: DecisionRiskSnapshotSchema.parse(decisionCase.riskSnapshot),
+      ruleDecision: decisionCase.ruleDecision,
+      ruleTriggers: decisionCase.ruleTriggers,
+      owner: {
+        shopId: decisionCase.shopId,
+        ...(owner === null ? {} : { profileId: owner.profileId, profileNo: owner.profileNo }),
+      },
+    },
+  );
   return {
     metricsSnapshot: DecisionMetricsSnapshotSchema.parse(decisionCase.metricsSnapshot),
     financeSnapshot: DecisionFinanceSnapshotSchema.parse({
@@ -339,7 +472,7 @@ export async function getDecisionAiInput(
     riskSnapshot: DecisionRiskSnapshotSchema.parse(decisionCase.riskSnapshot),
     ruleDecision: decisionCase.ruleDecision,
     ruleTriggers: decisionCase.ruleTriggers,
-    decisionContextSnapshot: parseDecisionContextSnapshot(decisionCase.decisionContextSnapshot),
+    decisionContextSnapshot,
   };
 }
 
@@ -347,12 +480,43 @@ export async function getLatestDecisionContext(
   db: Database,
   shopId: string,
 ): Promise<AiDecisionContext | null> {
-  const [row] = await db.select({ context: decisionCases.decisionContextSnapshot })
+  const rows = await db.select({ decisionCase: decisionCases })
     .from(decisionCases)
     .where(and(eq(decisionCases.shopId, shopId), isNotNull(decisionCases.decisionContextSnapshot)))
     .orderBy(desc(decisionCases.observedAt), desc(decisionCases.id))
-    .limit(1);
-  return parseDecisionContextSnapshot(row?.context);
+    .limit(100);
+  const owner = await loadContextOwner(db, shopId);
+  for (const row of rows) {
+    const decisionCase = row.decisionCase;
+    const coverageSnapshot = decisionCase.coverageSnapshot ?? {
+      coverageState: decisionCase.dataCoverage,
+      persistedMetricsWindow: decisionCase.metricsSnapshot.window,
+      provenSourceWindow: null,
+      completeWithinSourceWindow: null,
+      lifetimeHistoryComplete: null,
+    };
+    const context = parseDecisionContextSnapshot(
+      decisionCase.decisionContextSnapshot,
+      {
+        metrics: DecisionMetricsSnapshotSchema.parse(decisionCase.metricsSnapshot),
+        finance: DecisionFinanceSnapshotSchema.parse({
+          ...decisionCase.financeSnapshot,
+          officialOnHoldAmount: decisionCase.financeSnapshot.officialOnHoldAmount ?? null,
+          waitingForCompletedRefundReturnAmount: decisionCase.financeSnapshot.waitingForCompletedRefundReturnAmount ?? null,
+        }),
+        coverage: DecisionCoverageSnapshotSchema.parse(coverageSnapshot),
+        risk: DecisionRiskSnapshotSchema.parse(decisionCase.riskSnapshot),
+        ruleDecision: decisionCase.ruleDecision,
+        ruleTriggers: decisionCase.ruleTriggers,
+        owner: {
+          shopId: decisionCase.shopId,
+          ...(owner === null ? {} : { profileId: owner.profileId, profileNo: owner.profileNo }),
+        },
+      },
+    );
+    if (context !== null) return context;
+  }
+  return null;
 }
 
 export async function recordBaDecisionForCase(
@@ -432,12 +596,35 @@ function latestDate(left: Date | null, right: Date | null): Date | null {
   return left > right ? left : right;
 }
 
+function formatRatePercent(value: number): string {
+  if (!Number.isFinite(value)) throw new Error("Delivery rate threshold must be finite");
+
+  // Normalize binary floating-point noise before rendering a human threshold.
+  const canonicalValue = Number(value.toPrecision(12));
+  const [rawMantissa = "", rawExponent] = String(canonicalValue).toLowerCase().split("e");
+  const sign = rawMantissa.startsWith("-") ? "-" : "";
+  const mantissa = sign === "" ? rawMantissa : rawMantissa.slice(1);
+  const [whole = "", fraction = ""] = mantissa.split(".");
+  const digits = `${whole}${fraction}`;
+  const decimalIndex = whole.length + (rawExponent === undefined ? 0 : Number(rawExponent)) + 2;
+  const formatted = decimalIndex <= 0
+    ? `0.${"0".repeat(-decimalIndex)}${digits}`
+    : decimalIndex >= digits.length
+      ? `${digits}${"0".repeat(decimalIndex - digits.length)}`
+      : `${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`;
+  const [integer = "", fractional = ""] = formatted.split(".");
+  const normalizedInteger = integer.replace(/^0+(?=\d)/, "") || "0";
+  const normalizedFraction = fractional.replace(/0+$/, "");
+  return `${sign}${normalizedInteger}${normalizedFraction === "" ? "" : `.${normalizedFraction}`}`;
+}
+
 function makeReview(
   decisionCase: DecisionCaseRow,
   shop: ShopRow,
   aiDecision: AiDecisionRow | undefined,
   baDecision: BaDecisionRow | undefined,
   execution: DecisionExecutionRow | undefined,
+  baHistory: readonly BaDecisionRow[] = baDecision === undefined ? [] : [baDecision],
 ): DecisionReviewRecord {
   const metrics = decisionCase.metricsSnapshot;
   const risk = decisionCase.riskSnapshot;
@@ -448,6 +635,23 @@ function makeReview(
     completeWithinSourceWindow: null,
     lifetimeHistoryComplete: null,
   };
+  const decisionContextSnapshot = parseDecisionContextSnapshot(
+    decisionCase.decisionContextSnapshot,
+    {
+      metrics: DecisionMetricsSnapshotSchema.parse(metrics),
+      finance: DecisionFinanceSnapshotSchema.parse({
+        ...decisionCase.financeSnapshot,
+        officialOnHoldAmount: decisionCase.financeSnapshot.officialOnHoldAmount ?? null,
+        waitingForCompletedRefundReturnAmount: decisionCase.financeSnapshot.waitingForCompletedRefundReturnAmount ?? null,
+      }),
+      coverage: DecisionCoverageSnapshotSchema.parse(coverageSnapshot),
+      risk: DecisionRiskSnapshotSchema.parse(risk),
+      ruleDecision: decisionCase.ruleDecision,
+      ruleTriggers: decisionCase.ruleTriggers,
+      owner: { shopId: shop.id, profileId: shop.profileId, profileNo: shop.profileNo },
+    },
+  );
+  const invalidPersistedContext = decisionCase.decisionContextSnapshot !== null && decisionContextSnapshot === null;
   const unavailableReason = decisionCase.dataCoverage === "COMPLETE" ? "NOT_CAPTURED" : "DATA_INCOMPLETE";
   const { stopOnHoldValueAt, stopDeliveryRateBelow, minimumOrdersForRateRule } = risk;
   const events: DecisionReviewRecord["events"] = [
@@ -475,7 +679,7 @@ function makeReview(
       lastSyncAt: latestDate(shop.lastOrdersSyncedAt, shop.lastFinanceSyncedAt),
     },
     coverageSnapshot,
-    decisionContextSnapshot: parseDecisionContextSnapshot(decisionCase.decisionContextSnapshot),
+    decisionContextSnapshot,
     metrics: {
       totalOrders: metrics.totalOrders,
       onHoldValue: metrics.onHoldValue,
@@ -495,12 +699,38 @@ function makeReview(
     rule: {
       decision: decisionCase.ruleDecision,
       triggers: decisionCase.ruleTriggers,
-      expression: `VALUE >= ${stopOnHoldValueAt} ${metrics.currency} OR DELIVERY_RATE < ${stopDeliveryRateBelow * 100}%`,
+      expression: `VALUE >= ${stopOnHoldValueAt} ${metrics.currency} OR DELIVERY_RATE < ${formatRatePercent(stopDeliveryRateBelow)}%`,
       policyVersion: risk.policyVersion,
       thresholds: { stopOnHoldValueAt, stopDeliveryRateBelow, minimumOrdersForRateRule },
     },
     ai: !aiDecision
       ? null
+      : invalidPersistedContext && aiDecision.status === "AVAILABLE"
+        ? {
+            status: "UNAVAILABLE",
+            recommendation: null,
+            riskLevel: null,
+            confidence: null,
+            ruleOverride: null,
+            reasonCodes: null,
+            supportingFactors: null,
+            riskFactors: null,
+            whatWouldChangeDecision: null,
+            reason: null,
+            failureCode: "INVALID_RESPONSE",
+            humanReviewRequired: true,
+            provider: aiDecision.provider,
+            model: aiDecision.model,
+            requestedModel: aiDecision.requestedModel,
+            reportedModel: aiDecision.reportedModel,
+            actualModelUsed: aiDecision.actualModelUsed,
+            authMode: aiDecision.authMode,
+            outputSchemaVersion: aiDecision.outputSchemaVersion,
+            promptVersion: aiDecision.promptVersion,
+            policyVersion: aiDecision.policyVersion,
+            aiPolicyVersion: aiDecision.aiPolicyVersion,
+            createdAt: aiDecision.createdAt,
+          }
       : aiDecision.status === "AVAILABLE"
         ? {
             status: "AVAILABLE",
@@ -562,6 +792,17 @@ function makeReview(
       actor: baDecision.actor,
       decidedAt: baDecision.createdAt,
     },
+    baHistory: baHistory.map((revision) => ({
+      id: revision.id,
+      decision: revision.decision,
+      reasonCode: revision.reasonCode,
+      confidence: revision.confidence === null ? null : Number(revision.confidence),
+      reasonCodes: revision.reasonCodes,
+      note: revision.note,
+      notes: revision.notes,
+      actor: revision.actor,
+      decidedAt: revision.createdAt,
+    })),
     execution: !execution ? null : {
       id: execution.id,
       baDecisionId: execution.baDecisionId,
@@ -575,6 +816,16 @@ function makeReview(
   };
 }
 
+async function resolveQueryRows<T>(query: unknown): Promise<T[]> {
+  const candidate = query as {
+    readonly then?: (onFulfilled: (value: T[]) => unknown) => Promise<unknown>;
+    readonly limit?: (count: number) => Promise<T[]>;
+  };
+  if (typeof candidate.then === "function") return candidate.then((rows) => rows) as Promise<T[]>;
+  if (typeof candidate.limit === "function") return candidate.limit(100);
+  return [];
+}
+
 export async function getDecisionReview(
   db: Database,
   decisionCaseId: string,
@@ -586,16 +837,16 @@ export async function getDecisionReview(
     .where(eq(decisionCases.id, parsedCaseId)).limit(1);
   if (!base) return null;
 
-  const [[aiDecision], [baDecision], [execution]] = await Promise.all([
+  const [[aiDecision], baRows, [execution]] = await Promise.all([
     db.select().from(aiDecisions).where(eq(aiDecisions.decisionCaseId, parsedCaseId)).limit(1),
-    db.select().from(baDecisions)
+    resolveQueryRows<BaDecisionRow>(db.select().from(baDecisions)
       .where(eq(baDecisions.decisionCaseId, parsedCaseId))
-      .orderBy(desc(baDecisions.createdAt), desc(baDecisions.id)).limit(1),
+      .orderBy(desc(baDecisions.createdAt), desc(baDecisions.id))),
     db.select().from(decisionExecutions)
       .where(eq(decisionExecutions.decisionCaseId, parsedCaseId))
       .orderBy(desc(decisionExecutions.createdAt), desc(decisionExecutions.id)).limit(1),
   ]);
-  return makeReview(base.decisionCase, base.shop, aiDecision, baDecision, execution);
+  return makeReview(base.decisionCase, base.shop, aiDecision, baRows[0], execution, baRows);
 }
 
 export async function getDecisionReviewByRequestId(
@@ -646,8 +897,8 @@ export async function listDecisionHistory(
       .orderBy(desc(decisionExecutions.createdAt), desc(decisionExecutions.id)),
   ]);
   const aiByCase = new Map(aiRows.map((row) => [row.decisionCaseId, row]));
-  const baByCase = new Map<string, BaDecisionRow>();
-  for (const row of baRows) if (!baByCase.has(row.decisionCaseId)) baByCase.set(row.decisionCaseId, row);
+  const baByCase = new Map<string, BaDecisionRow[]>();
+  for (const row of baRows) baByCase.set(row.decisionCaseId, [...(baByCase.get(row.decisionCaseId) ?? []), row]);
   const executionByCase = new Map<string, DecisionExecutionRow>();
   for (const row of executionRows) if (!executionByCase.has(row.decisionCaseId)) executionByCase.set(row.decisionCaseId, row);
   const last = pageRows.at(-1)?.decisionCase;
@@ -656,8 +907,9 @@ export async function listDecisionHistory(
       decisionCase,
       shop,
       aiByCase.get(decisionCase.id),
-      baByCase.get(decisionCase.id),
+      baByCase.get(decisionCase.id)?.[0],
       executionByCase.get(decisionCase.id),
+      baByCase.get(decisionCase.id),
     )),
     nextCursor: rows.length > parsed.limit && last ? encodeCursor(last) : null,
   };
@@ -671,11 +923,29 @@ export async function captureBaDecision(
   const actor = requireBaActor();
   const ba = normalizeBaInput(parsed.baDecision);
   return db.transaction(async (transaction) => {
+    const [owner] = await transaction.select({ profileId: shops.profileId, profileNo: shops.profileNo })
+      .from(shops)
+      .where(eq(shops.id, parsed.decisionCase.shopId))
+      .limit(1);
+    if (!owner) throw new Error("Decision context owner shop was not found");
     const [decisionCase] = await transaction.insert(decisionCases)
       .values({
         ...parsed.decisionCase,
-        decisionContextSnapshot: parseDecisionContextSnapshot(
+        decisionContextSnapshot: parseDecisionContextSnapshotForWrite(
           parsed.decisionCase.decisionContextSnapshot,
+          {
+            metrics: parsed.decisionCase.metricsSnapshot,
+            finance: parsed.decisionCase.financeSnapshot,
+            coverage: parsed.decisionCase.coverageSnapshot,
+            risk: parsed.decisionCase.riskSnapshot,
+            ruleDecision: parsed.decisionCase.ruleDecision,
+            ruleTriggers: parsed.decisionCase.ruleTriggers,
+            owner: {
+              shopId: parsed.decisionCase.shopId,
+              profileId: owner.profileId,
+              profileNo: owner.profileNo,
+            },
+          },
         ),
       }).returning();
     if (!decisionCase) throw new Error("Failed to create decision case");

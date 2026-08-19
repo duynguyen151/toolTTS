@@ -1,6 +1,6 @@
-export type SellerIdentityResult =
-  | { readonly status: "IDENTIFIED"; readonly tiktokShopId: string }
-  | { readonly status: "AMBIGUOUS" | "UNAVAILABLE" | "NOT_TIKTOK_SELLER" | "UNSUPPORTED_REGION"; readonly tiktokShopId: null };
+import type { SellerProfileIdentity } from "@shop-health/domain";
+
+export type SellerIdentityResult = SellerProfileIdentity;
 
 export function sellerIdentityFromFinanceRequestUrl(requestUrl: string): SellerIdentityResult {
   const url = new URL(requestUrl);

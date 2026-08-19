@@ -65,10 +65,14 @@ export interface AdsPowerOpenReadyOptions {
 }
 
 export class AdsPowerClient {
+  private static readonly profileInventoryCacheMs = 2_000;
   private readonly baseUrl: string;
   private readonly apiKey: string | undefined;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof globalThis.fetch;
+  private profileInventory: readonly AdsPowerProfileSummary[] | undefined;
+  private profileInventoryExpiresAt = 0;
+  private profileInventoryRequest: Promise<readonly AdsPowerProfileSummary[]> | undefined;
 
   constructor(options: AdsPowerClientOptions = {}) {
     this.baseUrl = (options.baseUrl ?? "http://127.0.0.1:50325").replace(/\/$/, "");
@@ -100,7 +104,7 @@ export class AdsPowerClient {
     const active = await this.active(profileId);
     if (active) return active;
 
-    const response = await this.request("/api/v1/browser/start", profileId);
+    const response = await this.start(profileId);
     const cdpEndpoint = response.data?.ws?.puppeteer;
     if (response.code !== 0 || !cdpEndpoint) {
       throw new SellerCenterError(
@@ -126,6 +130,26 @@ export class AdsPowerClient {
   }
 
   async listProfiles(): Promise<AdsPowerProfileSummary[]> {
+    if (this.profileInventory !== undefined && Date.now() < this.profileInventoryExpiresAt) {
+      return [...this.profileInventory];
+    }
+    if (this.profileInventoryRequest !== undefined) {
+      return [...await this.profileInventoryRequest];
+    }
+
+    const request = this.fetchProfileInventory();
+    this.profileInventoryRequest = request;
+    try {
+      const profiles = await request;
+      this.profileInventory = profiles;
+      this.profileInventoryExpiresAt = Date.now() + AdsPowerClient.profileInventoryCacheMs;
+      return [...profiles];
+    } finally {
+      if (this.profileInventoryRequest === request) this.profileInventoryRequest = undefined;
+    }
+  }
+
+  private async fetchProfileInventory(): Promise<readonly AdsPowerProfileSummary[]> {
     const profiles: z.infer<typeof AdsPowerProfileListItemSchema>[] = [];
     let page = 1;
 
@@ -181,7 +205,7 @@ export class AdsPowerClient {
     if (active) return active;
 
     const response = await withinReadyDeadline((timeoutMs) => (
-      this.request("/api/v1/browser/start", profileId, timeoutMs)
+      this.start(profileId, timeoutMs)
     ));
     if (response.code !== 0) {
       throw new SellerCenterError(
@@ -226,6 +250,17 @@ export class AdsPowerClient {
     timeoutMs?: number,
   ): Promise<z.infer<typeof AdsPowerResponseSchema>> {
     return AdsPowerResponseSchema.parse(await this.requestJson(path, { user_id: profileId }, timeoutMs));
+  }
+
+  private async start(
+    profileId: string,
+    timeoutMs?: number,
+  ): Promise<z.infer<typeof AdsPowerResponseSchema>> {
+    return AdsPowerResponseSchema.parse(await this.requestJson(
+      "/api/v1/browser/start",
+      { user_id: profileId, password_filling: "1" },
+      timeoutMs,
+    ));
   }
 
   private async requestJson(

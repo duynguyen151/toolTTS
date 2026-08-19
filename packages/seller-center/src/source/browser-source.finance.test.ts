@@ -44,7 +44,7 @@ describe("SellerCenterBrowserDataSource.collectFinancials", () => {
     });
     const source = new SellerCenterBrowserDataSource({
       adsPowerClient: {
-        open: vi.fn().mockResolvedValue({
+        openReady: vi.fn().mockResolvedValue({
           profileId: "profile-1",
           status: "Active",
           cdpEndpoint: "ws://127.0.0.1/devtools/browser/test",
@@ -57,7 +57,7 @@ describe("SellerCenterBrowserDataSource.collectFinancials", () => {
 
     expect(page.goto).toHaveBeenNthCalledWith(1, financeRoute, {
       waitUntil: "domcontentloaded",
-      timeout: 30_000,
+      timeout: 90_000,
     });
     expect(page.goto).toHaveBeenCalledTimes(1);
     expect(page.fetchUrls).toHaveLength(1);
@@ -217,7 +217,7 @@ function browserFor(page: FakeFinancePage) {
 function sourceFor(_page: FakeFinancePage): SellerCenterBrowserDataSource {
   return new SellerCenterBrowserDataSource({
     adsPowerClient: {
-      open: vi.fn().mockResolvedValue({
+      openReady: vi.fn().mockResolvedValue({
         profileId: "profile-1",
         status: "Active",
         cdpEndpoint: "ws://127.0.0.1/devtools/browser/test",

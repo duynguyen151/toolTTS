@@ -1,4 +1,5 @@
 import type {
+  DashboardDecisionCenter,
   DashboardKpi,
   DashboardPresentation,
   DashboardProfileState,
@@ -41,6 +42,65 @@ function formatTimestamp(value: Date | null): string {
 
 function formatCount(value: number | null): string {
   return value === null ? "Unavailable" : value.toLocaleString("en-US");
+}
+
+function unavailableDecisionCenter(): DashboardDecisionCenter {
+  return {
+    status: "UNAVAILABLE",
+    message: "No persisted LIVE decision case is available for this shop.",
+    caseId: null,
+    profileNo: null,
+    coverage: {
+      status: "UNAVAILABLE",
+      source: "Unavailable",
+      provenWindow: "Unavailable",
+      sourceReconciled: "Unavailable",
+      freshness: "Unavailable",
+      completeWithinWindow: "Unavailable",
+      lifetimeHistory: "Not verified",
+    },
+    metrics: [],
+    comparisons: [],
+    trends: [],
+    rule: {
+      result: "UNAVAILABLE",
+      policyVersion: "Unavailable",
+      expression: "Unavailable",
+      evaluatedAt: "Unavailable",
+      triggers: [],
+      checks: [],
+    },
+    ai: {
+      status: "UNAVAILABLE",
+      recommendation: "Unavailable",
+      riskLevel: "Unavailable",
+      confidence: "Unavailable",
+      humanReviewRequired: "Yes",
+      reasonCodes: [],
+      supportingFactors: [],
+      riskFactors: [],
+      whatWouldChange: [],
+      reason: "Unavailable",
+      policyVersion: "Unavailable",
+      provider: "Unavailable",
+      requestedModel: "Unavailable",
+      reportedModel: "Unavailable",
+      actualModel: "Unavailable",
+      authMode: "Unavailable",
+      promptVersion: "Unavailable",
+      outputSchemaVersion: "Unavailable",
+      failureCode: "NOT_RECORDED",
+    },
+    ba: { current: "NOT_REVIEWED", currentDetail: "No BA decision is recorded.", history: [] },
+    execution: {
+      status: "NOT_REQUESTED",
+      requestedAction: "None",
+      mode: "DRY_RUN only",
+      sellerCenterCalled: "No",
+      executedAt: "Not executed",
+    },
+    reviewQueue: [],
+  };
 }
 
 function coverageTone(status: DashboardSource["selected"]["dataCoverage"]["status"]): DashboardTone {
@@ -221,5 +281,6 @@ export function buildDashboardPresentation(source: DashboardSource): DashboardPr
       canceled: formatCount(source.selected.orders.canceled),
     },
     decisionTrace: buildDecisionTrace(source),
+    decisionCenter: source.selected.decisionCenter ?? unavailableDecisionCenter(),
   };
 }

@@ -82,6 +82,26 @@ describe("AdsPowerClient", () => {
     expect(urls[0]).toContain("page_size=200");
   });
 
+  it("reuses a fresh profile inventory instead of immediately hitting the rate-limited Local API", async () => {
+    const urls: string[] = [];
+    const client = new AdsPowerClient({
+      fetch: async (input) => {
+        urls.push(String(input));
+        const path = new URL(String(input)).pathname;
+        return new Response(JSON.stringify(path.endsWith("/user/list")
+          ? { code: 0, data: { list: [{ user_id: "profile-1", serial_number: "957" }] } }
+          : { code: 0, data: { list: [] } }),
+        );
+      },
+    });
+
+    await client.listProfiles();
+    await client.listProfiles();
+
+    expect(urls.filter((url) => url.includes("/user/list"))).toHaveLength(1);
+    expect(urls.filter((url) => url.includes("/browser/local-active"))).toHaveLength(1);
+  });
+
   it("marks profiles as error when active state cannot be verified", async () => {
     const fetchMock: typeof fetch = async (input) => {
       const path = new URL(String(input)).pathname;
@@ -102,7 +122,9 @@ describe("AdsPowerClient", () => {
 
   it("waits until a newly opened profile exposes its connection", async () => {
     let activePoll = 0;
+    const urls: string[] = [];
     const fetchMock: typeof fetch = async (input) => {
+      urls.push(String(input));
       const path = new URL(String(input)).pathname;
       if (path.endsWith("/browser/start")) {
         return new Response(JSON.stringify({ code: 0, data: { status: "Active" } }));
@@ -123,6 +145,7 @@ describe("AdsPowerClient", () => {
 
     expect(result.cdpEndpoint).toBe("ws://127.0.0.1:1234/ready");
     expect(activePoll).toBe(3);
+    expect(urls.find((url) => url.includes("/browser/start"))).toContain("password_filling=1");
   });
 
   it("maps a ready deadline to the existing source timeout taxonomy", async () => {

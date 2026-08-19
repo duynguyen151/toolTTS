@@ -6,6 +6,7 @@ import {
   type NormalizedFinancialBatch,
   type NormalizedOrderBatch,
   type SellerDataSource,
+  type SellerProfileIdentity,
   type ShopSourceConfig,
   type SourceFingerprint,
   type SourceHealth,
@@ -23,6 +24,7 @@ import { SellerCenterError } from "../errors.js";
 import {
   OrderCountResponseSchema,
   OrderListResponseSchema,
+  StatementOrderListResponseSchema,
   StatementStatResponseSchema,
 } from "../extractors/schemas.js";
 import {
@@ -35,7 +37,6 @@ import { collectFinanceStatementPages } from "./finance-pagination.js";
 import { assertOnHoldReconciled } from "./finance-reconciliation.js";
 import {
   sellerIdentityFromFinanceRequestUrl,
-  type SellerIdentityResult,
 } from "./profile-verification.js";
 
 const SELLER_ORIGIN = "https://seller-us.tiktok.com";
@@ -50,6 +51,7 @@ export interface SellerCenterDataSourceOptions extends AdsPowerClientOptions {
   adsPowerClient?: AdsPowerClient;
   logger?: Logger;
   responseTimeoutMs?: number;
+  endpointResponseTimeoutMs?: number;
 }
 
 export function createSellerCenterDataSource(
@@ -82,11 +84,13 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
   private readonly adsPower: AdsPowerClient;
   private readonly logger: Logger | undefined;
   private readonly responseTimeoutMs: number;
+  private readonly endpointResponseTimeoutMs: number;
 
   constructor(options: SellerCenterDataSourceOptions = {}) {
     this.adsPower = options.adsPowerClient ?? new AdsPowerClient(options);
     this.logger = options.logger;
     this.responseTimeoutMs = options.responseTimeoutMs ?? 30_000;
+    this.endpointResponseTimeoutMs = options.endpointResponseTimeoutMs ?? 90_000;
   }
 
   async health(config: ShopSourceConfig): Promise<SourceHealth> {
@@ -104,16 +108,16 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
   }
 
   /** Reads the active Seller Center identity without writing to Seller Center. */
-  async verifyProfile(config: Pick<ShopSourceConfig, "profileId">): Promise<SellerIdentityResult> {
+  async verifyProfile(config: Pick<ShopSourceConfig, "profileId">): Promise<SellerProfileIdentity> {
     return this.withPage(config, async (page) => {
       const responseResult = captureJsonResponseWithRequest(
         page,
         STATEMENT_LIST_PATH,
         "GET",
-        this.responseTimeoutMs,
+        this.endpointResponseTimeoutMs,
         isOnHoldFinancePageOne,
       );
-      await page.goto(FINANCE_ON_HOLD_ROUTE, { waitUntil: "domcontentloaded", timeout: this.responseTimeoutMs });
+      await page.goto(FINANCE_ON_HOLD_ROUTE, { waitUntil: "domcontentloaded", timeout: this.endpointResponseTimeoutMs });
       const currentUrl = new URL(page.url());
       if (currentUrl.origin !== SELLER_ORIGIN) {
         void responseResult.catch(() => undefined);
@@ -132,6 +136,10 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
       await page.getByRole("tab", { name: /^on hold$/i }).click();
       const captured = await responseResult;
       if (!captured.ok) throw captured.error;
+      const response = StatementOrderListResponseSchema.safeParse(captured.body);
+      if (!response.success || response.data.code !== 0) {
+        throw new SellerCenterError("LAYOUT_CHANGED", "Finance identity response did not prove source success");
+      }
       return sellerIdentityFromFinanceRequestUrl(captured.requestUrl);
     });
   }
@@ -139,8 +147,8 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
   async probe(config: ShopSourceConfig): Promise<SourceFingerprint> {
     const shop = ShopSourceConfigSchema.parse(config);
     return this.withPage(shop, async (page) => {
-      const responseResult = captureJsonResponse(page, ORDER_COUNT_PATH, "POST", this.responseTimeoutMs);
-      await navigateToOrders(page, this.responseTimeoutMs);
+      const responseResult = captureJsonResponse(page, ORDER_COUNT_PATH, "POST", this.endpointResponseTimeoutMs);
+      await navigateToOrders(page, this.endpointResponseTimeoutMs);
       await assertHealthyPage(page);
       const captured = await responseResult;
       if (!captured.ok) throw captured.error;
@@ -156,10 +164,10 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
         page,
         ORDER_LIST_PATH,
         "POST",
-        this.responseTimeoutMs,
+        this.endpointResponseTimeoutMs,
         isActualOrderListResponse,
       );
-      await navigateToOrders(page, this.responseTimeoutMs);
+      await navigateToOrders(page, this.endpointResponseTimeoutMs);
       await assertHealthyPage(page);
       const captured = await responseResult;
       if (!captured.ok) throw captured.error;
@@ -191,17 +199,17 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
         page,
         STATEMENT_STAT_PATH,
         "GET",
-        this.responseTimeoutMs,
+        this.endpointResponseTimeoutMs,
         isOnHoldStatResponse,
       );
       const listResult = captureJsonResponseWithRequest(
         page,
         STATEMENT_LIST_PATH,
         "GET",
-        this.responseTimeoutMs,
+        this.endpointResponseTimeoutMs,
         isOnHoldFinancePageOne,
       );
-      await navigateToFinance(page, this.responseTimeoutMs);
+      await navigateToFinance(page, this.endpointResponseTimeoutMs);
       const statCaptured = await statResult;
       if (!statCaptured.ok) throw statCaptured.error;
       const listCaptured = await listResult;
@@ -231,10 +239,10 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
   }
 
   private async withPage<T>(shop: Pick<ShopSourceConfig, "profileId">, operation: (page: Page) => Promise<T>): Promise<T> {
-    const connection = await this.adsPower.open(shop.profileId);
     let browser: Browser | undefined;
     let page: Page | undefined;
     try {
+      const connection = await this.adsPower.openReady(shop.profileId);
       browser = await connectBrowser(connection.cdpEndpoint, this.responseTimeoutMs);
       const context = browser.contexts()[0];
       if (!context) throw new SellerCenterError("BROWSER_DISCONNECTED", "AdsPower browser has no context");
@@ -246,6 +254,13 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
       return await operation(page);
     } catch (error) {
       if (error instanceof SellerCenterError) throw error;
+      if (isProxyTimeout(error)) {
+        throw new SellerCenterError(
+          "PROXY_TIMEOUT",
+          "AdsPower profile proxy did not respond before the deadline",
+          { cause: error },
+        );
+      }
       throw new SellerCenterError("LAYOUT_CHANGED", "Seller Center operation failed", { cause: error });
     } finally {
       await page?.close().catch(() => undefined);
@@ -425,6 +440,7 @@ function classifyFailure(error: unknown): { status: SourceHealth["status"]; deta
       ADSPOWER_UNAVAILABLE: "UNAVAILABLE",
       PROFILE_START_FAILED: "UNAVAILABLE",
       BROWSER_DISCONNECTED: "UNAVAILABLE",
+      PROXY_TIMEOUT: "PROXY_TIMEOUT",
       LOGIN_REQUIRED: "LOGIN_REQUIRED",
       CHALLENGE_REQUIRED: "CHALLENGE_REQUIRED",
       LAYOUT_CHANGED: "LAYOUT_CHANGED",
@@ -433,4 +449,9 @@ function classifyFailure(error: unknown): { status: SourceHealth["status"]; deta
     return { status: statuses[error.failureType] ?? "UNAVAILABLE", detail: error.message };
   }
   return { status: "UNAVAILABLE", detail: error instanceof Error ? error.message : "Unknown source failure" };
+}
+
+function isProxyTimeout(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /ERR_PROXY_CONNECTION_FAILED|ERR_TUNNEL_CONNECTION_FAILED|PROXY_CONNECTION_TIMED_OUT|proxy\b.*\btimed out/i.test(error.message);
 }

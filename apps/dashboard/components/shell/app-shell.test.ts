@@ -17,6 +17,7 @@ describe("AppShell", () => {
     expect(html).toContain('href="#main-content"');
     expect(html).toContain("<aside");
     expect(html).toContain('<nav aria-label="Primary navigation"');
+    expect(html).toContain('id="sidebar-log-slot"');
     expect(html).toContain("<header");
     expect(html).toContain('<main id="main-content"');
     expect(html).toContain("Dashboard content");

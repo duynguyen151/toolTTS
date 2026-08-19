@@ -20,6 +20,11 @@ import type {
 import type { DashboardDataOrigin } from "../../lib/dashboard-contract.js";
 import { isTerminalUpdateState } from "../../lib/operations-contract.js";
 import { readUpdateDataEvents } from "../../lib/read-update-stream.js";
+import {
+  appendOperationLog,
+  createOperationLogEntry,
+  type OperationLogEntry,
+} from "./operation-log.js";
 
 type OperationsContextValue = {
   presentationStatus: ProfileOperationsPresentation["status"];
@@ -27,12 +32,20 @@ type OperationsContextValue = {
   profiles: readonly DashboardProfile[];
   selectedProfile: DashboardProfile | null;
   selectedProfileNo: string | null;
+  profileSelectionAligned: boolean;
   operationState: UpdateDataState;
   operationMessage: string;
+  operationLogs: readonly OperationLogEntry[];
+  logOpen: boolean;
   isBusy: boolean;
+  clearOperationLogs(): void;
+  toggleLog(): void;
   selectProfile(profileNo: string): void;
   openProfile(): Promise<void>;
+  verifyProfile(): Promise<void>;
   updateData(): Promise<void>;
+  syncSelected(): Promise<void>;
+  syncAllEligible(): Promise<void>;
 };
 
 const OperationsContext = createContext<OperationsContextValue | null>(null);
@@ -42,6 +55,22 @@ type PersistedDashboardShop = {
   readonly displayName: string;
   readonly dataOrigin: DashboardDataOrigin;
 };
+
+export function dashboardShopHref(profileNo: string): string {
+  return `/dashboard?shop=${encodeURIComponent(profileNo)}`;
+}
+
+export function dashboardProfileHref(profileNo: string): string {
+  return `/dashboard?profile=${encodeURIComponent(profileNo)}`;
+}
+
+export function isProfileSelectionAligned(
+  renderedShopProfileNo: string | undefined,
+  selectedProfileNo: string | null,
+): boolean {
+  // No persisted shop is expected before the selected profile has completed VERIFY.
+  return renderedShopProfileNo === undefined || renderedShopProfileNo === "UNAVAILABLE" || renderedShopProfileNo === selectedProfileNo;
+}
 
 function failedMessage(status: number): string {
   return status === 403
@@ -67,7 +96,7 @@ export function OperationsProvider({
   persistedShop?: PersistedDashboardShop;
 }) {
   const router = useRouter();
-  const liveOperationsEnabled = persistedShop === undefined || persistedShop.dataOrigin === "LIVE";
+  const liveOperationsEnabled = persistedShop === undefined || persistedShop.dataOrigin !== "DEMO_SANITIZED";
   const initialProfiles = !liveOperationsEnabled
     ? []
     : initialPresentation.status === "ERROR" && initialPresentation.profiles.length === 0 && persistedShop?.dataOrigin === "LIVE"
@@ -79,17 +108,33 @@ export function OperationsProvider({
         }]
       : initialPresentation.profiles;
   const [profiles, setProfiles] = useState(initialProfiles);
-  const [selectedProfileNo, setSelectedProfileNo] = useState(
+  const [selectedProfileNo] = useState(
     initialProfiles.some((profile) => profile.profileNo === (preferredProfileNo ?? persistedShop?.profileNo))
       ? preferredProfileNo ?? persistedShop?.profileNo ?? null
-      : initialPresentation.selectedProfileNo,
+      : persistedShop === undefined ? initialPresentation.selectedProfileNo : null,
   );
+  const renderedShopProfileNo = persistedShop?.profileNo;
+  const profileSelectionAligned = isProfileSelectionAligned(renderedShopProfileNo, selectedProfileNo);
   const [operationState, setOperationState] = useState<UpdateDataState>("READY");
   const [operationMessage, setOperationMessage] = useState(
     !liveOperationsEnabled
       ? "Live operations are disabled for sanitized demo data."
       : initialPresentation.error?.message ?? "Ready for operator action",
   );
+  const [operationLogs, setOperationLogs] = useState<readonly OperationLogEntry[]>([]);
+  const [logOpen, setLogOpen] = useState(false);
+
+  const reportOperation = useCallback((state: UpdateDataState, message: string): void => {
+    setOperationState(state);
+    setOperationMessage(message);
+    setOperationLogs((current) => appendOperationLog(current, createOperationLogEntry({
+      state,
+      message,
+      timestamp: new Date().toISOString(),
+    })));
+  }, []);
+  const clearOperationLogs = useCallback(() => setOperationLogs([]), []);
+  const toggleLog = useCallback(() => setLogOpen((open) => !open), []);
 
   const selectedProfile = useMemo(
     () => profiles.find((profile) => profile.profileNo === selectedProfileNo) ?? null,
@@ -98,16 +143,14 @@ export function OperationsProvider({
   const isBusy = operationState !== "READY" && !isTerminalUpdateState(operationState);
 
   const selectProfile = useCallback((profileNo: string) => {
-    if (!liveOperationsEnabled) return;
-    setSelectedProfileNo(profileNo);
-    setOperationState("READY");
-    setOperationMessage("Ready for operator action");
-  }, [liveOperationsEnabled]);
+    if (!liveOperationsEnabled || !profiles.some((profile) => profile.profileNo === profileNo)) return;
+    reportOperation("CONNECTING", `Loading dashboard for profile ${profileNo}`);
+    router.push(dashboardProfileHref(profileNo));
+  }, [liveOperationsEnabled, profiles, reportOperation, router]);
 
   const openProfile = useCallback(async () => {
-    if (!liveOperationsEnabled || selectedProfileNo === null) return;
-    setOperationState("OPENING_PROFILE");
-    setOperationMessage(`Opening AdsPower profile ${selectedProfileNo}`);
+    if (!liveOperationsEnabled || !profileSelectionAligned || selectedProfileNo === null) return;
+    reportOperation("OPENING_PROFILE", `Opening AdsPower profile ${selectedProfileNo}`);
 
     try {
       const response = await fetch("/api/profiles/open", {
@@ -118,27 +161,23 @@ export function OperationsProvider({
       const result = await response.json() as OpenProfileResult;
 
       if (!response.ok || !result.ok) {
-        setOperationState("ERROR");
-        setOperationMessage(result.ok ? failedMessage(response.status) : result.error.message);
+        reportOperation("ERROR", result.ok ? failedMessage(response.status) : result.error.message);
         return;
       }
 
       setProfiles((current) => current.map((profile) => profile.profileNo === result.profileNo
         ? { ...profile, state: "OPEN" }
         : profile));
-      setOperationState("READY");
-      setOperationMessage(`Profile ${result.profileNo} is ready`);
+      reportOperation("READY", `Profile ${result.profileNo} is ready`);
     } catch {
-      setOperationState("ERROR");
-      setOperationMessage("AdsPower could not be reached from the dashboard.");
+      reportOperation("ERROR", "AdsPower could not be reached from the dashboard.");
     }
-  }, [liveOperationsEnabled, selectedProfileNo]);
+  }, [liveOperationsEnabled, profileSelectionAligned, reportOperation, selectedProfileNo]);
 
   const updateData = useCallback(async () => {
-    if (!liveOperationsEnabled || selectedProfileNo === null) return;
+    if (!liveOperationsEnabled || !profileSelectionAligned || selectedProfileNo === null) return;
     const initialState = preflightUpdateState(selectedProfile?.state);
-    setOperationState(initialState);
-    setOperationMessage(initialState === "OPENING_PROFILE"
+    reportOperation(initialState, initialState === "OPENING_PROFILE"
       ? `Opening AdsPower profile ${selectedProfileNo}`
       : `Connecting to profile ${selectedProfileNo}`);
 
@@ -150,14 +189,12 @@ export function OperationsProvider({
       });
 
       if (!response.ok || response.body === null) {
-        setOperationState("ERROR");
-        setOperationMessage(failedMessage(response.status));
+        reportOperation("ERROR", failedMessage(response.status));
         return;
       }
 
       for await (const event of readUpdateDataEvents(response.body)) {
-        setOperationState(event.state);
-        setOperationMessage(event.message);
+        reportOperation(event.state, event.message);
         if (event.state === "CONNECTING") {
           setProfiles((current) => current.map((profile) => profile.profileNo === selectedProfileNo
             ? { ...profile, state: "OPEN" }
@@ -168,10 +205,47 @@ export function OperationsProvider({
         }
       }
     } catch {
-      setOperationState("ERROR");
-      setOperationMessage("The update stream ended unexpectedly.");
+      reportOperation("ERROR", "The update stream ended unexpectedly.");
     }
-  }, [liveOperationsEnabled, router, selectedProfile, selectedProfileNo]);
+  }, [liveOperationsEnabled, profileSelectionAligned, reportOperation, router, selectedProfile, selectedProfileNo]);
+
+  const verifyProfile = useCallback(async () => {
+    if (!liveOperationsEnabled || !profileSelectionAligned || selectedProfileNo === null) return;
+    reportOperation("CONNECTING", `Verifying profile ${selectedProfileNo}.`);
+    try {
+      const response = await fetch("/api/profiles/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profileNo: selectedProfileNo }) });
+      const result = await response.json() as { ok?: boolean; verificationState?: string; error?: { message: string } };
+      const ready = result.ok === true && result.verificationState === "READY";
+      reportOperation(ready ? "READY" : "ERROR", ready ? `Profile ${selectedProfileNo} is READY and eligible.` : result.ok ? `Profile ${selectedProfileNo} requires attention: ${result.verificationState}.` : result.error?.message ?? failedMessage(response.status));
+      if (ready) router.push(dashboardShopHref(selectedProfileNo));
+    } catch { reportOperation("ERROR", "Profile verification could not be completed."); }
+  }, [liveOperationsEnabled, profileSelectionAligned, reportOperation, router, selectedProfileNo]);
+
+  const syncAllEligible = useCallback(async () => {
+    if (!liveOperationsEnabled) return;
+    reportOperation("CONNECTING", "Synchronizing all eligible profiles.");
+    try {
+      const response = await fetch("/api/sync/all-eligible", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profileNo: "all" }) });
+      const result = await response.json() as readonly { status: string }[];
+      const failed = result.filter((item) => item.status === "FAILED").length;
+      reportOperation(failed === 0 ? "READY" : "PARTIAL", `Eligible profile sync completed: ${result.length - failed} succeeded, ${failed} failed.`);
+      router.refresh();
+    } catch { reportOperation("ERROR", "Eligible profile sync could not be completed."); }
+  }, [liveOperationsEnabled, reportOperation, router]);
+
+  const syncSelected = useCallback(async () => {
+    if (!liveOperationsEnabled || !profileSelectionAligned || selectedProfileNo === null) return;
+    reportOperation("CONNECTING", selectedProfile?.linkState === "UNLINKED"
+      ? `Connecting profile ${selectedProfileNo}, verifying its Seller Center identity, then collecting data.`
+      : `Connecting profile ${selectedProfileNo} for synchronization.`);
+    try {
+      const response = await fetch("/api/sync/selected", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profileNo: selectedProfileNo }) });
+      const result = await response.json() as readonly { status: string; error: string | null }[];
+      const failed = result.filter((item) => item.status === "FAILED").length;
+      reportOperation(failed === 0 ? "READY" : "ERROR", failed === 0 ? `Profile ${selectedProfileNo} sync completed.` : result.find((item) => item.error !== null)?.error ?? "Profile sync failed.");
+      if (failed === 0) router.refresh();
+    } catch { reportOperation("ERROR", "Selected profile sync could not be completed."); }
+  }, [liveOperationsEnabled, profileSelectionAligned, reportOperation, router, selectedProfile, selectedProfileNo]);
 
   const value = useMemo<OperationsContextValue>(() => ({
     presentationStatus: initialPresentation.status,
@@ -179,24 +253,40 @@ export function OperationsProvider({
     profiles,
     selectedProfile,
     selectedProfileNo,
+    profileSelectionAligned,
     operationState,
     operationMessage,
+    operationLogs,
+    logOpen,
     isBusy,
+    clearOperationLogs,
+    toggleLog,
     selectProfile,
     openProfile,
+    verifyProfile,
     updateData,
+    syncSelected,
+    syncAllEligible,
   }), [
     initialPresentation.status,
     liveOperationsEnabled,
     profiles,
     selectedProfile,
     selectedProfileNo,
+    profileSelectionAligned,
     operationState,
     operationMessage,
+    operationLogs,
+    logOpen,
     isBusy,
+    clearOperationLogs,
+    toggleLog,
     selectProfile,
     openProfile,
+    verifyProfile,
     updateData,
+    syncSelected,
+    syncAllEligible,
   ]);
 
   return <OperationsContext.Provider value={value}>{children}</OperationsContext.Provider>;

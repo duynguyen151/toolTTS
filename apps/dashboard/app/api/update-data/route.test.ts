@@ -7,11 +7,14 @@ function operations(onUpdate: (profileNo: string) => void): DashboardOperations 
   return {
     listProfiles: async () => ({ status: "READY", selectedProfileNo: null, profiles: [], error: null }),
     openProfile: async (profileNo) => ({ ok: true, profileNo, state: "OPEN" }),
+    verifyProfile: async () => ({ ok: false, profileNo: "", verificationState: "UNVERIFIED", shop: null, error: { code: "UNEXPECTED_ERROR", message: "test" } }),
     updateData: async (profileNo, emit) => {
       onUpdate(profileNo);
       await emit({ state: "SUCCESS", message: "Complete", terminal: true, completedKinds: ["orders", "finance"], error: null });
       await emit({ state: "ERROR", message: "Must be ignored", terminal: true, completedKinds: [], error: null });
     },
+    syncSelected: async () => [],
+    syncAllEligible: async () => [],
   };
 }
 

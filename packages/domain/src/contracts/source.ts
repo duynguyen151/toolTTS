@@ -19,6 +19,7 @@ export const SourceHealthSchema = z.object({
   status: z.enum([
     "HEALTHY",
     "UNAVAILABLE",
+    "PROXY_TIMEOUT",
     "LOGIN_REQUIRED",
     "CHALLENGE_REQUIRED",
     "LAYOUT_CHANGED",
@@ -46,9 +47,18 @@ export const SyncRequestSchema = z.object({
 
 export type SyncRequest = z.infer<typeof SyncRequestSchema>;
 
+export type SellerProfileIdentity =
+  | { readonly status: "IDENTIFIED"; readonly tiktokShopId: string }
+  | {
+      readonly status: "AMBIGUOUS" | "UNAVAILABLE" | "NOT_TIKTOK_SELLER" | "UNSUPPORTED_REGION";
+      readonly tiktokShopId: null;
+    };
+
 export interface SellerDataSource {
   health(config: ShopSourceConfig): Promise<SourceHealth>;
   probe(config: ShopSourceConfig): Promise<SourceFingerprint>;
+  /** Captures the identity from the source's canonical authenticated route. */
+  verifyProfile?(config: Pick<ShopSourceConfig, "profileId">): Promise<SellerProfileIdentity>;
   collectOrders(request: SyncRequest): AsyncIterable<NormalizedOrderBatch>;
   collectFinancials(
     request: SyncRequest,

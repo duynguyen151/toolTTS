@@ -107,6 +107,23 @@ function sourceConfig(shop: ShopRow): ShopSourceConfig {
   };
 }
 
+async function assertCurrentShopIdentity(source: SellerDataSource, shop: ShopRow): Promise<void> {
+  if (source.verifyProfile === undefined) {
+    throw new SellerCenterError("LAYOUT_CHANGED", "Seller Center identity verification is unavailable");
+  }
+  const identity = await source.verifyProfile({ profileId: shop.profileId });
+  if (
+    identity.status !== "IDENTIFIED"
+    || shop.tiktokShopId === null
+    || identity.tiktokShopId !== shop.tiktokShopId
+  ) {
+    throw new SellerCenterError(
+      "SHOP_IDENTITY_CHANGED",
+      "Canonical Seller Center identity does not match the linked shop",
+    );
+  }
+}
+
 function syncMode(kind: SyncKind, mode: SyncRequest["mode"]): SyncMode {
   if (mode === "BACKFILL") return "BACKFILL";
   if (mode === "RECONCILE") return "RECONCILE";
@@ -122,6 +139,8 @@ function pauseState(error: SellerCenterError): "PAUSED_LOGIN" | "PAUSED_CHALLENG
 
 export async function runShopSync(input: RunSyncInput): Promise<SyncResult> {
   const result = await withShopAdvisoryLock(input.context, input.shop.id, async () => {
+    // Bind the selected browser session to the persisted shop before any sync metadata or data is written.
+    await assertCurrentShopIdentity(input.source, input.shop);
     const mode = input.mode ?? "INCREMENTAL";
     const run = await beginSyncRun(input.context.db, {
       shopId: input.shop.id,

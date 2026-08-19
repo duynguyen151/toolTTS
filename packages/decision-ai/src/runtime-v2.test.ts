@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { AiDecisionContext } from "@shop-health/domain";
 import {
   createBaselineAiClientFromConfig,
   readBaselineAiConfig,
@@ -8,6 +9,83 @@ import {
 
 const deepseek = "oc/deepseek-v4-flash-free";
 const pickle = "oc/big-pickle";
+
+const frozenContext: AiDecisionContext = {
+  schemaVersion: "ai-decision-context.v1",
+  profile: { profileId: "profile-safe-1", profileNo: "SAFE-1" },
+  shop: { shopId: "shop-safe-1", tiktokShopId: null, displayName: "Safe Shop", region: "US", locale: "en-US", currency: "USD" },
+  metrics: {
+    observedAt: "2026-08-14T00:00:00.000Z",
+    decision: {
+      window: "FULL_PERSISTED_HISTORY",
+      periodStart: "2025-08-14T00:00:00.000Z",
+      periodEnd: "2026-08-14T00:00:00.000Z",
+      totalOrders: 9,
+      totalPersistedOrders: 9,
+      operationalOrderCount: 9,
+      onHoldOrderCount: 9,
+      deliveredCount: 8,
+      deliveryRate: 8 / 9,
+      cancellationRate: null,
+      refundRate: null,
+      currency: "USD",
+      operationalExposure: "844.6500",
+    },
+    finance: {
+      capturedAt: "2026-08-14T00:00:00.000Z",
+      currency: "USD",
+      availableBalance: null,
+      frozenBalance: null,
+      totalBalance: null,
+      toSettleBalance: "310.1600",
+      officialFinanceOnHold: "310.1600",
+      waitingForCompletedRefundReturnAmount: "42.0000",
+      settlementCount: 8,
+      onHoldSettlementCount: 8,
+    },
+  },
+  comparisons: [],
+  trends: [],
+  dataQuality: {
+    coverage: "COMPLETE",
+    source: "SELLER_CENTER",
+    provenSourceWindow: "ROLLING_12_MONTHS",
+    completeWithinSourceWindow: true,
+    lifetimeHistoryComplete: false,
+    ordersSourceComplete: true,
+    financeRequiredSourceComplete: true,
+    sourceReconciled: true,
+    freshness: "FRESH",
+    latestSuccessfulSyncAt: "2026-08-14T00:00:00.000Z",
+    financeCapturedAt: "2026-08-14T00:00:00.000Z",
+    blockers: [],
+  },
+  risk: {
+    policyVersion: "risk-control-policy.v1",
+    evaluatedAt: "2026-08-14T00:00:00.000Z",
+    deliveryRate: 8 / 9,
+    stopByOnHoldValue: false,
+    stopByDeliveryRate: false,
+    dataSufficient: true,
+    stopOnHoldValueAt: "3500.0000",
+    stopDeliveryRateBelow: 0.7,
+    minimumOrdersForRateRule: 0,
+    operationalExposure: "844.6500",
+  },
+  rule: {
+    result: "CONTINUE",
+    policyVersion: "risk-control-policy.v1",
+    checks: [
+      { metric: "operationalExposure", observedValue: "844.6500", threshold: "3500.0000", operator: "GTE", result: "PASS", triggeredReason: null },
+      { metric: "deliveryRate", observedValue: 8 / 9, threshold: 0.7, operator: "LT", result: "PASS", triggeredReason: null },
+    ],
+    triggers: [],
+    expression: "operationalExposure >= 3500 USD OR deliveryRate < 70%",
+    evaluatedAt: "2026-08-14T00:00:00.000Z",
+  },
+  previousCompatibleSnapshot: null,
+  policyVersions: { metricDefinitionVersion: "decision-metrics.v1", riskPolicyVersion: "risk-control-policy.v1", trendPolicyVersion: null },
+};
 
 const validInput: BaselineAiInput = {
   metricsSnapshot: {
@@ -66,6 +144,7 @@ const validInput: BaselineAiInput = {
   },
   ruleDecision: "CONTINUE",
   ruleTriggers: [],
+  decisionContextSnapshot: frozenContext,
 };
 
 function availableResponse(
@@ -398,19 +477,21 @@ describe("Tool AI runtime v1", () => {
       messages: Array<{ role: string; content: string }>;
     };
     const context = body.messages.find(({ role }) => role === "user")?.content ?? "";
-    expect(context).toContain('"officialOnHoldAmount":"310.1600"');
+    expect(context).toContain('"officialFinanceOnHold":"310.1600"');
     expect(context).toContain('"waitingForCompletedRefundReturnAmount":"42.0000"');
-    expect(context).toContain('"operationalOrderExposure":"844.6500"');
+    expect(context).toContain('"operationalExposure":"844.6500"');
     expect(context).toContain('"lifetimeHistoryComplete":false');
     expect(context).toContain('"totalPersistedOrders":9');
     expect(context).toContain('"operationalOrderCount":9');
-    expect(context).not.toContain('"totalOrders"');
+    expect(context).toContain('"totalOrders":9');
     expect(context).toContain('"dataSufficient":true');
     expect(context).toContain('"stopByOnHoldValue":false');
     expect(context).toContain('"stopByDeliveryRate":false');
-    expect(context).toContain('"currentValues"');
+    expect(context).not.toContain('"onHoldValue"');
+    expect(context).not.toContain('"officialOnHoldAmount"');
+    expect(context).not.toContain('"operationalOrderExposure"');
     expect(context).not.toMatch(
-      /shopId|profileNo|buyer|customer|shippingAddress|phone|email|cookie|token|csrf|proxy|cdp|rawData/i,
+      /buyer|customer|shippingAddress|phone|email|cookie|token|csrf|proxy|cdp|rawData/i,
     );
   });
 
@@ -421,7 +502,10 @@ describe("Tool AI runtime v1", () => {
     await expect(client.recommend({
       ...validInput,
       buyerName: "must-not-cross-boundary",
-    } as unknown as BaselineAiInput)).rejects.toThrow();
+    } as unknown as BaselineAiInput)).resolves.toMatchObject({
+      status: "UNAVAILABLE",
+      errorCode: "INVALID_RESPONSE",
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

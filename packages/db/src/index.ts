@@ -78,6 +78,7 @@ export {
   type CreateDecisionCaseInput,
   type DecisionCaseInput,
   type DecisionAiInputRecord,
+  type DecisionBaRevision,
   type DecisionHistoryPageRecord,
   type DecisionReviewRecord,
   type ListDecisionHistoryInput,

@@ -3,6 +3,7 @@ export * from "./contracts/finance.js";
 export * from "./contracts/orders.js";
 export * from "./contracts/source.js";
 export * from "./contracts/v1-freeze.js";
+export * from "./contracts/frozen-context.js";
 export * from "./decisions.js";
 export * from "./metrics/calculate.js";
 export * from "./metrics/types.js";

@@ -15,6 +15,7 @@ const runtimeMocks = vi.hoisted(() => ({
   evaluateAndStoreRiskControl: vi.fn(),
   findShopByProfileNo: vi.fn(),
   listShops: vi.fn(),
+  listReadyAdsPowerProfileShops: vi.fn(),
   runShopSync: vi.fn(),
   readBaselineAiConfig: vi.fn(),
   verifyAdsPowerBrowserConnection: vi.fn(),
@@ -140,6 +141,7 @@ describe("createDashboardOperationsRuntime", () => {
     runtimeMocks.createDatabase.mockReturnValue({ db: {} });
     runtimeMocks.closeDatabase.mockResolvedValue(undefined);
     runtimeMocks.listShops.mockResolvedValue([linkedShop]);
+    runtimeMocks.listReadyAdsPowerProfileShops.mockResolvedValue([linkedShop]);
     runtimeMocks.findShopByProfileNo.mockResolvedValue(linkedShop);
     runtimeMocks.runShopSync.mockImplementation(async (_input: unknown) => {
       const kind = calls.includes("orders-sync") ? "finance" : "orders";
@@ -206,11 +208,11 @@ describe("createDashboardOperationsRuntime", () => {
     await operations.updateData("957", (event) => { events.push(event); });
 
     expect(calls).toEqual([
+      "list-profiles",
+      "list-active-profiles",
       "application-not-ready",
       "launch-application",
       "application-ready",
-      "list-profiles",
-      "list-active-profiles",
       "profile-closed",
       "start-exact-profile",
       "profile-cdp-ready",
@@ -321,6 +323,7 @@ describe("createDashboardOperationsRuntime", () => {
     runtimeMocks.closeDatabase.mockResolvedValue(undefined);
     runtimeMocks.findShopByProfileNo.mockResolvedValue(linkedShop);
     runtimeMocks.listShops.mockResolvedValue([linkedShop]);
+    runtimeMocks.listReadyAdsPowerProfileShops.mockResolvedValue([linkedShop]);
     runtimeMocks.createSellerCenterDataSource.mockImplementation((options: { adsPowerClient: AdsPowerClient }) => {
       expect(options.adsPowerClient).toBe(injected);
       return source;

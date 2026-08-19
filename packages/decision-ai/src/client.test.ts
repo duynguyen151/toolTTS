@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { AiDecisionContext } from "@shop-health/domain";
 import {
   buildDecisionAiMessages,
   createBaselineAiClientFromConfig,
@@ -9,6 +10,112 @@ import {
 
 const defaultModel = "oc/deepseek-v4-flash-free";
 const fallbackModel = "oc/big-pickle";
+
+const frozenContext: AiDecisionContext = {
+  schemaVersion: "ai-decision-context.v1",
+  profile: { profileId: "profile-safe-1", profileNo: "SAFE-1" },
+  shop: {
+    shopId: "shop-safe-1",
+    tiktokShopId: null,
+    displayName: "Safe Shop",
+    region: "US",
+    locale: "en-US",
+    currency: "USD",
+  },
+  metrics: {
+    observedAt: "2026-08-14T00:00:00.000Z",
+    decision: {
+      window: "FULL_PERSISTED_HISTORY",
+      periodStart: "2026-08-01T00:00:00.000Z",
+      periodEnd: "2026-08-14T00:00:00.000Z",
+      totalOrders: 120,
+      totalPersistedOrders: 120,
+      operationalOrderCount: 100,
+      onHoldOrderCount: 18,
+      deliveredCount: 84,
+      deliveryRate: 0.84,
+      cancellationRate: null,
+      refundRate: null,
+      currency: "USD",
+      operationalExposure: "1200.0000",
+    },
+    finance: {
+      capturedAt: "2026-08-14T00:00:00.000Z",
+      currency: "USD",
+      availableBalance: null,
+      frozenBalance: null,
+      totalBalance: null,
+      toSettleBalance: "310.1600",
+      officialFinanceOnHold: "310.1600",
+      waitingForPackageDeliveryAmount: null,
+      deliveredAwaitingSettlementAmount: null,
+      waitingForCompletedRefundReturnAmount: "42.0000",
+      reasonTotalsReconcileToOfficialOnHold: true,
+      missingOnHoldExpectedAmountCount: 0,
+      settlementCount: 8,
+      onHoldSettlementCount: 8,
+    },
+  },
+  comparisons: [],
+  trends: [],
+  dataQuality: {
+    coverage: "COMPLETE",
+    source: "SELLER_CENTER",
+    provenSourceWindow: "ROLLING_12_MONTHS",
+    completeWithinSourceWindow: true,
+    lifetimeHistoryComplete: false,
+    ordersSourceComplete: true,
+    financeRequiredSourceComplete: true,
+    sourceReconciled: true,
+    freshness: "FRESH",
+    latestSuccessfulSyncAt: "2026-08-14T00:00:00.000Z",
+    financeCapturedAt: "2026-08-14T00:00:00.000Z",
+    blockers: [],
+  },
+  risk: {
+    policyVersion: "risk-control-policy.v1",
+    evaluatedAt: "2026-08-14T00:00:00.000Z",
+    deliveryRate: 0.84,
+    stopByOnHoldValue: false,
+    stopByDeliveryRate: false,
+    dataSufficient: true,
+    stopOnHoldValueAt: "3500.0000",
+    stopDeliveryRateBelow: 0.7,
+    minimumOrdersForRateRule: 10,
+    operationalExposure: "1200.0000",
+  },
+  rule: {
+    result: "CONTINUE",
+    policyVersion: "risk-control-policy.v1",
+    checks: [
+      {
+        metric: "operationalExposure",
+        observedValue: "1200.0000",
+        threshold: "3500.0000",
+        operator: "GTE",
+        result: "PASS",
+        triggeredReason: null,
+      },
+      {
+        metric: "deliveryRate",
+        observedValue: 0.84,
+        threshold: 0.7,
+        operator: "LT",
+        result: "PASS",
+        triggeredReason: null,
+      },
+    ],
+    triggers: [],
+    expression: "operationalExposure >= 3500 USD OR deliveryRate < 70%",
+    evaluatedAt: "2026-08-14T00:00:00.000Z",
+  },
+  previousCompatibleSnapshot: null,
+  policyVersions: {
+    metricDefinitionVersion: "decision-metrics.v1",
+    riskPolicyVersion: "risk-control-policy.v1",
+    trendPolicyVersion: null,
+  },
+};
 
 const validInput: BaselineAiInput = {
   metricsSnapshot: {
@@ -35,6 +142,11 @@ const validInput: BaselineAiInput = {
     toSettleBalance: "310.1600",
     onHoldBalance: "310.1600",
     officialOnHoldAmount: "310.1600",
+    waitingForPackageDeliveryAmount: null,
+    deliveredAwaitingSettlementAmount: null,
+    waitingForCompletedRefundReturnAmount: "42.0000",
+    reasonTotalsReconcileToOfficialOnHold: true,
+    missingOnHoldExpectedAmountCount: 0,
     settlementCount: 8,
     onHoldSettlementCount: 8,
   },
@@ -66,6 +178,7 @@ const validInput: BaselineAiInput = {
   },
   ruleDecision: "CONTINUE",
   ruleTriggers: [],
+  decisionContextSnapshot: frozenContext,
 };
 
 function config(overrides: NodeJS.ProcessEnv = {}) {
@@ -81,13 +194,134 @@ function config(overrides: NodeJS.ProcessEnv = {}) {
 }
 
 describe("baseline AI technical failures", () => {
+  it("returns unavailable without calling the provider when the frozen context is null", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const client = createBaselineAiClientFromConfig(config(), { fetch: fetchMock });
+
+    await expect(client.recommend({
+      ...validInput,
+      decisionContextSnapshot: null,
+    })).resolves.toMatchObject({
+      status: "UNAVAILABLE",
+      errorCode: "INVALID_RESPONSE",
+      reportedModel: null,
+      actualModelUsed: null,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns unavailable without calling the provider when canonical facts disagree with the frozen context", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const client = createBaselineAiClientFromConfig(config(), { fetch: fetchMock });
+    const mismatchedContext = {
+      ...frozenContext,
+      metrics: {
+        ...frozenContext.metrics,
+        decision: {
+          ...frozenContext.metrics.decision,
+          operationalExposure: "9999.0000",
+        },
+      },
+    };
+
+    await expect(client.recommend({
+      ...validInput,
+      decisionContextSnapshot: mismatchedContext,
+    })).resolves.toMatchObject({
+      status: "UNAVAILABLE",
+      errorCode: "INVALID_RESPONSE",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns unavailable without calling the provider when the frozen context is stale", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const client = createBaselineAiClientFromConfig(config(), { fetch: fetchMock });
+    const staleContext = {
+      ...frozenContext,
+      dataQuality: {
+        ...frozenContext.dataQuality,
+        freshness: "STALE" as const,
+      },
+    };
+
+    await expect(client.recommend({
+      ...validInput,
+      decisionContextSnapshot: staleContext,
+    })).resolves.toMatchObject({
+      status: "UNAVAILABLE",
+      errorCode: "INVALID_RESPONSE",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["finance currency", (context: AiDecisionContext) => ({
+      ...context,
+      metrics: { ...context.metrics, finance: { ...context.metrics.finance, currency: "EUR" as const } },
+    })],
+    ["coverage timestamp", (context: AiDecisionContext) => ({
+      ...context,
+      dataQuality: { ...context.dataQuality, financeCapturedAt: "2026-08-13T00:00:00.000Z" },
+    })],
+    ["risk threshold", (context: AiDecisionContext) => ({
+      ...context,
+      risk: { ...context.risk, stopOnHoldValueAt: "3600.0000" },
+    })],
+    ["rule evidence", (context: AiDecisionContext) => ({
+      ...context,
+      rule: { ...context.rule, checks: [{
+        metric: "deliveryRate",
+        observedValue: 0.84,
+        threshold: 0.7,
+        operator: "LT" as const,
+        result: "PASS" as const,
+        triggeredReason: null,
+      }] },
+    })],
+  ])("returns unavailable without calling the provider when %s disagrees", async (_label, mutate) => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const client = createBaselineAiClientFromConfig(config(), { fetch: fetchMock });
+
+    await expect(client.recommend({
+      ...validInput,
+      decisionContextSnapshot: mutate(frozenContext),
+    })).resolves.toMatchObject({
+      status: "UNAVAILABLE",
+      errorCode: "INVALID_RESPONSE",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns unavailable without calling the provider for a legacy context containing onHoldValue", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const client = createBaselineAiClientFromConfig(config(), { fetch: fetchMock });
+    const legacyContext = {
+      ...frozenContext,
+      metrics: {
+        ...frozenContext.metrics,
+        decision: {
+          ...frozenContext.metrics.decision,
+          onHoldValue: "1200.0000",
+        },
+      },
+    };
+
+    await expect(client.recommend({
+      ...validInput,
+      decisionContextSnapshot: legacyContext,
+    } as never)).resolves.toMatchObject({
+      status: "UNAVAILABLE",
+      errorCode: "INVALID_RESPONSE",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("sends the frozen sanitized decision context when available", () => {
-    const context = { schemaVersion: "ai-decision-context.v1", safe: "context-only" };
     const messages = buildDecisionAiMessages({
       ...validInput,
-      decisionContextSnapshot: context as never,
     });
-    expect(JSON.parse(messages[1].content)).toMatchObject({ decisionContext: context });
+    expect(JSON.parse(messages[1].content)).toMatchObject({ decisionContext: frozenContext });
   });
   it("does not call the provider without a verified Seller Center source identity", async () => {
     const fetchMock = vi.fn<typeof fetch>();

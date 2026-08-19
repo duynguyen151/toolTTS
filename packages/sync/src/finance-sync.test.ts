@@ -102,6 +102,7 @@ function financeSource(batch: NormalizedFinancialBatch): SellerDataSource {
   return {
     health: vi.fn(),
     probe: vi.fn(),
+    verifyProfile: vi.fn().mockResolvedValue({ status: "IDENTIFIED", tiktokShopId: "seller-957" }),
     collectOrders: vi.fn(),
     collectFinancials: async function* () {
       yield batch;
@@ -131,6 +132,7 @@ function shop(): ShopRow {
     id: "00000000-0000-0000-0000-000000000001",
     profileId: "profile-1",
     profileNo: "957",
+    tiktokShopId: "seller-957",
     region: "US",
     locale: "en-US",
   } as ShopRow;

@@ -15,6 +15,7 @@ import {
 } from "@shop-health/db";
 
 import type {
+  DashboardDecisionCenter,
   DashboardPresentation,
   DashboardShopSource,
   DashboardSource,
@@ -23,6 +24,245 @@ import type {
 import { buildDashboardPresentation } from "./dashboard-model.js";
 
 type JsonRecord = Record<string, unknown>;
+
+function displayValue(value: unknown): string {
+  if (value === null || value === undefined) return "Unavailable";
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "Unavailable";
+  if (typeof value === "string") return value;
+  return "Unavailable";
+}
+
+function displayTimestamp(value: Date | string | null | undefined): string {
+  if (value === null || value === undefined) return "Unavailable";
+  const timestamp = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return "Unavailable";
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone: "Asia/Bangkok",
+    timeZoneName: "short",
+  }).format(timestamp);
+}
+
+function decisionQueueReasons(review: DecisionReviewRecord): string[] {
+  const reasons: string[] = [];
+  if (review.rule.decision === "PAUSE") reasons.push("RULE_PAUSE");
+  if (review.ai?.status === "AVAILABLE" && review.ai.recommendation === "PAUSE") reasons.push("AI_PAUSE");
+  if (review.ai?.status === "AVAILABLE" && review.ai.recommendation === "WATCH") reasons.push("AI_WATCH");
+  const healthyAiRecommendation = review.ai?.recommendation === "CONTINUE" || review.ai?.recommendation === "SCALE";
+  if (
+    review.ai?.status === "AVAILABLE"
+    && review.ai.recommendation !== review.rule.decision
+    && !(review.rule.decision === "CONTINUE" && healthyAiRecommendation)
+  ) reasons.push("RULE_AI_DISAGREEMENT");
+  if (review.ai === null || review.ai.status === "UNAVAILABLE") reasons.push("AI_UNAVAILABLE");
+  if (review.ai?.humanReviewRequired === true) reasons.push("HUMAN_REVIEW_REQUIRED");
+  if (!hasCompleteProvenSourceWindow(review)) reasons.push("DATA_INCOMPLETE");
+  return reasons;
+}
+
+function decisionCenterFromReviews(
+  review: DecisionReviewRecord | null,
+  history: readonly DecisionReviewRecord[],
+  queueReviews: readonly DecisionReviewRecord[] = history,
+): DashboardDecisionCenter {
+  if (review === null) {
+    return {
+      status: "UNAVAILABLE",
+      message: "No persisted LIVE decision case is available for this shop.",
+      caseId: null,
+      profileNo: null,
+      coverage: {
+        status: "UNAVAILABLE",
+        source: "Unavailable",
+        provenWindow: "Unavailable",
+        sourceReconciled: "Unavailable",
+        freshness: "Unavailable",
+        completeWithinWindow: "Unavailable",
+        lifetimeHistory: "Not verified",
+      },
+      metrics: [],
+      comparisons: [],
+      trends: [],
+      rule: { result: "UNAVAILABLE", policyVersion: "Unavailable", expression: "Unavailable", evaluatedAt: "Unavailable", triggers: [], checks: [] },
+      ai: {
+        status: "UNAVAILABLE",
+        recommendation: "Unavailable",
+        riskLevel: "Unavailable",
+        confidence: "Unavailable",
+        humanReviewRequired: "Yes",
+        reasonCodes: [],
+        supportingFactors: [],
+        riskFactors: [],
+        whatWouldChange: [],
+        reason: "Unavailable",
+        policyVersion: "Unavailable",
+        provider: "Unavailable",
+        requestedModel: "Unavailable",
+        reportedModel: "Unavailable",
+        actualModel: "Unavailable",
+        authMode: "Unavailable",
+        promptVersion: "Unavailable",
+        outputSchemaVersion: "Unavailable",
+        failureCode: "NOT_RECORDED",
+      },
+      ba: { current: "NOT_REVIEWED", currentDetail: "No BA decision is recorded.", history: [] },
+      execution: { status: "NOT_REQUESTED", requestedAction: "None", mode: "DRY_RUN only", sellerCenterCalled: "No", executedAt: "Not executed" },
+      reviewQueue: queueReviews.flatMap((item) => {
+        const reasons = decisionQueueReasons(item);
+        return reasons.length === 0 ? [] : [{ profileNo: item.shop.profileNo, displayName: item.shop.displayName, reasons }];
+      }),
+    };
+  }
+
+  const context = review.decisionContextSnapshot;
+  const coverage = review.coverageSnapshot ?? {
+    coverageState: "PARTIAL",
+    provenSourceWindow: null,
+    completeWithinSourceWindow: false,
+    lifetimeHistoryComplete: false,
+    sourceReconciled: false,
+    freshness: "UNKNOWN",
+  };
+  const ai = review.ai;
+  const hasPersistedSourceWindow = coverage.source === "SELLER_CENTER" && coverage.provenSourceWindow !== null;
+  const reviewHistory = history.flatMap((item) => (item.baHistory ?? (item.ba === null ? [] : [item.ba])).map((ba) => ({
+    decision: ba.decision,
+    reason: ba.reasonCode,
+    actor: ba.actor,
+    decidedAt: displayTimestamp(ba.decidedAt),
+    notes: ba.notes ?? ba.note ?? "No note provided.",
+  })));
+
+  return {
+    status: "AVAILABLE",
+    message: "Live read model from persisted decision history.",
+    caseId: review.case?.id ?? null,
+    profileNo: review.shop?.profileNo ?? null,
+    coverage: {
+      status: hasCompleteProvenSourceWindow(review) ? "COMPLETE" : "PARTIAL",
+      source: coverage.source ?? "Unavailable",
+      provenWindow: hasPersistedSourceWindow ? coverage.provenSourceWindow ?? "Unavailable" : "Unavailable",
+      sourceReconciled: coverage.sourceReconciled ? "Yes" : "No",
+      freshness: coverage.freshness ?? "UNKNOWN",
+      completeWithinWindow: coverage.completeWithinSourceWindow ? "Yes" : "No",
+      lifetimeHistory: coverage.lifetimeHistoryComplete ? "Complete" : "Not verified",
+    },
+    metrics: [
+      { label: "Total orders", value: displayValue(review.metrics.totalOrders), detail: "Persisted decision-case snapshot" },
+      { label: "Operational exposure", value: displayValue(review.metrics.onHoldValue), detail: `Currency: ${review.metrics.currency}` },
+      { label: "Delivered count", value: displayValue(review.metrics.deliveredCount), detail: "Persisted decision-case snapshot" },
+      { label: "Delivery rate", value: displayValue(review.metrics.deliveryRate), detail: "Persisted decision-case snapshot" },
+      { label: "Cancellation rate", value: displayValue(review.metrics.cancellationRate), detail: "Persisted decision-case snapshot" },
+      { label: "Refund rate", value: displayValue(review.metrics.refundRate), detail: "Persisted decision-case snapshot" },
+    ],
+    comparisons: (context?.comparisons ?? []).map((comparison) => ({
+      metric: comparison.metric,
+      current: displayValue(comparison.current),
+      previous: displayValue(comparison.previous),
+      absoluteDelta: displayValue(comparison.absoluteDelta),
+      relativeDelta: displayValue(comparison.relativeDelta),
+      direction: comparison.direction,
+    })),
+    trends: (context?.trends ?? []).map((trend) => ({
+      signal: trend.signal,
+      status: trend.status,
+      reason: trend.reasonCode ?? "None",
+      comparisons: trend.comparisons.map((comparison) => ({
+        metric: comparison.metric,
+        current: displayValue(comparison.current),
+        previous: displayValue(comparison.previous),
+        absoluteDelta: displayValue(comparison.absoluteDelta),
+        relativeDelta: displayValue(comparison.relativeDelta),
+        direction: comparison.direction,
+      })),
+    })),
+    rule: {
+      result: review.rule.decision,
+      policyVersion: review.rule.policyVersion,
+      expression: context?.rule.expression ?? "Unavailable: frozen rule context was not recorded.",
+      evaluatedAt: displayTimestamp(context?.rule.evaluatedAt ?? review.case?.observedAt),
+      triggers: review.rule.triggers,
+      checks: (context?.rule.checks ?? []).map((check) => ({
+        metric: check.metric,
+        observed: displayValue(check.observedValue),
+        threshold: displayValue(check.threshold),
+        operator: check.operator,
+        result: check.result,
+        reason: check.triggeredReason ?? "None",
+      })),
+    },
+    ai: ai === null ? {
+      status: "UNAVAILABLE",
+      recommendation: "Unavailable",
+      riskLevel: "Unavailable",
+      confidence: "Unavailable",
+      humanReviewRequired: "Yes",
+      reasonCodes: [],
+      supportingFactors: [],
+      riskFactors: [],
+      whatWouldChange: [],
+      reason: "Unavailable",
+      policyVersion: "Unavailable",
+      provider: "Unavailable",
+      requestedModel: "Unavailable",
+      reportedModel: "Unavailable",
+      actualModel: "Unavailable",
+      authMode: "Unavailable",
+      promptVersion: "Unavailable",
+      outputSchemaVersion: "Unavailable",
+      failureCode: "NOT_RECORDED",
+    } : {
+      status: ai.status,
+      recommendation: displayValue(ai.recommendation),
+      riskLevel: displayValue(ai.riskLevel),
+      confidence: displayValue(ai.confidence),
+      humanReviewRequired: ai.humanReviewRequired ? "Yes" : "No",
+      reasonCodes: ai.reasonCodes ?? [],
+      supportingFactors: ai.supportingFactors ?? [],
+      riskFactors: ai.riskFactors ?? [],
+      whatWouldChange: ai.whatWouldChangeDecision ?? [],
+      reason: ai.reason ?? "Unavailable",
+      policyVersion: ai.policyVersion ?? "Unavailable",
+      provider: ai.provider,
+      requestedModel: ai.requestedModel ?? "Not reported",
+      reportedModel: ai.reportedModel ?? "Not reported",
+      actualModel: ai.actualModelUsed ?? ai.model ?? "Not reported",
+      authMode: ai.authMode ?? "Not reported",
+      promptVersion: ai.promptVersion,
+      outputSchemaVersion: ai.outputSchemaVersion ?? "Not reported",
+      failureCode: ai.status === "UNAVAILABLE" ? ai.failureCode : "None",
+    },
+    ba: {
+      current: review.ba?.decision ?? "NOT_REVIEWED",
+      currentDetail: review.ba === null ? "Business analyst review has not been completed." : `${review.ba.reasonCode} · ${review.ba.actor}`,
+      history: reviewHistory,
+    },
+    execution: review.execution === null ? {
+      status: "NOT_REQUESTED",
+      requestedAction: "None",
+      mode: "DRY_RUN only",
+      sellerCenterCalled: "No",
+      executedAt: "Not executed",
+    } : {
+      status: review.execution.status,
+      requestedAction: review.execution.requestedAction,
+      mode: review.execution.mode,
+      sellerCenterCalled: review.execution.sellerCenterCalled ? "Yes" : "No",
+      executedAt: displayTimestamp(review.execution.executedAt),
+    },
+    reviewQueue: queueReviews
+      .filter((item, index, items) => items.findIndex((candidate) => candidate.shop.id === item.shop.id) === index)
+      .flatMap((item) => {
+        const reasons = decisionQueueReasons(item);
+        return reasons.length === 0 ? [] : [{ profileNo: item.shop.profileNo, displayName: item.shop.displayName, reasons }];
+      }),
+  };
+}
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -155,7 +395,10 @@ function hasCompleteProvenSourceWindow(review: DecisionReviewRecord | null): boo
     && coverage.freshness === "FRESH";
 }
 
-function unavailableSource(now = new Date()): DashboardSource {
+function unavailableSource(
+  now = new Date(),
+  reason = "Live dashboard data is unavailable. Configure the database and retry.",
+): DashboardSource {
   const shop: DashboardShopSource = {
     id: "dashboard-unavailable",
     profileNo: "UNAVAILABLE",
@@ -164,7 +407,7 @@ function unavailableSource(now = new Date()): DashboardSource {
     dataOrigin: "UNAVAILABLE",
     enabled: false,
     syncState: "DISABLED",
-    pauseReason: "Live dashboard data is unavailable.",
+    pauseReason: reason,
     lastOrdersSyncedAt: null,
     lastFinanceSyncedAt: null,
   };
@@ -181,7 +424,7 @@ function unavailableSource(now = new Date()): DashboardSource {
       dataCoverage: {
         status: "UNAVAILABLE",
         label: "Live data unavailable",
-        reason: "Live dashboard data is unavailable. Configure the database and retry.",
+        reason,
       },
       latestSync: { status: "FAILED", startedAt: null, sourceComplete: null },
       profileState: "NOT_VERIFIED",
@@ -193,19 +436,21 @@ function unavailableSource(now = new Date()): DashboardSource {
   };
 }
 
-async function readLiveSource(databaseUrl: string): Promise<DashboardSource | null> {
+async function readLiveSource(databaseUrl: string, requestedProfileNo?: string): Promise<DashboardSource | null> {
   const context = createDatabase(databaseUrl);
   try {
     const shops = await listShops(context.db);
     const liveShops = shops.filter((shop) => shop.dataOrigin === "LIVE");
     const dashboardShops = liveShops;
-    const selectedShop = dashboardShops.find((shop) => shop.profileNo === "957")
-      ?? dashboardShops.find((shop) => shop.enabled)
-      ?? dashboardShops[0]
-      ?? null;
+    const selectedShop = requestedProfileNo === undefined
+      ? dashboardShops.find((shop) => shop.enabled) ?? dashboardShops[0] ?? null
+      : dashboardShops.find((shop) => shop.profileNo === requestedProfileNo) ?? null;
+    if (requestedProfileNo !== undefined && selectedShop === null) {
+      return unavailableSource(new Date(), `Requested LIVE shop ${requestedProfileNo} was not found.`);
+    }
     if (selectedShop === null) return null;
 
-    const [facts, finance, kpi, runs, decisionPage] = await Promise.all([
+    const [facts, finance, kpi, runs, decisionPage, decisionHistoryPages] = await Promise.all([
       getFullPersistedRiskOrderFacts(context.db, selectedShop.id),
       getFinanceSummary(context.db, selectedShop.id),
       getLatestKpiSnapshot(context.db, selectedShop.id),
@@ -215,6 +460,11 @@ async function readLiveSource(databaseUrl: string): Promise<DashboardSource | nu
         caseOrigin: "LIVE",
         limit: 1,
       }),
+      Promise.all(dashboardShops.map((shop) => listDecisionHistory(context.db, {
+        profileNo: shop.profileNo,
+        caseOrigin: "LIVE",
+        limit: 25,
+      }))),
     ]);
     const latestRun = runs[0] ?? null;
     const metrics = currentMetrics(kpi);
@@ -233,6 +483,8 @@ async function readLiveSource(databaseUrl: string): Promise<DashboardSource | nu
     const salesAmount = stringField(salesMetric, "value");
     const salesCurrency = stringField(salesMetric, "currency") ?? selectedShop.currency;
     const latestReview = decisionPage.items[0] ?? null;
+    const selectedHistory = latestReview === null ? [] : [latestReview];
+    const queueReviews = decisionHistoryPages.map((page) => page.items[0]).filter((item): item is DecisionReviewRecord => item !== undefined);
     const coverageComplete = hasCompleteProvenSourceWindow(latestReview);
 
     return {
@@ -254,10 +506,18 @@ async function readLiveSource(databaseUrl: string): Promise<DashboardSource | nu
           : { status: "AVAILABLE", amount: salesAmount, currency: salesCurrency },
         dataCoverage: {
           status: coverageComplete ? "READY" : "PARTIAL",
-          label: coverageComplete ? "Complete within proven source window" : "Last 12 months",
+          label: coverageComplete
+            ? "Complete within proven source window"
+            : latestReview?.coverageSnapshot?.source === "SELLER_CENTER"
+              && latestReview.coverageSnapshot.provenSourceWindow !== null
+              ? "Coverage incomplete"
+              : "Coverage unavailable",
           reason: coverageComplete
             ? "History window: Last 12 months. Lifetime history: not proven."
-            : "Seller Center collection is bounded to its rolling source window; lifetime history is not verified.",
+            : latestReview?.coverageSnapshot?.source === "SELLER_CENTER"
+              && latestReview.coverageSnapshot.provenSourceWindow !== null
+              ? "Persisted source-window evidence is incomplete; coverage is not verified."
+              : "No complete persisted source-window proof is recorded.",
         },
         latestSync: {
           status: currentSyncState(selectedShop, latestRun),
@@ -268,6 +528,7 @@ async function readLiveSource(databaseUrl: string): Promise<DashboardSource | nu
         },
         profileState: "NOT_VERIFIED",
         ...decisionStages(latestReview),
+        decisionCenter: decisionCenterFromReviews(latestReview, selectedHistory, queueReviews),
       },
     };
   } finally {
@@ -275,12 +536,12 @@ async function readLiveSource(databaseUrl: string): Promise<DashboardSource | nu
   }
 }
 
-export async function loadDashboardPresentation(): Promise<DashboardPresentation> {
+export async function loadDashboardPresentation(requestedProfileNo?: string): Promise<DashboardPresentation> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) return buildDashboardPresentation(unavailableSource());
 
   try {
-    const source = await readLiveSource(databaseUrl);
+    const source = await readLiveSource(databaseUrl, requestedProfileNo);
     return buildDashboardPresentation(source ?? unavailableSource());
   } catch {
     return buildDashboardPresentation(unavailableSource());

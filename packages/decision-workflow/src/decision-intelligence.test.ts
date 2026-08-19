@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 
+import { AiDecisionContextSchema } from "@shop-health/domain";
 import { buildDecisionIntelligence } from "./decision-intelligence.js";
 
 const observedAt = new Date("2026-08-14T00:00:00.000Z");
@@ -36,6 +37,26 @@ describe("decision intelligence", () => {
     expect(JSON.stringify(result.context)).not.toMatch(/cookie|token|credential|rawData/i);
   });
 
+  test("emits only the frozen AI context fields without legacy on-hold aliases", () => {
+    const context = buildDecisionIntelligence(input()).context;
+
+    expect(() => AiDecisionContextSchema.parse(context)).not.toThrow();
+    expect(context.metrics.decision).not.toHaveProperty("onHoldValue");
+    expect(context.risk).not.toHaveProperty("onHoldValue");
+    expect(context.metrics.decision.operationalExposure).toBe("1200.0000");
+    expect(context.risk.operationalExposure).toBe("1200.0000");
+  });
+
+  test("formats decimal delivery thresholds without binary floating-point artifacts", () => {
+    const context = buildDecisionIntelligence(input({
+      risk: { ...input().risk, stopDeliveryRateBelow: 0.58 },
+    })).context;
+
+    expect(context.rule.expression).toBe(
+      "operationalExposure >= 3500 USD OR deliveryRate < 58%",
+    );
+  });
+
   test("compares compatible history and applies only configured trend thresholds", () => {
     const previous = buildDecisionIntelligence(input()).context;
     const result = buildDecisionIntelligence(input({
@@ -44,6 +65,9 @@ describe("decision intelligence", () => {
       previous,
       trendPolicy: { version: "trend-policy.v1", signals: [{ signal: "RAPID_ONHOLD_GROWTH", thresholds: [{ metric: "operationalExposure.absoluteDelta", operator: "GTE", value: 1000 }] }] },
     }));
+    expect(result.context.previousCompatibleSnapshot).toMatchObject({
+      provenance: { shopId: "shop-safe-1", profileId: "profile-safe-1", profileNo: "SAFE-1" },
+    });
     expect(result.context.comparisons).toEqual(expect.arrayContaining([
       expect.objectContaining({ metric: "operationalExposure", absoluteDelta: "1000", direction: "INCREASED" }),
       expect.objectContaining({ metric: "deliveryRate", absoluteDelta: -0.1, direction: "DECREASED" }),
@@ -73,11 +97,13 @@ describe("decision intelligence", () => {
       metrics: { ...input().metrics, onHoldValue: "3500.0000" },
       risk: { ...input().risk, onHoldValue: "3500.0000", stopByOnHoldValue: true },
       ruleDecision: "PAUSE",
+      ruleTriggers: ["ONHOLD_VALUE"],
     })).context;
     const rate = buildDecisionIntelligence(input({
       metrics: { ...input().metrics, deliveryRate: 0.69 },
       risk: { ...input().risk, deliveryRate: 0.69, stopByDeliveryRate: true },
       ruleDecision: "PAUSE",
+      ruleTriggers: ["DELIVERY_RATE"],
     })).context;
     expect(exposure.rule.checks[0]).toMatchObject({ result: "FAIL", triggeredReason: "OPERATIONAL_EXPOSURE_LIMIT_REACHED" });
     expect(rate.rule.checks[1]).toMatchObject({ result: "FAIL", triggeredReason: "DELIVERY_RATE_BELOW_LIMIT" });
@@ -90,5 +116,44 @@ describe("decision intelligence", () => {
     })).context;
     expect(result.previousCompatibleSnapshot).toBeNull();
     expect(result.comparisons[0]).toMatchObject({ previous: null, direction: "UNKNOWN" });
+  });
+
+  test("does not compare history from another profile on the same shop", () => {
+    const incompatible = buildDecisionIntelligence(input()).context;
+    const result = buildDecisionIntelligence(input({
+      previous: {
+        ...incompatible,
+        profile: { profileId: "other-profile", profileNo: "OTHER-1" },
+      },
+    })).context;
+
+    expect(result.previousCompatibleSnapshot).toBeNull();
+    expect(result.comparisons[0]).toMatchObject({ previous: null, direction: "UNKNOWN" });
+  });
+
+  test("fails closed when metrics and risk carry different operational exposure", () => {
+    expect(() => buildDecisionIntelligence(input({
+      risk: { ...input().risk, onHoldValue: "1300.0000" },
+    }))).toThrow("Decision intelligence inputs are inconsistent");
+  });
+
+  test("fails closed when the rule result or triggers disagree with canonical risk facts", () => {
+    expect(() => buildDecisionIntelligence(input({
+      risk: { ...input().risk, stopByOnHoldValue: true },
+      ruleDecision: "CONTINUE",
+      ruleTriggers: [],
+    }))).toThrow("Decision intelligence inputs are inconsistent");
+  });
+
+  test("fails closed when canonical metric and finance currencies disagree with shop identity", () => {
+    expect(() => buildDecisionIntelligence(input({
+      finance: { ...input().finance, currency: "EUR" },
+    }))).toThrow("Decision intelligence inputs are inconsistent");
+  });
+
+  test("fails closed when canonical source timestamps disagree", () => {
+    expect(() => buildDecisionIntelligence(input({
+      risk: { ...input().risk, evaluatedAt: "2026-08-15T00:00:00.000Z" },
+    }))).toThrow("Decision intelligence inputs are inconsistent");
   });
 });

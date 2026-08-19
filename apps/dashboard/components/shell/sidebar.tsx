@@ -21,6 +21,7 @@ export function Sidebar() {
     <aside className="sidebar">
       <ProductMark />
       <NavigationList />
+      <div className="sidebar-log-slot" id="sidebar-log-slot" />
       <section className="sidebar-note" aria-labelledby="sidebar-note-title">
         <span className="sidebar-note__eyebrow">Decision trail</span>
         <h2 id="sidebar-note-title">Auditable by design</h2>

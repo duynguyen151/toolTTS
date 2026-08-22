@@ -52,4 +52,6 @@ Skills live in `.agents/skills`. Use only skills whose trigger matches the task.
 - Use `playwright-best-practices` for AdsPower/CDP collection logic and browser integration tests.
 - Use `adspower-browser` for AdsPower profile operations.
 
+Plans for this repository default to `docs/plans/` unless an explicit specification/project contract selects another location.
+
 Do not require subagents unless the user explicitly requests delegation or parallel agent work.

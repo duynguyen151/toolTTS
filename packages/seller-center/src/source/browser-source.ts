@@ -35,6 +35,7 @@ import { normalizeOrder } from "../normalizers/orders.js";
 import { stableHash } from "../normalizers/shared.js";
 import { collectFinanceStatementPages } from "./finance-pagination.js";
 import { assertOnHoldReconciled } from "./finance-reconciliation.js";
+import { collectOrderPages, type OrderPageRequest } from "./order-pagination.js";
 import {
   sellerIdentityFromFinanceRequestUrl,
 } from "./profile-verification.js";
@@ -110,37 +111,39 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
   /** Reads the active Seller Center identity without writing to Seller Center. */
   async verifyProfile(config: Pick<ShopSourceConfig, "profileId">): Promise<SellerProfileIdentity> {
     return this.withPage(config, async (page) => {
-      const responseResult = captureJsonResponseWithRequest(
-        page,
-        STATEMENT_LIST_PATH,
-        "GET",
-        this.endpointResponseTimeoutMs,
-        isOnHoldFinancePageOne,
-      );
-      await page.goto(FINANCE_ON_HOLD_ROUTE, { waitUntil: "domcontentloaded", timeout: this.endpointResponseTimeoutMs });
-      const currentUrl = new URL(page.url());
-      if (currentUrl.origin !== SELLER_ORIGIN) {
-        void responseResult.catch(() => undefined);
-        return currentUrl.hostname.startsWith("seller-")
-          ? { status: "UNSUPPORTED_REGION", tiktokShopId: null }
-          : { status: "NOT_TIKTOK_SELLER", tiktokShopId: null };
+      const startedAt = Date.now();
+      const capture = createFinanceResponseCapture(page);
+      try {
+        const financeDeadline = Date.now() + this.endpointResponseTimeoutMs;
+        return await withTallFinanceViewport(page, async (): Promise<SellerProfileIdentity> => {
+          await navigateToFinance(page, financeDeadline);
+          const currentUrl = new URL(page.url());
+          if (currentUrl.origin !== SELLER_ORIGIN) {
+            return currentUrl.hostname.startsWith("seller-")
+              ? { status: "UNSUPPORTED_REGION", tiktokShopId: null }
+              : { status: "NOT_TIKTOK_SELLER", tiktokShopId: null };
+          }
+          const resolved = await resolveFinanceResponses(capture, page, [{
+            path: STATEMENT_LIST_PATH,
+            matches: isOnHoldFinancePageOne,
+            stage: "Finance identity",
+            validate: (body) => assertFinanceEnvelope(body, "Finance identity", StatementOrderListResponseSchema),
+          }], this.endpointResponseTimeoutMs, financeDeadline);
+          // The response body and canonical request URL are now detached from Playwright.
+          capture.dispose();
+          const response = parseApiResponse(StatementOrderListResponseSchema, resolved.captured[0]!.body, "Finance identity");
+          if (response.code !== 0) throw new SellerCenterError("API_REJECTED", "Finance identity endpoint rejected the request");
+          this.logger?.debug?.({
+            operation: "finance-identity",
+            durationMs: Date.now() - startedAt,
+            triggerPath: resolved.triggerPath,
+            sweepSteps: resolved.sweepSteps,
+          }, "Finance identity finished");
+          return sellerIdentityFromFinanceRequestUrl(resolved.captured[0]!.requestUrl);
+        });
+      } finally {
+        capture.dispose();
       }
-      await assertHealthyPage(page);
-      if (
-        currentUrl.pathname !== "/finance/bills"
-        || currentUrl.searchParams.get("tab") !== "overview"
-        || currentUrl.searchParams.get("subTab") !== "on-hold"
-      ) {
-        throw new SellerCenterError("LAYOUT_CHANGED", "Finance On hold route changed");
-      }
-      await page.getByRole("tab", { name: /^on hold$/i }).click();
-      const captured = await responseResult;
-      if (!captured.ok) throw captured.error;
-      const response = StatementOrderListResponseSchema.safeParse(captured.body);
-      if (!response.success || response.data.code !== 0) {
-        throw new SellerCenterError("LAYOUT_CHANGED", "Finance identity response did not prove source success");
-      }
-      return sellerIdentityFromFinanceRequestUrl(captured.requestUrl);
     });
   }
 
@@ -152,7 +155,7 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
       await assertHealthyPage(page);
       const captured = await responseResult;
       if (!captured.ok) throw captured.error;
-      const response = OrderCountResponseSchema.parse(captured.body);
+      const response = parseApiResponse(OrderCountResponseSchema, captured.body, "Order count");
       return { value: stableHash(response.data.count_map), capturedAt: new Date() };
     });
   }
@@ -171,14 +174,38 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
       await assertHealthyPage(page);
       const captured = await responseResult;
       if (!captured.ok) throw captured.error;
-      const response = OrderListResponseSchema.parse(captured.body);
-      if (response.code !== 0) {
-        throw new SellerCenterError("LAYOUT_CHANGED", `Order list returned source code ${response.code}`);
+      const collected = await collectOrderPages({
+        capturedRequest: {
+          url: captured.requestUrl,
+          body: captured.requestBody,
+        },
+        firstPage: captured.body,
+        fetchPostPage: (req: OrderPageRequest) => fetchJsonInPage(page, req.url, req.body),
+      });
+
+      if (collected.completeness === "INCOMPLETE") {
+        throw new SellerCenterError(
+          "INCOMPLETE_RESPONSE",
+          `Order collection incomplete: reason=${collected.diagnostics.stopReason}, collected=${collected.diagnostics.collectedUniqueCount}/${collected.diagnostics.expectedTotalCount ?? "unknown"}`,
+        );
       }
-      assertCompleteAllOrdersResponse(response.data);
+
+      if (collected.diagnostics.reconciliation.status === "MISMATCH") {
+        throw new SellerCenterError(
+          "INCOMPLETE_RESPONSE",
+          `Order total_count reconciliation mismatch: expected=${collected.diagnostics.expectedTotalCount}, collected=${collected.diagnostics.collectedUniqueCount}`,
+        );
+      }
+
+      // Fail-closed: without total_count there is no count proof, so the batch must
+      // never be marked COMPLETE ("never silently infer safe data").
+      if (collected.diagnostics.reconciliation.status === "UNKNOWN") {
+        throw new SellerCenterError("INCOMPLETE_RESPONSE", "Order total_count is missing; completeness is unproven");
+      }
+
       const observedAt = new Date();
       return NormalizedOrderBatchSchema.parse({
-        orders: response.data.main_orders.map((order) => normalizeOrder(order, request.shop.shopId, observedAt)),
+        orders: collected.orders.map((order) => normalizeOrder(order, request.shop.shopId, observedAt)),
         checkpoint: null,
         complete: true,
         sourceWindow: {
@@ -195,42 +222,68 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
   async *collectFinancials(input: SyncRequest): AsyncIterable<NormalizedFinancialBatch> {
     const request = SyncRequestSchema.parse(input);
     const batch = await this.withPage(request.shop, async (page) => {
-      const statResult = captureJsonResponseWithRequest(
-        page,
-        STATEMENT_STAT_PATH,
-        "GET",
-        this.endpointResponseTimeoutMs,
-        isOnHoldStatResponse,
-      );
-      const listResult = captureJsonResponseWithRequest(
-        page,
-        STATEMENT_LIST_PATH,
-        "GET",
-        this.endpointResponseTimeoutMs,
-        isOnHoldFinancePageOne,
-      );
-      await navigateToFinance(page, this.endpointResponseTimeoutMs);
-      const statCaptured = await statResult;
-      if (!statCaptured.ok) throw statCaptured.error;
-      const listCaptured = await listResult;
-      if (!listCaptured.ok) throw listCaptured.error;
-      const stat = StatementStatResponseSchema.parse(statCaptured.body);
-      if (stat.code !== 0) {
-        throw new SellerCenterError("LAYOUT_CHANGED", `Finance stat returned source code ${stat.code}`);
+      const startedAt = Date.now();
+      const capture = createFinanceResponseCapture(page);
+      const financeDeadline = Date.now() + this.endpointResponseTimeoutMs;
+      let resolved: ResolvedFinanceResponses;
+      try {
+        resolved = await withTallFinanceViewport(page, async (): Promise<ResolvedFinanceResponses> => {
+          await navigateToFinance(page, financeDeadline);
+          return resolveFinanceResponses(capture, page, [
+            {
+              path: STATEMENT_STAT_PATH,
+              matches: isOnHoldStatResponse,
+              stage: "Finance stat",
+              validate: (body) => assertFinanceEnvelope(body, "Finance stat", StatementStatResponseSchema),
+            },
+            {
+              path: STATEMENT_LIST_PATH,
+              matches: isOnHoldFinancePageOne,
+              stage: "Finance list",
+              validate: (body) => assertFinanceEnvelope(body, "Finance list", StatementOrderListResponseSchema),
+            },
+          ], this.endpointResponseTimeoutMs, financeDeadline);
+        });
+      } finally {
+        // Materialized bodies and the first-page URL are sufficient from here on.
+        // Stop retaining later pagination responses before issuing page fetches.
+        capture.dispose();
       }
+
+      const statCaptured = resolved.captured[0]!;
+      const listCaptured = resolved.captured[1]!;
+      const stat = parseApiResponse(StatementStatResponseSchema, statCaptured.body, "Finance stat");
+      if (stat.code !== 0) throw new SellerCenterError("API_REJECTED", `Finance stat returned source code ${stat.code}`);
       const collected = await collectFinanceStatementPages({
         capturedPageOneUrl: listCaptured.requestUrl,
         firstPage: listCaptured.body,
-        fetchPage: (url) => fetchJsonInPage(page, url),
+        fetchPage: (url) => fetchJsonInPage(page, url, undefined, financeDeadline),
+        deadlineAt: financeDeadline,
       });
-      assertOnHoldReconciled(stat, collected.rows);
+      // Fail-closed reconciliation: tainted rows are never persisted. When the official
+      // stat parsed cleanly we retain its value flagged UNVERIFIED — downstream already
+      // refuses authoritative use (frozen-context FINANCE_NOT_RECONCILED blocker; sync
+      // FinanceCompletionProof requires the flag to be true, so the run stays incomplete).
+      let reconciled = true;
+      try {
+        assertOnHoldReconciled(stat, collected.rows);
+      } catch (error) {
+        if (!(error instanceof SellerCenterError) || error.failureType !== "INCOMPLETE_RESPONSE") throw error;
+        reconciled = false;
+      }
       const capturedAt = new Date();
       const snapshot = normalizeFinancialSnapshot(stat, request.shop.shopId, capturedAt);
+      this.logger?.debug?.({
+        operation: "finance-collect",
+        durationMs: Date.now() - startedAt,
+        triggerPath: resolved.triggerPath,
+        sweepSteps: resolved.sweepSteps,
+        pagesFetched: collected.pages,
+        reconciled,
+      }, "Finance collection finished");
       return NormalizedFinancialBatchSchema.parse({
-        settlements: collected.rows.map((row) => normalizeSettlementRecord(row, request.shop.shopId)),
-        snapshot: snapshot === null
-          ? null
-          : { ...snapshot, reasonTotalsReconcileToOfficialOnHold: true },
+        settlements: reconciled ? collected.rows.map((row) => normalizeSettlementRecord(row, request.shop.shopId)) : [],
+        snapshot: snapshot === null ? null : { ...snapshot, reasonTotalsReconcileToOfficialOnHold: reconciled },
         checkpoint: null,
         complete: true,
       });
@@ -275,7 +328,7 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
           { cause: error },
         );
       }
-      throw new SellerCenterError("LAYOUT_CHANGED", "Seller Center operation failed", { cause: error });
+      throw new SellerCenterError("ROUTE_CHANGED", "Seller Center operation failed", { cause: error });
     } finally {
       await page?.close().catch(() => undefined);
       // Release the Playwright CDP transport without stopping the AdsPower profile.
@@ -313,19 +366,347 @@ async function captureJsonResponseWithRequest(
   timeoutMs: number,
   matchesResponse?: (response: Response) => boolean,
 ): Promise<
-  | { ok: true; body: unknown; requestUrl: string }
+  | { ok: true; body: unknown; requestUrl: string; requestBody: unknown }
   | { ok: false; error: unknown }
 > {
   try {
     const response = await waitForResponse(page, path, method, timeoutMs, matchesResponse);
+    let requestBody: unknown = undefined;
+    try {
+      requestBody = response.request().postDataJSON();
+    } catch {
+      requestBody = undefined;
+    }
     return {
       ok: true,
       body: await response.json(),
       requestUrl: response.request().url(),
+      requestBody,
     };
   } catch (error) {
     return { ok: false, error };
   }
+}
+
+interface CapturedFinanceResponse {
+  body: unknown;
+  requestUrl: string;
+}
+
+interface FinanceResponseSpec {
+  path: string;
+  matches(response: Response): boolean;
+  stage: string;
+  /** Envelope + schema proof required before the sweep may exit early. */
+  validate(body: unknown): void;
+}
+
+interface FinanceResponseCapture {
+  find(spec: FinanceResponseSpec): Promise<CapturedFinanceResponse | undefined>;
+  observed(spec: FinanceResponseSpec): boolean;
+  waitUntil(specs: readonly FinanceResponseSpec[], timeoutMs: number): Promise<boolean>;
+  dispose(): void;
+}
+
+interface FinanceResponseWaiter {
+  check(): void;
+  cancel(): void;
+}
+
+function createFinanceResponseCapture(page: Page): FinanceResponseCapture {
+  const responses: Response[] = [];
+  const waiters = new Set<FinanceResponseWaiter>();
+  let disposed = false;
+  const listener = (response: Response): void => {
+    if (disposed || !isFinanceResponse(response)) return;
+    responses.push(response);
+    for (const waiter of [...waiters]) waiter.check();
+  };
+  page.on("response", listener);
+
+  const findResponse = (spec: FinanceResponseSpec): Response | undefined =>
+    responses.find((candidate) =>
+      new URL(candidate.url()).pathname === spec.path && spec.matches(candidate),
+    );
+
+  return {
+    async find(spec) {
+      const response = findResponse(spec);
+      if (response === undefined) return undefined;
+      return { body: await response.json(), requestUrl: response.request().url() };
+    },
+    observed(spec) {
+      return findResponse(spec) !== undefined;
+    },
+    waitUntil(specs, timeoutMs) {
+      if (disposed) return Promise.resolve(false);
+      if (specs.every((spec) => findResponse(spec) !== undefined)) return Promise.resolve(true);
+      return new Promise<boolean>((resolve) => {
+        let settled = false;
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        const finish = (observed: boolean): void => {
+          if (settled) return;
+          settled = true;
+          if (timeout !== undefined) clearTimeout(timeout);
+          waiters.delete(waiter);
+          resolve(observed);
+        };
+        const waiter: FinanceResponseWaiter = {
+          check: () => {
+            if (specs.every((spec) => findResponse(spec) !== undefined)) finish(true);
+          },
+          cancel: () => finish(false),
+        };
+        timeout = setTimeout(() => finish(false), Math.max(0, timeoutMs));
+        waiters.add(waiter);
+        waiter.check();
+      });
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      page.off("response", listener);
+      for (const waiter of [...waiters]) waiter.cancel();
+      waiters.clear();
+      responses.length = 0;
+    },
+  };
+}
+
+/** @internal Test seam for proving capture disposal settles active waits. */
+export function createPendingFinanceWaitForTest(
+  page: Page,
+  timeoutMs: number,
+): { pending: Promise<boolean>; dispose(): void } {
+  const capture = createFinanceResponseCapture(page);
+  return {
+    pending: capture.waitUntil([{
+      path: STATEMENT_LIST_PATH,
+      matches: isOnHoldFinancePageOne,
+      stage: "Finance list",
+      validate: (body) => assertFinanceEnvelope(body, "Finance list", StatementOrderListResponseSchema),
+    }], timeoutMs),
+    dispose: () => capture.dispose(),
+  };
+}
+
+interface ResolvedFinanceResponses {
+  readonly captured: CapturedFinanceResponse[];
+  readonly triggerPath: "NATURAL" | "SWEEP_EARLY_EXIT" | "SWEEP_FULL";
+  readonly sweepSteps: number;
+}
+
+/**
+ * Reads each spec's captured body and proves envelope plus schema validity.
+ * Returns null when any endpoint has not been observed yet; throws the typed
+ * validation error (API_REJECTED / API_SCHEMA_CHANGED / SOURCE_TIMEOUT) when an
+ * observed response fails proof, so callers never sweep past bad data.
+ */
+async function tryMaterializeValidatedFinanceResponses(
+  capture: FinanceResponseCapture,
+  page: Page,
+  specs: readonly FinanceResponseSpec[],
+  deadline: number,
+): Promise<CapturedFinanceResponse[] | null> {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) return null;
+  let found: Array<CapturedFinanceResponse | undefined>;
+  try {
+    found = await withDeadline(
+      Promise.all(specs.map((spec) => capture.find(spec))),
+      remaining,
+      "Finance response body exceeded the endpoint response deadline",
+    );
+  } catch (error) {
+    // Deadline breaches keep their SOURCE_TIMEOUT typing; any other body-read
+    // failure is incomplete data, never a layout change.
+    if (error instanceof SellerCenterError) throw error;
+    throw new SellerCenterError("INCOMPLETE_RESPONSE", "Finance response body could not be materialized", { cause: error });
+  }
+  const captured: CapturedFinanceResponse[] = [];
+  for (const [index, response] of found.entries()) {
+    if (response === undefined) return null;
+    specs[index]!.validate(response.body);
+    captured.push(response);
+  }
+  return captured;
+}
+
+async function resolveFinanceResponses(
+  capture: FinanceResponseCapture,
+  page: Page,
+  specs: readonly FinanceResponseSpec[],
+  timeoutMs: number,
+  absoluteDeadline = Date.now() + timeoutMs,
+): Promise<ResolvedFinanceResponses> {
+  const deadline = Math.min(absoluteDeadline, Date.now() + timeoutMs);
+  const remainingBeforeNatural = deadline - Date.now();
+  if (remainingBeforeNatural <= 0) {
+    throw new SellerCenterError(
+      "SOURCE_TIMEOUT",
+      "Finance collection exceeded the endpoint response deadline before any Finance endpoint could be observed",
+    );
+  }
+  const naturalBudgetMs = Math.min(
+    1_000,
+    Math.max(1, Math.floor(timeoutMs / 4)),
+    remainingBeforeNatural,
+  );
+  const naturallyObserved = await capture.waitUntil(specs, naturalBudgetMs);
+  if (naturallyObserved) {
+    const captured = await tryMaterializeValidatedFinanceResponses(capture, page, specs, deadline);
+    if (captured !== null) return { captured, triggerPath: "NATURAL", sweepSteps: 0 };
+  }
+  let sweepSteps = 0;
+  const remainingBeforeSweep = deadline - Date.now();
+  if (remainingBeforeSweep > 0) {
+    const sweep = await sweepFinanceViewportUntilValidated(page, capture, specs, deadline);
+    sweepSteps = sweep.steps;
+    if (sweep.validated !== null) {
+      return { captured: sweep.validated, triggerPath: "SWEEP_EARLY_EXIT", sweepSteps };
+    }
+  }
+  await capture.waitUntil(specs, Math.max(0, deadline - Date.now()));
+  const captured = await tryMaterializeValidatedFinanceResponses(capture, page, specs, deadline);
+  if (captured !== null) return { captured, triggerPath: "SWEEP_FULL", sweepSteps };
+  return missingFinanceResponses(specs, capture);
+}
+
+async function withDeadline<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  if (timeoutMs <= 0) throw new SellerCenterError("SOURCE_TIMEOUT", message);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new SellerCenterError("SOURCE_TIMEOUT", message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+function missingFinanceResponses(
+  specs: readonly FinanceResponseSpec[],
+  capture?: FinanceResponseCapture,
+): never {
+  const missing = specs.find((spec) => capture?.observed(spec) !== true)?.stage ?? "Finance";
+  throw new SellerCenterError("ENDPOINT_NOT_OBSERVED", missing + " endpoint response was not observed before the deadline");
+}
+
+const FINANCE_SWEEP_MAX_STEPS = 100;
+
+/** Scrolls one overlapping viewport-height step inside the page and reports the grown scroll bounds. */
+function financeScrollStep(argument: { top: number }): Promise<{ maxScroll: number; nextTop: number }> {
+  return new Promise((resolve) => {
+    const viewportHeight = Math.max(1, window.innerHeight);
+    window.scrollTo({ top: Math.max(0, argument.top), behavior: "auto" });
+    requestAnimationFrame(() => {
+      const maxScroll = Math.max(
+        0,
+        Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0) - viewportHeight,
+      );
+      const overlap = Math.max(1, Math.floor(viewportHeight * 0.2));
+      const nextTop = argument.top + Math.max(1, viewportHeight - overlap);
+      resolve({ maxScroll, nextTop });
+    });
+  });
+}
+
+function financeScrollRestore(): void {
+  window.scrollTo({ top: 0, behavior: "auto" });
+}
+
+/**
+ * Walks the Finance page in bounded overlapping steps and exits early only once
+ * every spec is PROVEN valid (canonical endpoint + request filter + envelope code
+ * + schema). Never scrolls without bound: hard step cap, one final-bottom visit,
+ * absolute deadline, and an always-applied scroll restore.
+ */
+async function sweepFinanceViewportUntilValidated(
+  page: Page,
+  capture: FinanceResponseCapture,
+  specs: readonly FinanceResponseSpec[],
+  deadline: number,
+): Promise<{ validated: CapturedFinanceResponse[] | null; steps: number }> {
+  let top = 0;
+  let maxScroll = Number.POSITIVE_INFINITY;
+  let steps = 0;
+  let bottomVisited = false;
+  try {
+    while (Date.now() < deadline) {
+      // Exactly ONE final checkpoint past the step cap: the capped walk may not
+      // cover an extremely tall or newly-grown document, so its CURRENT bottom is
+      // always visited once before giving up.
+      const capReached = steps >= FINANCE_SWEEP_MAX_STEPS;
+      if (bottomVisited) break;
+      const finalVisit = capReached || top >= maxScroll;
+      // The capped walk may not cover an extremely tall or newly-grown document:
+      // the final checkpoint always visits the CURRENT document bottom itself.
+      // A hidden/backgrounded page pauses requestAnimationFrame, so evaluate() may
+      // never settle on its own: the shared deadline must bound every scroll call.
+      const result = await withDeadline(
+        page.evaluate(financeScrollStep, { top: finalVisit ? maxScroll : top }),
+        Math.max(0, deadline - Date.now()),
+        "Finance viewport scroll step exceeded the endpoint response deadline",
+      );
+      steps += 1;
+      if (finalVisit) {
+        bottomVisited = true;
+      } else {
+        maxScroll = result.maxScroll;
+        top = result.nextTop;
+      }
+      const validated = await tryMaterializeValidatedFinanceResponses(capture, page, specs, deadline);
+      if (validated !== null) return { validated, steps };
+      if (finalVisit) break;
+    }
+  } finally {
+    await withDeadline(
+      page.evaluate(financeScrollRestore),
+      Math.max(0, deadline - Date.now()),
+      "Finance viewport restore exceeded the endpoint response deadline",
+    ).catch(() => undefined);
+  }
+  return { validated: null, steps };
+}
+
+type FinanceBodySchema = { safeParse(input: unknown): { success: boolean } };
+
+/** Envelope-first validity proof reused by strict sweep exit and final parsing. */
+function assertFinanceEnvelope(body: unknown, label: string, schema: FinanceBodySchema): void {
+  rejectSourceError(body, label);
+  if (!schema.safeParse(body).success) {
+    throw new SellerCenterError("API_SCHEMA_CHANGED", `${label} response schema changed`);
+  }
+}
+
+/**
+ * Fast path only: a taller viewport lets below-the-fold lazy sections mount without
+ * scrolling. Width is preserved so responsive breakpoints stay untouched, the size is
+ * derived from the current viewport (no Seller Center layout constants), and correctness
+ * never depends on it — the controlled sweep remains the fallback when data is missing.
+ */
+async function withTallFinanceViewport<T>(page: Page, operation: () => Promise<T>): Promise<T> {
+  const previous = typeof page.viewportSize === "function" ? page.viewportSize() : null;
+  // Mutate only when the original size is KNOWN and settable: an unrestorable
+  // mutation would leak the tall viewport into later collections on this page.
+  if (previous === null || typeof page.setViewportSize !== "function") return operation();
+  try {
+    await page.setViewportSize({ width: previous.width, height: Math.min(previous.height * 3, 4000) }).catch(() => undefined);
+    return await operation();
+  } finally {
+    await page.setViewportSize(previous).catch(() => undefined);
+  }
+}
+
+function isFinanceResponse(response: Response): boolean {
+  const url = new URL(response.url());
+  return url.origin === SELLER_ORIGIN
+    && response.request().method() === "GET"
+    && response.status() === 200
+    && (url.pathname === STATEMENT_STAT_PATH || url.pathname === STATEMENT_LIST_PATH);
 }
 
 async function navigateToOrders(page: Page, timeoutMs: number): Promise<void> {
@@ -336,26 +717,46 @@ async function navigateToOrders(page: Page, timeoutMs: number): Promise<void> {
   await page.goto(url.toString(), { waitUntil: "domcontentloaded", timeout: timeoutMs });
 }
 
-async function assertHealthyPage(page: Page): Promise<void> {
-  const state = await detectAccessState(page);
+async function assertHealthyPage(page: Page, timeoutMs = 5_000): Promise<void> {
+  const state = await detectAccessState(page, timeoutMs);
   if (state === "LOGIN_REQUIRED") throw new SellerCenterError("LOGIN_REQUIRED", "Seller Center login is required");
   if (state === "CHALLENGE_REQUIRED") throw new SellerCenterError("CHALLENGE_REQUIRED", "Seller Center security challenge requires manual action");
-  if (state !== "HEALTHY") throw new SellerCenterError("LAYOUT_CHANGED", `Unexpected Seller Center state at ${page.url()}`);
+  if (state !== "HEALTHY") throw new SellerCenterError("ROUTE_CHANGED", `Unexpected Seller Center state at ${page.url()}`);
 }
 
-async function navigateToFinance(page: Page, timeoutMs: number): Promise<void> {
-  await page.goto(FINANCE_ON_HOLD_ROUTE, { waitUntil: "domcontentloaded", timeout: timeoutMs });
-  await assertHealthyPage(page);
-  const financeUrl = new URL(page.url());
-  if (
-    financeUrl.origin !== SELLER_ORIGIN
-    || financeUrl.pathname !== "/finance/bills"
-    || financeUrl.searchParams.get("tab") !== "overview"
-    || financeUrl.searchParams.get("subTab") !== "on-hold"
-  ) {
-    throw new SellerCenterError("LAYOUT_CHANGED", "Finance On hold route changed");
+function remainingDeadlineMs(deadline: number, stage: string): number {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) {
+    throw new SellerCenterError("SOURCE_TIMEOUT", stage + " exceeded the endpoint response deadline");
   }
-  await page.getByRole("tab", { name: /^on hold$/i }).click();
+  return remaining;
+}
+
+async function navigateToFinance(page: Page, deadline: number): Promise<void> {
+  await page.goto(FINANCE_ON_HOLD_ROUTE, {
+    waitUntil: "domcontentloaded",
+    timeout: remainingDeadlineMs(deadline, "Finance navigation"),
+  });
+  await assertHealthyPage(page, remainingDeadlineMs(deadline, "Finance access verification"));
+}
+
+function rejectSourceError(body: unknown, label: string): void {
+  if (typeof body !== "object" || body === null || !("code" in body)) return;
+  const code = (body as { code?: unknown }).code;
+  if (typeof code === "number" && code !== 0) {
+    throw new SellerCenterError("API_REJECTED", label + " returned source code " + code);
+  }
+}
+
+function parseApiResponse<T>(
+  schema: { safeParse(input: unknown): { success: true; data: T } | { success: false } },
+  body: unknown,
+  label: string,
+): T {
+  rejectSourceError(body, label);
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) throw new SellerCenterError("API_SCHEMA_CHANGED", `${label} response schema changed`);
+  return parsed.data;
 }
 
 async function waitForResponse(
@@ -374,21 +775,26 @@ async function waitForResponse(
       { timeout: timeoutMs },
     );
   } catch (error) {
-    throw new SellerCenterError("SOURCE_TIMEOUT", `Timed out waiting for ${path}`, { cause: error });
+    throw new SellerCenterError("ENDPOINT_NOT_OBSERVED", `Endpoint response was not observed for ${path}`, { cause: error });
   }
+}
+
+function hasSingleQueryValue(url: URL, key: string, expected: string): boolean {
+  const values = url.searchParams.getAll(key);
+  return values.length === 1 && values[0] === expected;
 }
 
 function isOnHoldFinancePageOne(response: Response): boolean {
   const requestUrl = new URL(response.request().url());
-  return requestUrl.searchParams.get("settlement_status") === "1"
-    && requestUrl.searchParams.get("from") === "0"
-    && requestUrl.searchParams.get("size") === "5"
-    && requestUrl.searchParams.get("page_type") === "10"
-    && requestUrl.searchParams.get("pagination_type") === "1";
+  return requestUrl.origin === SELLER_ORIGIN
+    && hasSingleQueryValue(requestUrl, "settlement_status", "1")
+    && hasSingleQueryValue(requestUrl, "from", "0");
 }
 
 function isOnHoldStatResponse(response: Response): boolean {
-  return new URL(response.request().url()).searchParams.get("amount_stat_type") === "1";
+  const requestUrl = new URL(response.request().url());
+  return requestUrl.origin === SELLER_ORIGIN
+    && hasSingleQueryValue(requestUrl, "amount_stat_type", "1");
 }
 
 function isActualOrderListResponse(response: Response): boolean {
@@ -405,46 +811,51 @@ function isActualOrderListResponse(response: Response): boolean {
   }
 }
 
-function assertCompleteAllOrdersResponse(data: {
-  total_count?: number | undefined;
-  main_orders: ReadonlyArray<{ main_order_id: string }>;
-  has_more?: boolean | undefined;
-  search_next_has_more?: boolean | undefined;
-}): void {
-  if (data.total_count === undefined) {
-    throw new SellerCenterError("LAYOUT_CHANGED", "Order total_count is missing; completeness is unproven");
-  }
-  if (data.has_more === true || data.search_next_has_more === true) {
-    throw new SellerCenterError(
-      "LAYOUT_CHANGED",
-      "Order pagination is present but its request mapping is unresolved",
-    );
-  }
-  const uniqueOrderIds = new Set(data.main_orders.map((order) => order.main_order_id));
-  if (uniqueOrderIds.size !== data.main_orders.length) {
-    throw new SellerCenterError("LAYOUT_CHANGED", "Order duplicate main_order_id values prevent reconciliation");
-  }
-  if (data.main_orders.length !== data.total_count || uniqueOrderIds.size !== data.total_count) {
-    throw new SellerCenterError(
-      "LAYOUT_CHANGED",
-      `Order reconciliation failed: rows=${data.main_orders.length}, unique=${uniqueOrderIds.size}, total=${data.total_count}`,
-    );
-  }
+async function fetchJsonInPage(
+  page: Page,
+  requestUrl: string,
+  postBody?: unknown,
+  deadlineAt?: number,
+): Promise<unknown> {
+  return page.evaluate(async (arg: string | { url: string; body?: unknown; deadlineAt?: number }) => {
+    const url = typeof arg === "string" ? arg : arg.url;
+    const body = typeof arg === "string" ? undefined : arg.body;
+    const deadlineAt = typeof arg === "string" ? undefined : arg.deadlineAt;
+    const isPost = body !== undefined && body !== null;
+    // Real browser-side cancellation: the losing side of a timeout race stops
+    // fetching instead of running on after the caller has already failed.
+    const controller = new AbortController();
+    const abortTimer = deadlineAt === undefined
+      ? undefined
+      : setTimeout(() => controller.abort(), Math.max(0, deadlineAt - Date.now()));
+    try {
+      const init: RequestInit = {
+        credentials: "include",
+        method: isPost ? "POST" : "GET",
+        signal: controller.signal,
+        ...(isPost ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {}),
+      };
+      const response = await fetch(url, init);
+      if (!response.ok) throw new Error(`In-page fetch failed with HTTP ${response.status}`);
+      return await response.json();
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error("Finance in-page fetch was aborted at the collection deadline");
+      }
+      throw error;
+    } finally {
+      if (abortTimer !== undefined) clearTimeout(abortTimer);
+    }
+  }, postBody !== undefined || deadlineAt !== undefined
+    ? { ...(postBody !== undefined ? { body: postBody } : {}), ...(deadlineAt !== undefined ? { deadlineAt } : {}), url: requestUrl }
+    : requestUrl);
 }
 
-async function fetchJsonInPage(page: Page, requestUrl: string): Promise<unknown> {
-  return page.evaluate(async (url) => {
-    const response = await fetch(url, { credentials: "include" });
-    if (!response.ok) throw new Error(`Finance page fetch failed with HTTP ${response.status}`);
-    return response.json();
-  }, requestUrl);
-}
-
-async function detectAccessState(page: Page): Promise<SourceHealth["status"]> {
+async function detectAccessState(page: Page, timeoutMs = 5_000): Promise<SourceHealth["status"]> {
   const url = page.url().toLowerCase();
   if (/login|signin|passport/.test(url)) return "LOGIN_REQUIRED";
   if (/captcha|challenge|verification|verify/.test(url)) return "CHALLENGE_REQUIRED";
-  const body = (await page.locator("body").innerText({ timeout: 5_000 }).catch(() => "")).slice(0, 20_000).toLowerCase();
+  const body = (await page.locator("body").innerText({ timeout: Math.min(5_000, Math.max(1, timeoutMs)) }).catch(() => "")).slice(0, 20_000).toLowerCase();
   if (/log in|sign in/.test(body) && /password|email|phone/.test(body)) return "LOGIN_REQUIRED";
   if (/captcha|security verification|verify (?:that )?you are human|unusual activity/.test(body)) return "CHALLENGE_REQUIRED";
   return url.startsWith(SELLER_ORIGIN) ? "HEALTHY" : "LAYOUT_CHANGED";
@@ -460,6 +871,11 @@ function classifyFailure(error: unknown): { status: SourceHealth["status"]; deta
       LOGIN_REQUIRED: "LOGIN_REQUIRED",
       CHALLENGE_REQUIRED: "CHALLENGE_REQUIRED",
       LAYOUT_CHANGED: "LAYOUT_CHANGED",
+      ROUTE_CHANGED: "LAYOUT_CHANGED",
+      ENDPOINT_NOT_OBSERVED: "LAYOUT_CHANGED",
+      API_SCHEMA_CHANGED: "LAYOUT_CHANGED",
+      API_REJECTED: "LAYOUT_CHANGED",
+      INCOMPLETE_RESPONSE: "LAYOUT_CHANGED",
       SOURCE_TIMEOUT: "UNAVAILABLE",
     };
     return { status: statuses[error.failureType] ?? "UNAVAILABLE", detail: error.message };

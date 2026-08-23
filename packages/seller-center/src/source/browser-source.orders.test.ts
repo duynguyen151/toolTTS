@@ -65,6 +65,24 @@ describe("SellerCenterBrowserDataSource order response capture", () => {
     expect(page.gotoUrls[0]).toContain("tab=all");
   });
 
+  it("refuses to mark orders COMPLETE when total_count is absent (no count proof)", async () => {
+    const page = new FakeOrdersPage([
+      new FakeResponse(
+        "https://seller-us.tiktok.com/api/fulfillment/na/order/list",
+        "POST",
+        orderListResponse(3, { totalCount: undefined, hasMore: false }),
+        {},
+      ),
+    ]);
+    const source = dataSource(page);
+
+    await expect(async () => {
+      for await (const _batch of source.collectOrders(syncRequest())) {
+        // A batch without count proof must never be yielded as complete.
+      }
+    }).rejects.toMatchObject({ failureType: "INCOMPLETE_RESPONSE" });
+  });
+
   it("matches order list response when request body is empty object {}", async () => {
     const page = new FakeOrdersPage([
       new FakeResponse(
@@ -91,12 +109,48 @@ describe("SellerCenterBrowserDataSource order response capture", () => {
     expect(batches).toHaveLength(1);
   });
 
+  it("collects multi-page orders using cursor pagination in browser context", async () => {
+    const pageOne = orderListResponse(5, {
+      totalCount: 10,
+      hasMore: true,
+      nextCursorToken: "cursor-page-2",
+    });
+    const pageTwo = {
+      code: 0,
+      data: {
+        total_count: 10,
+        has_more: false,
+        main_orders: Array.from({ length: 5 }, (_, index) => ({
+          main_order_id: `order-page-2-${index + 1}`,
+          trade_order_module: { create_time: 1_723_680_000 },
+          order_status_module: [{ main_order_status: 101 }],
+          price_module: {
+            grand_total: { price_val: "25.00", currency: "USD" },
+          },
+        })),
+      },
+    };
+
+    const page = new FakeOrdersPage([
+      new FakeResponse(
+        "https://seller-us.tiktok.com/api/fulfillment/na/order/list",
+        "POST",
+        pageOne,
+        null,
+      ),
+    ]);
+
+    page.evaluateResponse = pageTwo;
+
+    const source = dataSource(page);
+    const batches = await collectBatches(source);
+
+    expect(batches).toHaveLength(1);
+    expect((batches[0] as { orders: unknown[] }).orders).toHaveLength(10);
+    expect((batches[0] as { complete: boolean }).complete).toBe(true);
+  });
+
   it.each([
-    {
-      name: "total_count is missing",
-      response: orderListResponse(9, { totalCount: undefined }),
-      message: "total_count",
-    },
     {
       name: "the row count differs from total_count",
       response: orderListResponse(8, { totalCount: 9 }),
@@ -104,18 +158,18 @@ describe("SellerCenterBrowserDataSource order response capture", () => {
     },
     {
       name: "main_order_id values are duplicated",
-      response: orderListResponse(9, { duplicateLastOrderId: true }),
-      message: "duplicate",
+      response: orderListResponse(9, { totalCount: 9, duplicateLastOrderId: true }),
+      message: "reconciliation",
     },
     {
-      name: "has_more reports another page",
-      response: orderListResponse(9, { hasMore: true }),
-      message: "pagination",
+      name: "has_more reports another page without next cursor",
+      response: orderListResponse(9, { hasMore: true, nextCursorToken: "" }),
+      message: "incomplete",
     },
     {
-      name: "search_next_has_more reports another page",
-      response: orderListResponse(9, { searchNextHasMore: true }),
-      message: "pagination",
+      name: "search_next_has_more reports another page without next cursor",
+      response: orderListResponse(9, { searchNextHasMore: true, searchNextCursor: "" }),
+      message: "incomplete",
     },
   ])("fails closed when $name", async ({ response, message }) => {
     const page = new FakeOrdersPage([
@@ -129,7 +183,7 @@ describe("SellerCenterBrowserDataSource order response capture", () => {
     const source = dataSource(page);
 
     await expect(collectBatches(source)).rejects.toMatchObject({
-      failureType: "LAYOUT_CHANGED",
+      failureType: "INCOMPLETE_RESPONSE",
       message: expect.stringContaining(message),
     });
   });
@@ -138,6 +192,7 @@ describe("SellerCenterBrowserDataSource order response capture", () => {
 class FakeOrdersPage {
   readonly matchedMethods: string[] = [];
   readonly gotoUrls: string[] = [];
+  evaluateResponse?: unknown;
   private currentUrl = "about:blank";
 
   constructor(
@@ -174,6 +229,10 @@ class FakeOrdersPage {
   locator(selector: string): { innerText(): Promise<string> } {
     if (selector !== "body") throw new Error(`Unexpected locator ${selector}`);
     return { innerText: async () => "Orders" };
+  }
+
+  async evaluate(_callback: unknown, _arg?: unknown): Promise<unknown> {
+    return this.evaluateResponse ?? { code: 0, data: { main_orders: [], has_more: false } };
   }
 
   async close(): Promise<void> {}
@@ -282,6 +341,7 @@ function defaultResponses(): FakeResponse[] {
       "https://seller-us.tiktok.com/api/fulfillment/na/order/list",
       "POST",
       orderListResponse(9, {
+        hasMore: false,
         nextCursorToken: "terminal-order-cursor",
         searchNextCursor: "terminal-search-cursor",
       }),
@@ -301,8 +361,8 @@ function orderListResponse(
   options: OrderListResponseOptions = {},
 ): Record<string, unknown> {
   const totalCount = "totalCount" in options ? options.totalCount : count;
-  const hasMore = "hasMore" in options ? options.hasMore : false;
-  const searchNextHasMore = "searchNextHasMore" in options ? options.searchNextHasMore : false;
+  const hasMore = "hasMore" in options ? options.hasMore : undefined;
+  const searchNextHasMore = "searchNextHasMore" in options ? options.searchNextHasMore : undefined;
   const mainOrders = Array.from({ length: count }, (_, index) => ({
     main_order_id: options.duplicateLastOrderId === true && index === count - 1
       ? "order-1"

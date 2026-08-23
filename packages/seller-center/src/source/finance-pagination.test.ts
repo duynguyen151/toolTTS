@@ -59,6 +59,59 @@ describe("collectFinanceStatementPages", () => {
     expect(JSON.stringify(result)).not.toContain("must-not-leave-page");
   });
 
+  it("preserves the demonstrated variable page size while pinning protocol selectors", async () => {
+    const dynamicUrl = capturedPageOneUrl.replace("size=5", "size=17");
+    const fetchPage = vi.fn(async (url: string) => {
+      const parsed = new URL(url);
+      expect(parsed.searchParams.get("from")).toBe("5");
+      expect(parsed.searchParams.get("size")).toBe("17");
+      expect(parsed.searchParams.get("pagination_type")).toBe("1");
+      expect(parsed.searchParams.get("terminal_type")).toBe("1");
+      expect(parsed.searchParams.get("page_type")).toBe("10");
+      expect(parsed.searchParams.get("no_need_sku_record")).toBe("false");
+      expect(parsed.searchParams.get("statement_version")).toBe("1");
+      expect(parsed.searchParams.get("token")).toBeNull();
+      expect(parsed.searchParams.get("sign")).toBeNull();
+      return pageResponse(5, 3, 8, false);
+    });
+
+    const result = await collectFinanceStatementPages({
+      capturedPageOneUrl: dynamicUrl,
+      firstPage: pageResponse(0, 5, 8, true),
+      fetchPage,
+    });
+
+    expect(result.rows).toHaveLength(8);
+    expect(fetchPage).toHaveBeenCalledOnce();
+  });
+
+  it("rejects changed protocol selectors instead of replaying them", async () => {
+    await expect(collectFinanceStatementPages({
+      capturedPageOneUrl: capturedPageOneUrl.replace("page_type=10", "page_type=23"),
+      firstPage: pageResponse(0, 5, 8, true),
+      fetchPage: vi.fn(),
+    })).rejects.toMatchObject({ failureType: "INCOMPLETE_RESPONSE" });
+  });
+
+  it("bounds a page fetch using the supplied collection deadline", async () => {
+    await expect(collectFinanceStatementPages({
+      capturedPageOneUrl,
+      firstPage: pageResponse(0, 5, 8, true),
+      fetchPage: async () => new Promise<never>(() => undefined),
+      deadlineAt: Date.now() + 10,
+      // Deadline breaches are typed SOURCE_TIMEOUT; only contract drift stays
+      // INCOMPLETE_RESPONSE so the sync pause table can distinguish the two.
+    })).rejects.toMatchObject({ failureType: "SOURCE_TIMEOUT" });
+  });
+
+  it("classifies a malformed nonzero page envelope as API_REJECTED", async () => {
+    await expect(collectFinanceStatementPages({
+      capturedPageOneUrl,
+      firstPage: { code: 8 },
+      fetchPage: vi.fn(),
+    })).rejects.toMatchObject({ failureType: "API_REJECTED" });
+  });
+
   it("rejects a repeated page signature", async () => {
     await expect(collectFinanceStatementPages({
       capturedPageOneUrl,
@@ -119,12 +172,20 @@ describe("collectFinanceStatementPages", () => {
     })).rejects.toThrow(/100 Finance pages/i);
   });
 
+  it("rejects a captured Finance request from a changed origin", async () => {
+    await expect(collectFinanceStatementPages({
+      capturedPageOneUrl: capturedPageOneUrl.replace("seller-us.tiktok.com", "seller-us.tiktok.com:8443"),
+      firstPage: pageResponse(0, 5, 5, false),
+      fetchPage: vi.fn(),
+    })).rejects.toMatchObject({ failureType: "INCOMPLETE_RESPONSE" });
+  });
+
   it("rejects captured URLs whose fixed business contract changed", async () => {
     await expect(collectFinanceStatementPages({
       capturedPageOneUrl: capturedPageOneUrl.replace("settlement_status=1", "settlement_status=2"),
       firstPage: pageResponse(0, 5, 5, false),
       fetchPage: vi.fn(),
-    })).rejects.toMatchObject({ failureType: "LAYOUT_CHANGED" });
+    })).rejects.toMatchObject({ failureType: "INCOMPLETE_RESPONSE" });
   });
 
   it("rejects duplicate allowlisted business parameters", async () => {

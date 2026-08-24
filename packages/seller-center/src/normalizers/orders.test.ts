@@ -97,6 +97,26 @@ describe("normalizeOrder", () => {
     });
   });
 
+  it("accepts an absent optional reverse refund_time without fabricating a timestamp", () => {
+    // Live evidence: profile 957 returned a valid reverse record with refund_time
+    // absent while its other reverse timestamps remained epoch strings.
+    const reverse = reverseModule();
+    delete reverse.refund_time;
+    const raw = RawOrderSchema.parse(orderInput({
+      reverse_module: [reverse],
+    }));
+
+    const normalized = normalizeOrder(raw, "shop-1");
+
+    expect(normalized.rawData).toMatchObject({
+      reverse: {
+        cancelledTime: "1700000100",
+        refundTime: null,
+        sellerAutoApproveTime: "1700000300",
+      },
+    });
+  });
+
   it("strips reverse reason text and unapproved reverse fields", () => {
     const rawWithSensitiveReverse = RawOrderSchema.parse(orderInput({
       reverse_module: [{
@@ -166,6 +186,17 @@ describe("normalizeOrder", () => {
       reverse_module: [reverseModule(), reverseModule({ reverse_status: 101 })],
     }))).toThrow();
   });
+
+  it.each(["cancelled_time", "seller_auto_approve_time"])(
+    "rejects an absent required reverse timestamp field %s",
+    (field) => {
+      const reverse = reverseModule();
+      delete reverse[field];
+      expect(() => RawOrderSchema.parse(orderInput({
+        reverse_module: [reverse],
+      }))).toThrow();
+    },
+  );
 
   it.each(["cancelled_time", "refund_time", "seller_auto_approve_time"])(
     "rejects non-epoch text in reverse timestamp field %s",

@@ -45,7 +45,7 @@ export function normalizeOrder(raw: RawOrder, shopId: string, observedAt = new D
         reverseType: String(reverseSource.reverse_type),
         reverseFrom: String(reverseSource.reverse_from),
         cancelledTime: reverseSource.cancelled_time,
-        refundTime: reverseSource.refund_time,
+        refundTime: reverseSource.refund_time ?? null,
         sellerAutoApproveTime: reverseSource.seller_auto_approve_time,
       };
   const rawData = {

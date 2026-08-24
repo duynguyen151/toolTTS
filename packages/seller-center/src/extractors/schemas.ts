@@ -44,7 +44,9 @@ const ReverseModuleSchema = z.object({
   reverse_type: SourceCodeSchema,
   reverse_from: SourceCodeSchema,
   cancelled_time: EpochStringSchema,
-  refund_time: EpochStringSchema,
+  // Canonical live Orders evidence: a reverse record may omit refund_time while
+  // the remaining reverse timestamps stay valid epoch strings.
+  refund_time: EpochStringSchema.optional(),
   seller_auto_approve_time: EpochStringSchema,
 }).strip();
 

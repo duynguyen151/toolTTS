@@ -1,0 +1,4 @@
+ALTER TABLE "shop_provider_bindings" DROP CONSTRAINT "shop_provider_bindings_cotik_no_official_on_hold";--> statement-breakpoint
+ALTER TABLE "shop_provider_bindings" ADD CONSTRAINT "shop_provider_bindings_provenance_source_matches_provider" CHECK ("shop_provider_bindings"."provenance"->>'source' = "shop_provider_bindings"."provider");--> statement-breakpoint
+ALTER TABLE "shop_provider_bindings" ADD CONSTRAINT "shop_provider_bindings_cotik_no_official_on_hold" CHECK ("shop_provider_bindings"."provider" <> 'COTIK'
+        or not ("shop_provider_bindings"."provenance"->'capabilities' ? 'OFFICIAL_ON_HOLD'));

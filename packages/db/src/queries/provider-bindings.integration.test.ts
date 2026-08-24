@@ -161,6 +161,15 @@ describeWithDatabase("shop provider binding PostgreSQL persistence", () => {
       context.db.insert(shopProviderBindings).values({
         shopId: shop.id,
         provider: "COTIK",
+        providerShopId: "external-laundered",
+        provenance: { source: "SELLER_CENTER", capabilities: ["ORDERS", "OFFICIAL_ON_HOLD"] },
+      }),
+    ).rejects.toThrow(/shop_provider_bindings_provenance_source_matches_provider/);
+
+    await expect(
+      context.db.insert(shopProviderBindings).values({
+        shopId: shop.id,
+        provider: "COTIK",
         providerShopId: null,
         enabled: true,
         provenance: { source: "COTIK", capabilities: ["ORDERS"] },

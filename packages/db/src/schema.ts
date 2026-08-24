@@ -824,8 +824,12 @@ export const shopProviderBindings = pgTable(
         and jsonb_typeof(${table.provenance}->'capabilities') = 'array'`
     ),
     check(
+      "shop_provider_bindings_provenance_source_matches_provider",
+      sql`${table.provenance}->>'source' = ${table.provider}`
+    ),
+    check(
       "shop_provider_bindings_cotik_no_official_on_hold",
-      sql`${table.provenance}->>'source' <> 'COTIK'
+      sql`${table.provider} <> 'COTIK'
         or not (${table.provenance}->'capabilities' ? 'OFFICIAL_ON_HOLD')`
     ),
     check(

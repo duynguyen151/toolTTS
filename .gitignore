@@ -27,4 +27,6 @@ cookies/
 tokens/
 adspower-profiles/
 adspower-sessions/
+# Local API reference supplied by COTIK, the ERP service in use; may contain credentials, so it is readable locally but never version-controlled.
+docs/integrations/cotik/public-api-guide.md
 .agents/vendor/

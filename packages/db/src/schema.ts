@@ -25,7 +25,8 @@ import type {
   DecisionMetricsSnapshot,
   DecisionRiskSnapshot,
   DecisionRuleTrigger,
-  SourceCoverageProof
+  SourceCoverageProof,
+  SourceProvenance
 } from "@shop-health/domain";
 
 export const canonicalOrderStatusEnum = pgEnum("canonical_order_status", [
@@ -778,6 +779,62 @@ export const decisionExecutions = pgTable(
   ]
 );
 
+export const shopProviderBindings = pgTable(
+  "shop_provider_bindings",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    shopId: uuid("shop_id")
+      .notNull()
+      .references(() => shops.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    provider: text("provider").notNull(),
+    providerShopId: text("provider_shop_id"),
+    enabled: boolean("enabled").notNull().default(true),
+    provenance: jsonb("provenance").$type<SourceProvenance>().notNull(),
+    providerUpdatedAt: timestamp("provider_updated_at", { withTimezone: true }),
+    collectedAt: timestamp("collected_at", { withTimezone: true }).notNull().defaultNow(),
+    checkpoint: jsonb("checkpoint").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("shop_provider_bindings_shop_provider_unique").on(table.shopId, table.provider),
+    uniqueIndex("shop_provider_bindings_provider_shop_id_unique")
+      .on(table.provider, table.providerShopId)
+      .where(sql`${table.providerShopId} is not null`),
+    index("shop_provider_bindings_enabled_provider_idx")
+      .on(table.provider)
+      .where(sql`${table.enabled}`),
+    check(
+      "shop_provider_bindings_provider_known",
+      sql`${table.provider} in ('SELLER_CENTER', 'COTIK')`
+    ),
+    check(
+      "shop_provider_bindings_provider_shop_id_not_blank",
+      sql`${table.providerShopId} is null or length(btrim(${table.providerShopId})) > 0`
+    ),
+    check(
+      "shop_provider_bindings_enabled_requires_identity",
+      sql`not ${table.enabled} or ${table.providerShopId} is not null`
+    ),
+    check(
+      "shop_provider_bindings_provenance_object",
+      sql`jsonb_typeof(${table.provenance}) = 'object'
+        and ${table.provenance} ? 'source'
+        and ${table.provenance} ? 'capabilities'
+        and jsonb_typeof(${table.provenance}->'capabilities') = 'array'`
+    ),
+    check(
+      "shop_provider_bindings_cotik_no_official_on_hold",
+      sql`${table.provenance}->>'source' <> 'COTIK'
+        or not (${table.provenance}->'capabilities' ? 'OFFICIAL_ON_HOLD')`
+    ),
+    check(
+      "shop_provider_bindings_checkpoint_object",
+      sql`${table.checkpoint} is null or jsonb_typeof(${table.checkpoint}) = 'object'`
+    )
+  ]
+);
+
 export type ShopRow = typeof shops.$inferSelect;
 export type AdsPowerProfileRow = typeof adspowerProfiles.$inferSelect;
 export type OrderRow = typeof orders.$inferSelect;
@@ -790,3 +847,4 @@ export type DecisionCaseRow = typeof decisionCases.$inferSelect;
 export type BaDecisionRow = typeof baDecisions.$inferSelect;
 export type AiDecisionRow = typeof aiDecisions.$inferSelect;
 export type DecisionExecutionRow = typeof decisionExecutions.$inferSelect;
+export type ShopProviderBindingRow = typeof shopProviderBindings.$inferSelect;

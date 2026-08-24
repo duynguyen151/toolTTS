@@ -7,6 +7,7 @@ import { closeDatabase, createDatabase, type DatabaseContext } from "../client.j
 import { migrateDatabase } from "../migrations.js";
 import { shopProviderBindings, shops, type ShopRow } from "../schema.js";
 import {
+  disableShopProviderBinding,
   findEnabledShopProviderBinding,
   listEnabledShopProviderBindings,
   upsertShopProviderBinding,
@@ -84,6 +85,27 @@ describeWithDatabase("shop provider binding PostgreSQL persistence", () => {
     });
     await expect(findEnabledShopProviderBinding(context.db, shop.id, "COTIK")).resolves.toBeNull();
     await expect(listEnabledShopProviderBindings(context.db, shop.id)).resolves.toHaveLength(0);
+  });
+
+  it("disables only the COTIK binding in place and leaves the canonical shop untouched", async () => {
+    const shop = await createTestShop();
+    const providerShopId = `cotik-${randomUUID()}`;
+    await upsertShopProviderBinding(context.db, {
+      shopId: shop.id,
+      provider: "COTIK",
+      providerShopId,
+      provenance: { source: "COTIK", capabilities: ["ORDERS"] },
+    });
+
+    const disabled = await disableShopProviderBinding(context.db, shop.id, "COTIK");
+    expect(disabled).toMatchObject({ enabled: false });
+    expect(disabled!.providerShopId).toBe(providerShopId);
+    await expect(findEnabledShopProviderBinding(context.db, shop.id, "COTIK")).resolves.toBeNull();
+
+    // Repeating unbind stays idempotent and never deletes or rewrites canonical rows.
+    await expect(disableShopProviderBinding(context.db, shop.id, "COTIK")).resolves.toMatchObject({ enabled: false });
+    const [refetchedShop] = await context.db.select().from(shops).where(eq(shops.id, shop.id));
+    expect(refetchedShop!.profileId).toBe(shop.profileId);
   });
 
   it("keeps one canonical shop supporting both SELLER_CENTER and COTIK bindings", async () => {

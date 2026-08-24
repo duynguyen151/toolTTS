@@ -6,6 +6,8 @@ import { SourceProviderSchema, SourceProvenanceSchema } from "@shop-health/domai
 import type { Database } from "../client.js";
 import { shopProviderBindings, type ShopProviderBindingRow } from "../schema.js";
 
+export type { ShopProviderBindingRow };
+
 /**
  * Validates binding input at the persistence trust boundary and projects it onto
  * exactly the persisted columns. Unknown fields (including token/credential-shaped
@@ -104,4 +106,19 @@ export async function listEnabledShopProviderBindings(
     .from(shopProviderBindings)
     .where(and(eq(shopProviderBindings.shopId, shopId), eq(shopProviderBindings.enabled, true)))
     .orderBy(asc(shopProviderBindings.provider));
+}
+
+/** Disables one provider binding in place; canonical shop rows are never touched. */
+export async function disableShopProviderBinding(
+  db: Database,
+  shopId: string,
+  provider: ShopProviderBindingRow["provider"]
+): Promise<ShopProviderBindingRow | null> {
+  const [binding] = await db
+    .update(shopProviderBindings)
+    .set({ enabled: false, updatedAt: new Date() })
+    .where(and(eq(shopProviderBindings.shopId, shopId), eq(shopProviderBindings.provider, provider)))
+    .returning();
+
+  return binding ?? null;
 }

@@ -7,6 +7,7 @@ const configSchema = z.object({
   DATABASE_URL: z.string().min(1).optional(),
   ADSPOWER_BASE_URL: z.string().url().default("http://127.0.0.1:50325"),
   ADSPOWER_API_KEY: z.string().optional(),
+  COTIK_TOKEN: z.string().optional(),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   DISPLAY_TIME_ZONE: z.string().default("Asia/Bangkok")
 });

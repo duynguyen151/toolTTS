@@ -26,6 +26,9 @@ importers:
 
   apps/cli:
     dependencies:
+      '@shop-health/cotik':
+        specifier: workspace:*
+        version: link:../../packages/cotik
       '@shop-health/db':
         specifier: workspace:*
         version: link:../../packages/db

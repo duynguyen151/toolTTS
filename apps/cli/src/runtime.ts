@@ -39,3 +39,14 @@ export function requireDatabaseUrl(runtime: CliRuntime): string {
   }
   return databaseUrl;
 }
+
+export function requireCotikToken(runtime: CliRuntime): string {
+  const token = runtime.config.COTIK_TOKEN?.trim();
+  if (!token) {
+    throw new CliError({
+      failureType: "COTIK_NOT_CONFIGURED",
+      message: "COTIK_TOKEN is required for this command"
+    });
+  }
+  return token;
+}

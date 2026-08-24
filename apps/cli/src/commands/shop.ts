@@ -6,6 +6,7 @@ import {
 } from "@shop-health/db";
 import type { Command } from "commander";
 
+import { registerShopCotikCommands } from "./cotik.js";
 import { withDatabase } from "../db-runtime.js";
 import { CliError } from "../errors.js";
 import { formatDate, printJson, printKeyValues, printTable } from "../presentation/output.js";
@@ -15,6 +16,7 @@ interface JsonOption { readonly json?: boolean; }
 
 export function registerShopCommands(program: Command, runtime: CliRuntime): void {
   const shop = program.command("shop").description("Manage configured shops");
+  registerShopCotikCommands(shop, runtime);
 
   shop.command("add")
     .requiredOption("--profile-no <number>")

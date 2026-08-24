@@ -171,3 +171,11 @@ export {
   type FailSyncRunInput,
   type SyncMode
 } from "./queries/sync-runs.js";
+export {
+  disableShopProviderBinding,
+  findEnabledShopProviderBinding,
+  listEnabledShopProviderBindings,
+  upsertShopProviderBinding,
+  type ShopProviderBindingRow,
+  type UpsertShopProviderBindingInput
+} from "./queries/provider-bindings.js";

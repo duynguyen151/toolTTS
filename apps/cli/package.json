@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@shop-health/db": "workspace:*",
+    "@shop-health/cotik": "workspace:*",
     "@shop-health/decision-ai": "workspace:*",
     "@shop-health/decision-workflow": "workspace:*",
     "@shop-health/domain": "workspace:*",

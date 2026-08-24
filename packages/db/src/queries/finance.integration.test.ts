@@ -113,6 +113,34 @@ describeWithDatabase("finance current-population PostgreSQL integration", () => 
       .where(eq(settlementRecords.sourceStatementDetailId, "SIGNED")))
       .resolves.toEqual([{ expectedSettlementAmount: "-0.4100" }]);
   });
+
+  // W0-T02 diagnostic: current mutable rows cannot prove capture A after capture B overwrites the same ID.
+  it.fails("preserves a prior capture's amount and state when its statement ID is overwritten later", async () => {
+    const captureA = new Date("2026-08-18T00:00:00.000Z");
+    const captureB = new Date("2026-08-19T00:00:00.000Z");
+    await upsertSettlementBatch(context.db, [settlement(shopId, "MUTABLE", "524.2800")], captureA);
+    await insertFinancialSnapshot(context.db, {
+      ...financialSnapshot(shopId, captureA, "snapshot-mutable-a"),
+      officialOnHoldAmount: "524.2800",
+    });
+    await upsertSettlementBatch(context.db, [{
+      ...settlement(shopId, "MUTABLE", "523.8700"),
+      settlementState: "ELIGIBLE",
+      sourceSettlementStatus: "ELIGIBLE",
+      onHoldReason: null,
+      sourceHash: "MUTABLE-hash-b",
+    }], captureB);
+    await insertFinancialSnapshot(context.db, {
+      ...financialSnapshot(shopId, captureB, "snapshot-mutable-b"),
+      officialOnHoldAmount: "523.8700",
+    });
+
+    await expect(getFinanceSummary(context.db, shopId, captureA)).resolves.toMatchObject({
+      latestSnapshot: { officialOnHoldAmount: "524.2800" },
+      onHoldCount: 1,
+      onHoldExpectedAmount: "524.2800",
+    });
+  });
 });
 
 function settlement(shopId: string, id: string, amount: string, earningAmount = amount): SettlementUpsertInput {

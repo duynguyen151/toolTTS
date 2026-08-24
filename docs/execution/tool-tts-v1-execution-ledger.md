@@ -46,8 +46,8 @@ Only one implementation worker may edit each shared integration seam at a time:
 
 | Task ID | State | Direct Dependencies | Scheduled/Unscheduled | Worker | Reviewer | Owned Files/Modules | Tests | Review Verdict | Verification | Accepted Commit/Checkpoint | Blocker | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| W0-T01 | REVIEW | None | Scheduled | Technical Director recovery after three no-output worker attempts | Pending independent reviewer | `docs/plans/2026-08-25-tool-tts-v1-master-plan.md`; this ledger | Documentation consistency; Git inventory; placeholder scan; diff check | Pending | Pending independent verification | Pending | None | Documentation-only authority/ownership gate; local COTIK guide is intentionally ignored and excluded from commit. |
-| W0-T02 | BLOCKED | W0-T01 | Unscheduled | — | — | Finance query/sync/schema evidence only after W0 acceptance | Required diagnostic/regression tests | — | — | — | W0-T01 pending review | No production schema or data mutation. |
+| W0-T01 | DONE | None | Completed | Technical Director recovery after three no-output worker attempts | Independent read-only reviewer | `docs/plans/2026-08-25-tool-tts-v1-master-plan.md`; this ledger; `.gitignore` | Documentation consistency; Git inventory; placeholder scan; `git diff --check` | APPROVE | PASS: scoped diff check; ignored-guide verification; independent review | `17fa6002797590741a123b0481410cb515454a3f` | None | Accepted 2026-08-25. Documentation-only authority/ownership gate; local COTIK guide is intentionally ignored and excluded from commit. |
+| W0-T02 | READY | W0-T01 | Scheduled (bootstrap priority) | Pending bounded worker | Pending independent reviewer | Finance query/sync/schema evidence; task-owned tests/decision record only | Required diagnostic/regression tests | — | Pre-dispatch source evidence captured | — | None | No production schema or data mutation. |
 
 ## Scheduling rule
 

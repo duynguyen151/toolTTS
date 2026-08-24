@@ -23,6 +23,8 @@ const CotikShopCandidateSchema = z.object({
 });
 
 const CotikListShopsDataSchema = z.object({ list_shop: z.array(CotikShopCandidateSchema) });
+// COTIK Statements returns the discoverable shop ids in data.list_shop; its page defaults are explicit here.
+const COTIK_SHOP_DISCOVERY_PATH = "/statements/?page=1&sizeperpage=50";
 
 // COTIK reads cover Orders and Supplementary Finance only; Official On-Hold stays Seller Center's.
 const COTIK_PROVENANCE: SourceProvenance = {
@@ -43,7 +45,7 @@ export function registerShopCotikCommands(shop: Command, runtime: CliRuntime): v
 
   cotik.command("list").option("--json").action(async (options: JsonOption) => {
     const client = createCotikClient({ token: requireCotikToken(runtime) });
-    const { list_shop } = await client.get("/statements/", CotikListShopsDataSchema);
+    const { list_shop } = await client.get(COTIK_SHOP_DISCOVERY_PATH, CotikListShopsDataSchema);
     if (options.json === true) printJson({ schemaVersion: "cotik-shop-list.v1", shops: list_shop });
     else printTable(["COTIK ID", "NAME", "CODE"], list_shop.map((item) => [item._id, item.name ?? "-", item.code ?? "-"]));
   });
@@ -57,7 +59,7 @@ export function registerShopCotikCommands(shop: Command, runtime: CliRuntime): v
         const target = await findShopByProfileNo(db, profileNo);
         if (target === null) throw new CliError({ failureType: "SHOP_NOT_FOUND", message: `Shop profile ${profileNo} is not configured` });
         const client = createCotikClient({ token });
-        const { list_shop } = await client.get("/statements/", CotikListShopsDataSchema);
+        const { list_shop } = await client.get(COTIK_SHOP_DISCOVERY_PATH, CotikListShopsDataSchema);
         const matches = list_shop.filter((candidate) => candidate._id === options.shopId);
         if (matches.length !== 1) {
           throw matches.length === 0

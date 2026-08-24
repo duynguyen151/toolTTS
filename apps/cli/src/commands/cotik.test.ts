@@ -93,11 +93,13 @@ describe("shop cotik commands", () => {
   describe("list", () => {
     it("projects fetched candidates onto exactly id, name, and code", async () => {
       // Honor the real client contract: get(path, schema) validates through the supplied schema.
-      mocks.cotikGet.mockImplementation(async (_path: string, schema: { parse: (value: unknown) => unknown }) =>
-        schema.parse({
+      mocks.cotikGet.mockImplementation(async (path: string, schema: { parse: (value: unknown) => unknown }) => {
+        expect(path).toBe("/statements/?page=1&sizeperpage=50");
+        // Sanitized COTIK Statements response: data.list_shop contains discoverable provider ids.
+        return schema.parse({
           list_shop: [{ _id: "cotik-shop-1", name: "My Shop", code: "SHOP01", internalFlag: "drop-me" }],
-        }),
-      );
+        });
+      });
 
       const output = await run(["shop", "cotik", "list", "--json"]);
 
@@ -111,7 +113,7 @@ describe("shop cotik commands", () => {
       await run(["shop", "cotik", "list"]);
 
       expect(mocks.createCotikClient).toHaveBeenCalledWith({ token: "test-cotik-token" });
-      expect(mocks.cotikGet).toHaveBeenCalledWith("/statements/", expect.anything());
+      expect(mocks.cotikGet).toHaveBeenCalledWith("/statements/?page=1&sizeperpage=50", expect.anything());
     });
 
     it("fails closed before any fetch when COTIK_TOKEN is missing", async () => {

@@ -91,19 +91,16 @@ export const SourceProvenanceSchema = z
 
 export type SourceProvenance = z.infer<typeof SourceProvenanceSchema>;
 
-export interface SellerDataSource {
+/**
+ * Provider-neutral read seam. A provider may expose Orders and supplementary
+ * Finance without being eligible to produce Official On-Hold evidence.
+ */
+export interface ReadProviderDataSource {
   health(config: ShopSourceConfig): Promise<SourceHealth>;
   probe(config: ShopSourceConfig): Promise<SourceFingerprint>;
   /** Captures the identity from the source's canonical authenticated route. */
   verifyProfile?(config: Pick<ShopSourceConfig, "profileId">): Promise<SellerProfileIdentity>;
   collectOrders(request: SyncRequest): AsyncIterable<NormalizedOrderBatch>;
-  /**
-   * Official-On-Hold-capable Finance collection; only this method may produce
-   * evidence claiming Official OH reconciliation.
-   */
-  collectFinancials(
-    request: SyncRequest,
-  ): AsyncIterable<NormalizedFinancialBatch>;
   /**
    * Optional supplementary Finance collection (e.g. COTIK statements/payments).
    * Batches never imply an Official On-Hold claim or reconciliation.
@@ -111,6 +108,16 @@ export interface SellerDataSource {
   collectSupplementaryFinancials?(
     request: SyncRequest,
   ): AsyncIterable<SupplementaryFinancialBatch>;
+}
+
+/**
+ * Existing Official-On-Hold-capable seam used by Seller Center and sync.
+ * `collectFinancials()` retains its existing Official On-Hold meaning.
+ */
+export interface SellerDataSource extends ReadProviderDataSource {
+  collectFinancials(
+    request: SyncRequest,
+  ): AsyncIterable<NormalizedFinancialBatch>;
 }
 
 /**

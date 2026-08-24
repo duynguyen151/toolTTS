@@ -3,9 +3,10 @@ import { describe, expect, it } from "vitest";
 import { NormalizedOrderBatchSchema, ProviderNormalizedOrderBatchSchema } from "./orders.js";
 import {
   ProviderSourceCoverageProofSchema,
-  SellerDataSource,
   SourceCoverageProofSchema,
   SourceProvenanceSchema,
+  type ReadProviderDataSource,
+  type SellerDataSource,
 } from "./source.js";
 
 const capturedAt = new Date("2026-08-14T00:00:00.000Z");
@@ -117,13 +118,17 @@ describe("SourceProvenanceSchema", () => {
   });
 });
 
-describe("SellerDataSource optional supplementary Finance contract", () => {
-  function assertCompatible(source: SellerDataSource): SellerDataSource {
+describe("provider read and Official-On-Hold contract separation", () => {
+  function assertOfficialProvider(source: SellerDataSource): SellerDataSource {
     return source;
   }
 
-  it("remains structurally compatible with legacy implementations", () => {
-    const legacy = assertCompatible({
+  function assertReadProvider(source: ReadProviderDataSource): ReadProviderDataSource {
+    return source;
+  }
+
+  it("remains structurally compatible with legacy Official-On-Hold implementations", () => {
+    const legacy = assertOfficialProvider({
       health: async () => ({ status: "HEALTHY", checkedAt: capturedAt, detail: null }),
       probe: async () => ({ value: "fp-1", capturedAt }),
       collectOrders: async function* () {},
@@ -133,8 +138,8 @@ describe("SellerDataSource optional supplementary Finance contract", () => {
     expect(legacy.collectSupplementaryFinancials).toBeUndefined();
   });
 
-  it("allows COTIK Orders plus optional supplementary Finance without collectFinancials", () => {
-    const cotik = assertCompatible({
+  it("allows COTIK Orders plus supplementary Finance through the read-provider contract", () => {
+    const cotik = assertReadProvider({
       health: async () => ({ status: "HEALTHY", checkedAt: capturedAt, detail: null }),
       probe: async () => ({ value: "fp-2", capturedAt }),
       collectOrders: async function* () {},

@@ -268,7 +268,7 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
       try {
         assertOnHoldReconciled(stat, collected.rows);
       } catch (error) {
-        if (!(error instanceof SellerCenterError) || error.failureType !== "INCOMPLETE_RESPONSE") throw error;
+        if (!(error instanceof SellerCenterError) || !["INCOMPLETE_RESPONSE", "LAYOUT_CHANGED"].includes(error.failureType)) throw error;
         reconciled = false;
       }
       const capturedAt = new Date();

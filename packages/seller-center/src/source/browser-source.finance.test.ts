@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SyncRequest } from "@shop-health/domain";
 
+import { SellerCenterError } from "../errors.js";
+import * as financeReconciliation from "./finance-reconciliation.js";
+
 const { connectOverCDP } = vi.hoisted(() => ({
   connectOverCDP: vi.fn(),
 }));
@@ -206,6 +209,22 @@ describe("SellerCenterBrowserDataSource.collectFinancials", () => {
 
     // Fail-closed for rows; retained official total is flagged UNVERIFIED, never
     // silently marked COMPLETE-with-authoritative-data downstream.
+    const batches = [];
+    for await (const batch of source.collectFinancials(syncRequest())) batches.push(batch);
+
+    expect(batches[0]?.settlements).toHaveLength(0);
+    expect(batches[0]?.snapshot?.reasonTotalsReconcileToOfficialOnHold).toBe(false);
+    expect(batches[0]?.complete).toBe(true);
+  });
+
+  it("retains an unverified official snapshot for the legacy reconciliation classification", async () => {
+    vi.spyOn(financeReconciliation, "assertOnHoldReconciled").mockImplementationOnce(() => {
+      throw new SellerCenterError("LAYOUT_CHANGED", "legacy reconciliation classification");
+    });
+    const page = new FakeFinancePage();
+    connectOverCDP.mockResolvedValue(browserFor(page));
+    const source = sourceFor(page);
+
     const batches = [];
     for await (const batch of source.collectFinancials(syncRequest())) batches.push(batch);
 

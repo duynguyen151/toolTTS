@@ -87,9 +87,9 @@ describeWithDatabase("risk policy PostgreSQL persistence", () => {
 
     expect(second.sequence).toBeGreaterThan(first.sequence);
     await expect(context.db.update(riskPolicyRevisions).set({ enabled: false }).where(eq(riskPolicyRevisions.revisionId, first.revisionId)))
-      .rejects.toThrow("risk_policy_revisions are append-only");
+      .rejects.toMatchObject({ cause: expect.objectContaining({ message: "risk_policy_revisions are append-only" }) });
     await expect(context.db.delete(riskPolicyRevisions).where(eq(riskPolicyRevisions.revisionId, first.revisionId)))
-      .rejects.toThrow("risk_policy_revisions are append-only");
+      .rejects.toMatchObject({ cause: expect.objectContaining({ message: "risk_policy_revisions are append-only" }) });
   });
 
   it("serializes concurrent same-scope appends with an explicit monotonic tie-break", async () => {

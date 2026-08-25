@@ -385,6 +385,9 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
         ...caseInput.riskSnapshot,
         evaluatedAt: "2026-08-13T23:00:00.000Z",
       },
+      // This intentionally older historical fixture predates the exact policy
+      // snapshot added to the newer Case above.
+      resolvedPolicySnapshot: undefined,
     });
     await expect(recordAiDecision(
       context.db,

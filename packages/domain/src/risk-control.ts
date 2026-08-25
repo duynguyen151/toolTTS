@@ -2,20 +2,13 @@ import { Decimal } from "decimal.js";
 import { z } from "zod";
 
 import type { NormalizedOrder } from "./contracts/orders.js";
+import {
+  AUTHORITATIVE_DELIVERED_STATUSES,
+  AUTHORITATIVE_DELIVERY_TOTAL_STATUSES,
+  calculateAuthoritativeDeliveryRateFromCounts,
+} from "./delivery-rate.js";
 
-// AWAITING_SHIPMENT is the normalized union of Seller Center's
-// "Awaiting Packing" and "Awaiting Collection" states.
-const OPERATIONAL_TOTAL_STATUSES = new Set([
-  "AWAITING_SHIPMENT",
-  "IN_TRANSIT",
-  "DELIVERED",
-  "COMPLETED",
-]);
-const OPERATIONAL_DELIVERED_STATUSES = new Set([
-  "IN_TRANSIT",
-  "DELIVERED",
-  "COMPLETED",
-]);
+const OPERATIONAL_TOTAL_STATUSES = new Set<NormalizedOrder["canonicalStatus"]>(AUTHORITATIVE_DELIVERY_TOTAL_STATUSES);
 
 const DecimalThresholdSchema = z.string().regex(/^\d+(?:\.\d+)?$/);
 
@@ -230,9 +223,6 @@ export function evaluateRiskControlFacts(
   const operationalFacts = input.facts.filter((fact) =>
     OPERATIONAL_TOTAL_STATUSES.has(fact.canonicalStatus)
   );
-  const deliveredFacts = input.facts.filter((fact) =>
-    OPERATIONAL_DELIVERED_STATUSES.has(fact.canonicalStatus)
-  );
   const totalPersistedOrderCount = input.facts.reduce(
     (sum, fact) => sum + fact.orderCount,
     0,
@@ -262,22 +252,16 @@ export function evaluateRiskControlFacts(
     (sum, fact) => sum.plus(fact.totalValue),
     new Decimal(0),
   );
-  const knownDeliveredCount = deliveredFacts.reduce(
-    (sum, fact) => sum + fact.orderCount,
-    0,
+  const authoritativeDelivery = calculateAuthoritativeDeliveryRateFromCounts(
+    input.facts.map((fact) => ({ canonicalStatus: fact.canonicalStatus, count: fact.orderCount })),
   );
-  const knownTotalCount = operationalFacts.reduce(
-    (sum, fact) => sum + fact.orderCount,
-    0,
-  );
-  const statusMetricsAvailable = unknownOrderCount === 0;
-  const onHoldOrderCount = statusMetricsAvailable ? knownTotalCount : null;
-  const deliveredCount = statusMetricsAvailable ? knownDeliveredCount : null;
-  const totalCount = statusMetricsAvailable ? knownTotalCount : null;
-  const deliveryRate =
-    !statusMetricsAvailable || knownTotalCount === 0
-      ? null
-      : knownDeliveredCount / knownTotalCount;
+  const knownDeliveredCount = authoritativeDelivery.deliveredCount ?? 0;
+  const knownTotalCount = authoritativeDelivery.totalCount ?? 0;
+  const statusMetricsAvailable = !authoritativeDelivery.dataIssues.includes("UNKNOWN_STATUS_PRESENT");
+  const onHoldOrderCount = authoritativeDelivery.totalCount;
+  const deliveredCount = authoritativeDelivery.deliveredCount;
+  const totalCount = authoritativeDelivery.totalCount;
+  const deliveryRate = authoritativeDelivery.rate;
   const sampleSufficient =
     statusMetricsAvailable &&
     knownTotalCount > 0 &&

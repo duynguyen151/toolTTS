@@ -77,6 +77,19 @@ describe("evaluateRiskControl", () => {
     expect(result.desiredState).toBe("HOLIDAY_MODE_OFF");
   });
 
+  it("counts Awaiting Collection in the authoritative delivery denominator", () => {
+    const result = evaluateRiskControl({
+      orders: [
+        order("collection", "AWAITING_COLLECTION", "10"),
+        order("delivered", "DELIVERED", "10"),
+      ],
+    });
+
+    expect(result.totalCount).toBe(2);
+    expect(result.deliveredCount).toBe(1);
+    expect(result.deliveryRate).toBe(0.5);
+  });
+
   it("stops when either BA condition is true", () => {
     const valueStop = evaluateRiskControl({
       orders: [order("1", "COMPLETED", "3500")],

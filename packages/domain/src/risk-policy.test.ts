@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { ZodError } from "zod";
 
 import { DecisionCaseInputSchema } from "./decisions.js";
-import { RISK_CONTROL_POLICY_V1 } from "./risk-control.js";
+import {
+  evaluateRiskControlFacts,
+  RISK_CONTROL_POLICY_V1,
+} from "./risk-control.js";
 import {
   INITIAL_GLOBAL_RISK_POLICY_REVISION,
   MetricCautionSchema,
@@ -9,6 +13,7 @@ import {
   GlobalRiskPolicyRevisionSchema,
   ShopRiskPolicyOverrideRevisionSchema,
   resolveEffectiveRiskPolicy,
+  toRiskControlPolicy,
 } from "./risk-policy.js";
 
 const T0 = new Date("2026-01-01T00:00:00.000Z");
@@ -79,6 +84,16 @@ describe("risk control policy contracts", () => {
       ).toBe(true);
     });
 
+    it("rejects unknown global threshold keys", () => {
+      expect(
+        GlobalRiskPolicyRevisionSchema.safeParse(
+          globalRevision({
+            thresholds: thresholds({ stopDeliveryRateBelwo: 0.8 }),
+          }),
+        ).success,
+      ).toBe(false);
+    });
+
     it("rejects invalid global threshold values", () => {
       const cases: Array<[string, Record<string, unknown>]> = [
         ["negative money threshold", { stopOnHoldValueAt: "-1" }],
@@ -145,6 +160,16 @@ describe("risk control policy contracts", () => {
   });
 
   describe("shop override schema", () => {
+    it("rejects unknown shop threshold keys", () => {
+      expect(
+        ShopRiskPolicyOverrideRevisionSchema.safeParse(
+          shopOverride({
+            thresholds: { stopDeliveryRateBelwo: 0.8 },
+          }),
+        ).success,
+      ).toBe(false);
+    });
+
     it("accepts partial overrides with only provided values", () => {
       expect(
         ShopRiskPolicyOverrideRevisionSchema.safeParse(
@@ -383,6 +408,29 @@ describe("risk control policy contracts", () => {
       ).toThrow();
     });
 
+    it("rejects an invalid effectiveAt date", () => {
+      expect(() =>
+        resolveEffectiveRiskPolicy({
+          globalRevisions: [],
+          effectiveAt: new Date("invalid"),
+        }),
+      ).toThrow(ZodError);
+    });
+
+    it.each(["", "   ", " shop-1", "shop-1 "])(
+      "rejects a blank or trim-mismatched shopId %j",
+      (shopId) => {
+        expect(() =>
+          resolveEffectiveRiskPolicy({
+            globalRevisions: [globalRevision()],
+            shopOverrides: [shopOverride()],
+            shopId,
+            effectiveAt: T0,
+          }),
+        ).toThrow(ZodError);
+      },
+    );
+
     it("does not mutate inputs and freezes its result", () => {
       const globalRevisions = deepFreeze([globalRevision()]);
       const shopOverrides = deepFreeze([
@@ -406,6 +454,70 @@ describe("risk control policy contracts", () => {
       expect(resolved.effectiveAt).toBe("2026-01-01T00:00:00.000Z");
       expect(Object.isFrozen(resolved.thresholds)).toBe(true);
       expect(Object.isFrozen(resolved.caution.onHoldValue)).toBe(true);
+    });
+  });
+
+  describe("risk-control adapter", () => {
+    it("returns the exact flattened policy shape and feeds the evaluator", () => {
+      const resolved = resolveEffectiveRiskPolicy({
+        globalRevisions: [
+          globalRevision({
+            currency: "EUR",
+            thresholds: thresholds({
+              stopOnHoldValueAt: "4200.0000",
+              stopDeliveryRateBelow: 0.8,
+              minimumOrdersForRateRule: 10,
+              resumeOnHoldValueBelow: "4000.0000",
+              resumeDeliveryRateAt: 0.85,
+              stableCyclesBeforeResume: 2,
+            }),
+          }),
+        ],
+        effectiveAt: T0,
+      });
+      const inputBefore = JSON.stringify(resolved);
+
+      const policy = toRiskControlPolicy(resolved);
+      const decision = evaluateRiskControlFacts({
+        facts: [
+          {
+            canonicalStatus: "COMPLETED",
+            currency: "EUR",
+            orderCount: 10,
+            totalValue: "1000.0000",
+          },
+        ],
+        policy,
+      });
+
+      expect(policy).toEqual({
+        version: "risk-control-policy.v1",
+        currency: "EUR",
+        stopOnHoldValueAt: "4200.0000",
+        stopDeliveryRateBelow: 0.8,
+        minimumOrdersForRateRule: 10,
+        resumeOnHoldValueBelow: "4000.0000",
+        resumeDeliveryRateAt: 0.85,
+        stableCyclesBeforeResume: 2,
+      });
+      expect(decision.policyVersion).toBe("risk-control-policy.v1");
+      expect(decision.currency).toBe("EUR");
+      expect(decision.thresholds).toEqual({
+        stopOnHoldValueAt: "4200.0000",
+        stopDeliveryRateBelow: 0.8,
+        minimumOrdersForRateRule: 10,
+        resumeOnHoldValueBelow: "4000.0000",
+        resumeDeliveryRateAt: 0.85,
+      });
+      expect(JSON.stringify(resolved)).toBe(inputBefore);
+    });
+
+    it("keeps resolved initial defaults identical to the existing evaluator policy", () => {
+      const policy = toRiskControlPolicy(
+        resolveEffectiveRiskPolicy({ globalRevisions: [], effectiveAt: T0 }),
+      );
+
+      expect(policy).toEqual(RISK_CONTROL_POLICY_V1);
     });
   });
 
@@ -510,19 +622,107 @@ describe("risk control policy contracts", () => {
       expect(parsed.resolvedPolicySnapshot).toBeUndefined();
     });
 
-    it("accepts the exact resolved policy snapshot on new cases", () => {
-      const resolved = resolveEffectiveRiskPolicy({
-        globalRevisions: [],
+    function matchingResolvedPolicy() {
+      return resolveEffectiveRiskPolicy({
+        globalRevisions: [
+          globalRevision({
+            thresholds: thresholds({
+              stopOnHoldValueAt: "4321.0000",
+              stopDeliveryRateBelow: 0.73,
+              minimumOrdersForRateRule: 25,
+              resumeOnHoldValueBelow: "4321.0000",
+              resumeDeliveryRateAt: 0.73,
+            }),
+          }),
+        ],
         effectiveAt: new Date("2026-08-14T00:00:00.000Z"),
       });
+    }
+
+    it("accepts a resolved policy snapshot matching the case evidence", () => {
       const parsed = DecisionCaseInputSchema.parse({
         ...validCase,
-        resolvedPolicySnapshot: resolved,
+        resolvedPolicySnapshot: matchingResolvedPolicy(),
       });
 
       expect(parsed.resolvedPolicySnapshot?.thresholds.stopOnHoldValueAt).toBe(
-        "3500.0000",
+        "4321.0000",
       );
     });
+
+    it.each([
+      [
+        "policy version",
+        (snapshot: ReturnType<typeof matchingResolvedPolicy>) => ({
+          ...snapshot,
+          policyVersion: "risk-control-policy.v2",
+        }),
+      ],
+      [
+        "evaluation time",
+        (snapshot: ReturnType<typeof matchingResolvedPolicy>) => ({
+          ...snapshot,
+          effectiveAt: "2026-08-14T00:00:00.001Z",
+        }),
+      ],
+      [
+        "Onhold Value threshold",
+        (snapshot: ReturnType<typeof matchingResolvedPolicy>) => ({
+          ...snapshot,
+          thresholds: {
+            ...snapshot.thresholds,
+            stopOnHoldValueAt: "4322.0000",
+          },
+        }),
+      ],
+      [
+        "delivery-rate threshold",
+        (snapshot: ReturnType<typeof matchingResolvedPolicy>) => ({
+          ...snapshot,
+          thresholds: {
+            ...snapshot.thresholds,
+            stopDeliveryRateBelow: 0.74,
+            resumeDeliveryRateAt: 0.74,
+          },
+        }),
+      ],
+      [
+        "minimum-order threshold",
+        (snapshot: ReturnType<typeof matchingResolvedPolicy>) => ({
+          ...snapshot,
+          thresholds: {
+            ...snapshot.thresholds,
+            minimumOrdersForRateRule: 26,
+          },
+        }),
+      ],
+      [
+        "currency",
+        (snapshot: ReturnType<typeof matchingResolvedPolicy>) => ({
+          ...snapshot,
+          currency: "EUR",
+        }),
+      ],
+    ])("rejects a resolved policy snapshot with mismatched %s", (_label, mismatch) => {
+      expect(
+        DecisionCaseInputSchema.safeParse({
+          ...validCase,
+          resolvedPolicySnapshot: mismatch(matchingResolvedPolicy()),
+        }).success,
+      ).toBe(false);
+    });
+
+    it.each(["metricsSnapshot", "financeSnapshot"] as const)(
+      "rejects snapshot currency inconsistent with %s",
+      (field) => {
+        expect(
+          DecisionCaseInputSchema.safeParse({
+            ...validCase,
+            [field]: { ...validCase[field], currency: "EUR" },
+            resolvedPolicySnapshot: matchingResolvedPolicy(),
+          }).success,
+        ).toBe(false);
+      },
+    );
   });
 });

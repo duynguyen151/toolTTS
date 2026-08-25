@@ -5,6 +5,10 @@ import {
   CurrencyCodeSchema,
   NonNegativeDecimalStringSchema,
 } from "./contracts/common.js";
+import {
+  RiskControlPolicySchema,
+  type RiskControlPolicy,
+} from "./risk-control.js";
 
 // Caution is an explicit per-metric state. There is deliberately no bare
 // caution number anywhere in these contracts: nothing may imply an invented
@@ -55,8 +59,10 @@ const RiskThresholdShape = {
   stableCyclesBeforeResume: z.number().int().positive(),
 };
 
-export const RiskThresholdsSchema =
-  z.object(RiskThresholdShape).superRefine((thresholds, context) => {
+export const RiskThresholdsSchema = z
+  .object(RiskThresholdShape)
+  .strict()
+  .superRefine((thresholds, context) => {
     if (thresholds.resumeDeliveryRateAt < thresholds.stopDeliveryRateBelow) {
       context.addIssue({
         code: "custom",
@@ -78,14 +84,16 @@ export const RiskThresholdsSchema =
   });
 export type RiskThresholds = z.infer<typeof RiskThresholdsSchema>;
 
-const PartialRiskThresholdsSchema = z.object({
-  stopOnHoldValueAt: NonNegativeDecimalStringSchema.optional(),
-  stopDeliveryRateBelow: z.number().min(0).max(1).optional(),
-  minimumOrdersForRateRule: z.number().int().nonnegative().optional(),
-  resumeOnHoldValueBelow: NonNegativeDecimalStringSchema.optional(),
-  resumeDeliveryRateAt: z.number().min(0).max(1).optional(),
-  stableCyclesBeforeResume: z.number().int().positive().optional(),
-});
+const PartialRiskThresholdsSchema = z
+  .object({
+    stopOnHoldValueAt: NonNegativeDecimalStringSchema.optional(),
+    stopDeliveryRateBelow: z.number().min(0).max(1).optional(),
+    minimumOrdersForRateRule: z.number().int().nonnegative().optional(),
+    resumeOnHoldValueBelow: NonNegativeDecimalStringSchema.optional(),
+    resumeDeliveryRateAt: z.number().min(0).max(1).optional(),
+    stableCyclesBeforeResume: z.number().int().positive().optional(),
+  })
+  .strict();
 
 /** Complete GLOBAL policy state; each revision fully replaces the previous one. */
 export const GlobalRiskPolicyRevisionSchema = z
@@ -206,6 +214,16 @@ export interface ResolveRiskPolicyInput {
   readonly effectiveAt: Date;
 }
 
+const EffectiveDateSchema = z.date().refine((value) => !Number.isNaN(value.getTime()), {
+  message: "effectiveAt must be a valid Date",
+});
+const ShopIdSchema = z
+  .string()
+  .min(1)
+  .refine((value) => value === value.trim(), {
+    message: "shopId must not include surrounding whitespace",
+  });
+
 /**
  * Latest revision with effectiveFrom <= effectiveAt wins; later array
  * position wins equal timestamps so ties stay deterministic. Revisions are
@@ -230,19 +248,22 @@ function selectEffective<T extends { readonly effectiveFrom: Date }>(
 export function resolveEffectiveRiskPolicy(
   input: ResolveRiskPolicyInput,
 ): ResolvedRiskPolicy {
+  const effectiveAt = EffectiveDateSchema.parse(input.effectiveAt);
+  const shopId =
+    input.shopId === undefined ? undefined : ShopIdSchema.parse(input.shopId);
   const globals = (input.globalRevisions ?? []).map((revision) =>
     GlobalRiskPolicyRevisionSchema.parse(revision),
   );
   const globalWinner =
-    selectEffective(globals, input.effectiveAt) ??
+    selectEffective(globals, effectiveAt) ??
     GlobalRiskPolicyRevisionSchema.parse(INITIAL_GLOBAL_RISK_POLICY_REVISION);
 
   let shopWinner: ShopRiskPolicyOverrideRevision | null = null;
   if (input.shopOverrides !== undefined && input.shopOverrides.length > 0) {
     const candidates = input.shopOverrides
       .map((revision) => ShopRiskPolicyOverrideRevisionSchema.parse(revision))
-      .filter((revision) => revision.shopId === input.shopId);
-    shopWinner = selectEffective(candidates, input.effectiveAt);
+      .filter((revision) => revision.shopId === shopId);
+    shopWinner = selectEffective(candidates, effectiveAt);
   }
 
   const mergedThresholds: RiskThresholds = { ...globalWinner.thresholds };
@@ -285,7 +306,7 @@ export function resolveEffectiveRiskPolicy(
     ResolvedRiskPolicySchema.parse({
       policyVersion: globalWinner.version,
       currency: globalWinner.currency,
-      effectiveAt: input.effectiveAt.toISOString(),
+      effectiveAt: effectiveAt.toISOString(),
       thresholds,
       caution,
       globalRevisionId: globalWinner.revisionId,
@@ -293,4 +314,16 @@ export function resolveEffectiveRiskPolicy(
       sources: { thresholds: thresholdSources, caution: cautionSources },
     }),
   );
+}
+
+/** Flatten a resolved policy into the existing risk-control evaluator contract. */
+export function toRiskControlPolicy(
+  resolvedPolicy: ResolvedRiskPolicy,
+): RiskControlPolicy {
+  const resolved = ResolvedRiskPolicySchema.parse(resolvedPolicy);
+  return RiskControlPolicySchema.parse({
+    version: resolved.policyVersion,
+    currency: resolved.currency,
+    ...resolved.thresholds,
+  });
 }

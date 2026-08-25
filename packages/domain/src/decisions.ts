@@ -182,7 +182,16 @@ export const DecisionCaseInputSchema = z
     // Parsed by the persistence boundary to avoid a contract-module cycle.
     decisionContextSnapshot: z.unknown().nullable().optional(),
   })
-  .superRefine(({ ruleDecision, ruleTriggers, coverageSnapshot, dataCoverage }, context) => {
+  .superRefine(({
+    ruleDecision,
+    ruleTriggers,
+    coverageSnapshot,
+    dataCoverage,
+    metricsSnapshot,
+    riskSnapshot,
+    financeSnapshot,
+    resolvedPolicySnapshot,
+  }, context) => {
     if (coverageSnapshot.coverageState !== dataCoverage) {
       context.addIssue({
         code: "custom",
@@ -203,6 +212,38 @@ export const DecisionCaseInputSchema = z
         path: ["ruleTriggers"],
         message: "CONTINUE cannot have rule triggers",
       });
+    }
+    if (resolvedPolicySnapshot !== undefined) {
+      const matchingEvidence = [
+        ["policyVersion", resolvedPolicySnapshot.policyVersion, riskSnapshot.policyVersion],
+        ["effectiveAt", resolvedPolicySnapshot.effectiveAt, riskSnapshot.evaluatedAt],
+        [
+          "thresholds.stopOnHoldValueAt",
+          resolvedPolicySnapshot.thresholds.stopOnHoldValueAt,
+          riskSnapshot.stopOnHoldValueAt,
+        ],
+        [
+          "thresholds.stopDeliveryRateBelow",
+          resolvedPolicySnapshot.thresholds.stopDeliveryRateBelow,
+          riskSnapshot.stopDeliveryRateBelow,
+        ],
+        [
+          "thresholds.minimumOrdersForRateRule",
+          resolvedPolicySnapshot.thresholds.minimumOrdersForRateRule,
+          riskSnapshot.minimumOrdersForRateRule,
+        ],
+        ["currency", resolvedPolicySnapshot.currency, metricsSnapshot.currency],
+        ["currency", resolvedPolicySnapshot.currency, financeSnapshot.currency],
+      ] as const;
+      for (const [path, actual, expected] of matchingEvidence) {
+        if (actual !== expected) {
+          context.addIssue({
+            code: "custom",
+            path: ["resolvedPolicySnapshot", ...path.split(".")],
+            message: `Resolved policy ${path} must match Decision Case evidence`,
+          });
+        }
+      }
     }
   });
 

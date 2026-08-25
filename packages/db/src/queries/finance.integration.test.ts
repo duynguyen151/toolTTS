@@ -604,9 +604,9 @@ describeWithDatabase.sequential("finance immutable-capture PostgreSQL integratio
     }))).rejects.toThrow(/decimal/i);
     await failSyncRun(context.db, { runId: run.id, failureType: "TEST", failureMessage: "expected over-scale" });
 
-    const negativeRun = await beginSyncRun(context.db, { shopId, mode: "FINANCE" });
+    const negativeExpectedRun = await beginSyncRun(context.db, { shopId, mode: "FINANCE" });
     await expect(context.db.transaction((transaction) => finalizeFinanceSyncRun(transaction, {
-      runId: negativeRun.id,
+      runId: negativeExpectedRun.id,
       shopId,
       checkpoint: null,
       rowsRead: 2,
@@ -614,9 +614,23 @@ describeWithDatabase.sequential("finance immutable-capture PostgreSQL integratio
       sourceComplete: true,
       sourceReconciled: true,
       snapshot: { ...valid, capturedAt: new Date("2026-08-28T05:01:00.000Z") },
-      settlements: [settlement(shopId, "NEGATIVE", "1.0000", { settledAmount: "-0.0001" })],
+      settlements: [settlement(shopId, "NEGATIVE-EXPECTED", "-0.0001")],
+    }))).rejects.toThrow(/expected settlement amount must be nonnegative/i);
+    await failSyncRun(context.db, { runId: negativeExpectedRun.id, failureType: "TEST", failureMessage: "expected negative On Hold amount" });
+
+    const negativeSettledRun = await beginSyncRun(context.db, { shopId, mode: "FINANCE" });
+    await expect(context.db.transaction((transaction) => finalizeFinanceSyncRun(transaction, {
+      runId: negativeSettledRun.id,
+      shopId,
+      checkpoint: null,
+      rowsRead: 2,
+      rowsWritten: 1,
+      sourceComplete: true,
+      sourceReconciled: true,
+      snapshot: { ...valid, capturedAt: new Date("2026-08-28T05:02:00.000Z") },
+      settlements: [settlement(shopId, "NEGATIVE-SETTLED", "1.0000", { settledAmount: "-0.0001" })],
     }))).rejects.toThrow(/settled amount must be nonnegative/i);
-    await failSyncRun(context.db, { runId: negativeRun.id, failureType: "TEST", failureMessage: "expected negative settled amount" });
+    await failSyncRun(context.db, { runId: negativeSettledRun.id, failureType: "TEST", failureMessage: "expected negative settled amount" });
   });
 
   it("uses a deterministic equal-time snapshot tie-break without substituting capture evidence", async () => {

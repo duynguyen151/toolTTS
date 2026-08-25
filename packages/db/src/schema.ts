@@ -804,14 +804,24 @@ export const baDecisions = pgTable(
       "ba_decisions_planned_method_other_requires_notes",
       sql`${table.plannedMethods} is null
         or not (${table.plannedMethods} ? 'OTHER')
-        or coalesce(${table.notes}, ${table.note}) is not null`
+        or length(regexp_replace(coalesce(${table.notes}, ${table.note}, ''), E'[[:space:][:cntrl:]\\u200B\\uFEFF]', '', 'g')) > 0`
     ),
-    check("ba_decisions_note_not_blank", sql`${table.note} is null or length(btrim(${table.note})) > 0`),
-    check("ba_decisions_notes_not_blank", sql`${table.notes} is null or length(btrim(${table.notes})) > 0`),
+    check(
+      "ba_decisions_note_not_blank",
+      sql`${table.note} is null
+        or length(regexp_replace(${table.note}, E'[[:space:][:cntrl:]\\u200B\\uFEFF]', '', 'g')) > 0`
+    ),
+    check(
+      "ba_decisions_notes_not_blank",
+      sql`${table.notes} is null
+        or length(regexp_replace(${table.notes}, E'[[:space:][:cntrl:]\\u200B\\uFEFF]', '', 'g')) > 0`
+    ),
     check("ba_decisions_actor_not_blank", sql`length(btrim(${table.actor})) > 0`),
     check(
       "ba_decisions_other_requires_notes",
-      sql`${table.reasonCode} <> 'OTHER' or coalesce(${table.notes}, ${table.note}) is not null or ${table.actor} = 'LEGACY_UNATTRIBUTED'`
+      sql`${table.reasonCode} <> 'OTHER'
+        or length(regexp_replace(coalesce(${table.notes}, ${table.note}, ''), E'[[:space:][:cntrl:]\\u200B\\uFEFF]', '', 'g')) > 0
+        or ${table.actor} = 'LEGACY_UNATTRIBUTED'`
     )
   ]
 );

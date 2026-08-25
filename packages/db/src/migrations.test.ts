@@ -6,8 +6,10 @@ const initialMigrationUrl = new URL("../migrations/0023_risk_policy_revisions.sq
 const repairMigrationUrl = new URL("../migrations/0024_risk_policy_constraints.sql", import.meta.url);
 const parityMigrationUrl = new URL("../migrations/0025_risk_policy_safe_integers.sql", import.meta.url);
 const slowSellMigrationUrl = new URL("../migrations/0026_slow_sell_planned_methods.sql", import.meta.url);
+const notesRepairMigrationUrl = new URL("../migrations/0027_meaningful_ba_notes.sql", import.meta.url);
 const snapshotUrl = new URL("../migrations/meta/0023_snapshot.json", import.meta.url);
 const slowSellSnapshotUrl = new URL("../migrations/meta/0026_snapshot.json", import.meta.url);
+const notesRepairSnapshotUrl = new URL("../migrations/meta/0027_snapshot.json", import.meta.url);
 const previousSnapshotUrl = new URL("../migrations/meta/0025_snapshot.json", import.meta.url);
 const journalUrl = new URL("../migrations/meta/_journal.json", import.meta.url);
 
@@ -67,9 +69,41 @@ describe("W16-T01 migration", () => {
       ba_decisions_planned_methods_valid: expect.anything(),
       ba_decisions_planned_method_other_requires_notes: expect.anything(),
     });
-    expect(journal.entries.at(-1)).toEqual(expect.objectContaining({
+    expect(journal.entries[26]).toEqual(expect.objectContaining({
       idx: 26,
       tag: "0026_slow_sell_planned_methods",
+    }));
+  });
+
+  it("repairs meaningful BA note checks in forward 0027 metadata", async () => {
+    const [sql, snapshotText, previousSnapshotText, journalText] = await Promise.all([
+      readFile(notesRepairMigrationUrl, "utf8"),
+      readFile(notesRepairSnapshotUrl, "utf8"),
+      readFile(slowSellSnapshotUrl, "utf8"),
+      readFile(journalUrl, "utf8"),
+    ]);
+    const snapshot = JSON.parse(snapshotText) as {
+      prevId: string;
+      tables: Record<string, { checkConstraints: Record<string, { value: string }> }>;
+    };
+    const previousSnapshot = JSON.parse(previousSnapshotText) as { id: string };
+    const journal = JSON.parse(journalText) as { entries: Array<{ idx: number; tag: string }> };
+    const checks = snapshot.tables["public.ba_decisions"]?.checkConstraints;
+
+    expect(sql).toContain('DROP CONSTRAINT "ba_decisions_note_not_blank"');
+    expect(sql).toContain('DROP CONSTRAINT "ba_decisions_notes_not_blank"');
+    expect(sql).toContain('DROP CONSTRAINT "ba_decisions_planned_method_other_requires_notes"');
+    expect(sql).toContain('DROP CONSTRAINT "ba_decisions_other_requires_notes"');
+    expect(sql).toContain("regexp_replace");
+    expect(sql).toContain("[[:space:][:cntrl:]\\u200B\\uFEFF]");
+    expect(snapshot.prevId).toBe(previousSnapshot.id);
+    expect(checks?.ba_decisions_note_not_blank?.value).toContain("regexp_replace");
+    expect(checks?.ba_decisions_notes_not_blank?.value).toContain("regexp_replace");
+    expect(checks?.ba_decisions_planned_method_other_requires_notes?.value).toContain("regexp_replace");
+    expect(checks?.ba_decisions_other_requires_notes?.value).toContain("LEGACY_UNATTRIBUTED");
+    expect(journal.entries.at(-1)).toEqual(expect.objectContaining({
+      idx: 27,
+      tag: "0027_meaningful_ba_notes",
     }));
   });
 });

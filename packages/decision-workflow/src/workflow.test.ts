@@ -263,7 +263,7 @@ function createStore(): DecisionWorkflowStore & {
           confidence: input.confidence ?? null,
           reasonCodes: input.reasonCodes,
           plannedMethods: input.plannedMethods ?? null,
-          note: input.note ?? null,
+          note: input.notes ?? null,
           decidedAt: now,
         },
       });
@@ -397,8 +397,44 @@ describe("decision workflow", () => {
       requestId: "9f45eef4-d10f-4392-9b23-3dbefad2991c",
     });
 
-    expect(store.baRecords).toHaveLength(1);
+    expect(store.baRecords).toEqual([
+      expect.objectContaining({ notes: "Needs a larger sample" }),
+    ]);
     expect(result.ba).toMatchObject({ status: "DECIDED", decision: "WATCH" });
+  });
+
+  test("normalizes canonical notes once before persisting and reading SLOW_SELL OTHER", async () => {
+    const store = createStore();
+    const workflow = createDecisionWorkflow({
+      store,
+      aiClient: { recommend: async () => { throw new Error("AI should not be called"); } },
+      now: () => now,
+    });
+
+    const result = await workflow.decide({
+      caseId,
+      decision: "SLOW_SELL",
+      reasonCode: "LOW_DELIVERY_RATE",
+      plannedMethods: ["OTHER"],
+      notes: "  Giảm giá 5% / operator follow-up ✓  ",
+      requestId: "8aa4c764-091c-4f05-a1af-f3c15a3c36ba",
+    });
+
+    expect(store.baRecords).toEqual([{
+      decisionCaseId: caseId,
+      decision: "SLOW_SELL",
+      reasonCode: "LOW_DELIVERY_RATE",
+      reasonCodes: ["LOW_DELIVERY_RATE"],
+      plannedMethods: ["OTHER"],
+      notes: "Giảm giá 5% / operator follow-up ✓",
+      requestId: "8aa4c764-091c-4f05-a1af-f3c15a3c36ba",
+    }]);
+    expect(result.ba).toMatchObject({
+      status: "DECIDED",
+      decision: "SLOW_SELL",
+      plannedMethods: ["OTHER"],
+      note: "Giảm giá 5% / operator follow-up ✓",
+    });
   });
 
   test("requires explicit confirmation and a PAUSE BA decision for DRY_RUN execution", async () => {

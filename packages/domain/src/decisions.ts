@@ -1,5 +1,5 @@
 import { Decimal } from "decimal.js";
-import { z } from "zod";
+import { z, type RefinementCtx } from "zod";
 
 import {
   CurrencyCodeSchema,
@@ -265,12 +265,52 @@ const BaReasonCodesInputSchema = z
     message: "BA reason codes must not contain duplicates",
   });
 
-const BaPlannedMethodsInputSchema = z
+export const UniqueBaPlannedMethodsSchema = z
   .array(BaPlannedMethodSchema)
   .min(1)
   .refine((values) => new Set(values).size === values.length, {
     message: "BA planned methods must not contain duplicates",
   });
+
+export const MeaningfulBaNotesSchema = z.string().trim().refine(
+  (value) => /[^\s\p{Cc}\p{Cf}]/u.test(value),
+  { message: "BA notes must contain meaningful text" },
+);
+
+export interface BaDecisionInvariantInput {
+  readonly decision: BaDecision;
+  readonly reasonCode: BaDecisionReasonCode;
+  readonly reasonCodes?: readonly BaDecisionReasonCode[] | undefined;
+  readonly plannedMethods?: readonly BaPlannedMethod[] | null | undefined;
+  readonly notes?: string | null | undefined;
+  readonly note?: string | null | undefined;
+  readonly actor?: string | undefined;
+}
+
+export function refineBaDecisionInvariants(
+  value: BaDecisionInvariantInput,
+  context: RefinementCtx,
+): void {
+  if (value.reasonCodes !== undefined && value.reasonCodes[0] !== value.reasonCode) {
+    context.addIssue({ code: "custom", path: ["reasonCodes"], message: "BA reasonCode must match the first legacy reason code" });
+  }
+  const hasNotes = value.notes != null || value.note != null;
+  if (value.reasonCode === "OTHER" && !hasNotes && value.actor !== "LEGACY_UNATTRIBUTED") {
+    context.addIssue({ code: "custom", path: ["notes"], message: "BA notes are required for OTHER" });
+  }
+  if (value.decision === "SLOW_SELL" && value.plannedMethods == null) {
+    context.addIssue({ code: "custom", path: ["plannedMethods"], message: "SLOW_SELL requires at least one planned method" });
+  }
+  if (value.decision !== "SLOW_SELL" && value.plannedMethods != null) {
+    context.addIssue({ code: "custom", path: ["plannedMethods"], message: "Only SLOW_SELL can have planned methods" });
+  }
+  if (value.plannedMethods?.includes("OTHER") === true && !hasNotes) {
+    context.addIssue({ code: "custom", path: ["notes"], message: "BA notes are required for planned method OTHER" });
+  }
+  if (value.notes != null && value.note != null && value.notes !== value.note) {
+    context.addIssue({ code: "custom", path: ["notes"], message: "BA notes must match note" });
+  }
+}
 
 export const BaDecisionInputSchema = z
   .object({
@@ -279,35 +319,12 @@ export const BaDecisionInputSchema = z
     // reasonCodes/note are retained as a compatibility input for existing V1 callers.
     reasonCode: BaDecisionReasonCodeSchema,
     reasonCodes: BaReasonCodesInputSchema.optional(),
-    plannedMethods: BaPlannedMethodsInputSchema.optional(),
-    notes: z.string().trim().min(1).optional(),
-    note: z.string().trim().min(1).optional(),
+    plannedMethods: UniqueBaPlannedMethodsSchema.optional(),
+    notes: MeaningfulBaNotesSchema.optional(),
+    note: MeaningfulBaNotesSchema.optional(),
   })
   .strict()
-  .superRefine((value, context) => {
-    const reasonCode = value.reasonCode ?? value.reasonCodes?.[0];
-    if (reasonCode === undefined) {
-      context.addIssue({ code: "custom", path: ["reasonCode"], message: "BA reasonCode is required" });
-    }
-    if (value.reasonCode !== undefined && value.reasonCodes !== undefined && value.reasonCodes[0] !== value.reasonCode) {
-      context.addIssue({ code: "custom", path: ["reasonCodes"], message: "BA reasonCode must match the first legacy reason code" });
-    }
-    if (reasonCode === "OTHER" && value.notes === undefined && value.note === undefined) {
-      context.addIssue({ code: "custom", path: ["notes"], message: "BA notes are required for OTHER" });
-    }
-    if (value.decision === "SLOW_SELL" && value.plannedMethods === undefined) {
-      context.addIssue({ code: "custom", path: ["plannedMethods"], message: "SLOW_SELL requires at least one planned method" });
-    }
-    if (value.decision !== "SLOW_SELL" && value.plannedMethods !== undefined) {
-      context.addIssue({ code: "custom", path: ["plannedMethods"], message: "Only SLOW_SELL can have planned methods" });
-    }
-    if (value.plannedMethods?.includes("OTHER") === true && value.notes === undefined && value.note === undefined) {
-      context.addIssue({ code: "custom", path: ["notes"], message: "BA notes are required for planned method OTHER" });
-    }
-    if (value.notes !== undefined && value.note !== undefined && value.notes !== value.note) {
-      context.addIssue({ code: "custom", path: ["notes"], message: "BA notes must match note" });
-    }
-  })
+  .superRefine(refineBaDecisionInvariants)
 
 export const CaptureBaDecisionInputSchema = z.object({
   decisionCase: DecisionCaseInputSchema,

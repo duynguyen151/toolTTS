@@ -6,7 +6,8 @@ import {
   BaDecisionInputSchema,
   BaDecisionReasonCodeSchema,
   BaDecisionSchema,
-  BaPlannedMethodSchema,
+  UniqueBaPlannedMethodsSchema,
+  refineBaDecisionInvariants,
   DecisionCoverageSnapshotSchema,
   DecisionDataCoverageSchema,
   DecisionFinanceSnapshotSchema,
@@ -14,6 +15,7 @@ import {
   DecisionRiskSnapshotSchema,
   DecisionRuleResultSchema,
   DryRunExecutionSchema,
+  MeaningfulBaNotesSchema,
 } from "../decisions.js";
 import { PeriodMetricsSchema } from "../metrics/types.js";
 
@@ -237,11 +239,11 @@ export const BaDecisionRevisionSchema = z.object({
   decision: BaDecisionSchema,
   reasonCode: BaDecisionReasonCodeSchema,
   reasonCodes: z.array(BaDecisionReasonCodeSchema).min(1),
-  plannedMethods: z.array(BaPlannedMethodSchema).min(1).nullable().default(null),
-  notes: z.string().trim().min(1).nullable(),
+  plannedMethods: UniqueBaPlannedMethodsSchema.nullable().default(null),
+  notes: MeaningfulBaNotesSchema.nullable(),
   actor: z.string().trim().min(1),
   decidedAt: TimestampSchema,
-}).strict();
+}).strict().superRefine(refineBaDecisionInvariants);
 
 export const BaDecisionHistorySchema = z.object({
   current: BaDecisionRevisionSchema.nullable(),

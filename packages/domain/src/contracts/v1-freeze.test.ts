@@ -39,9 +39,78 @@ describe("V1 shared contracts", () => {
     }).plannedMethods).toEqual(["DISABLE_FLASH_SALE", "INCREASE_PRICE"]);
   });
 
+  it("rejects revision methods that do not match the BA decision", () => {
+    const revision = {
+      id: "00000000-0000-4000-8000-000000000012",
+      decisionCaseId: "00000000-0000-4000-8000-000000000011",
+      reasonCode: "LOW_DELIVERY_RATE",
+      reasonCodes: ["LOW_DELIVERY_RATE"],
+      notes: null,
+      actor: "test-ba",
+      decidedAt: "2026-08-14T00:00:00.000Z",
+    };
+
+    expect(BaDecisionRevisionSchema.safeParse({
+      ...revision,
+      decision: "SLOW_SELL",
+      plannedMethods: null,
+    }).success).toBe(false);
+    expect(BaDecisionRevisionSchema.safeParse({
+      ...revision,
+      decision: "SLOW_SELL",
+      plannedMethods: [],
+    }).success).toBe(false);
+    expect(BaDecisionRevisionSchema.safeParse({
+      ...revision,
+      decision: "SLOW_SELL",
+      plannedMethods: ["INCREASE_PRICE", "INCREASE_PRICE"],
+    }).success).toBe(false);
+    expect(BaDecisionRevisionSchema.safeParse({
+      ...revision,
+      decision: "SLOW_SELL",
+      plannedMethods: ["UNKNOWN"],
+    }).success).toBe(false);
+    expect(BaDecisionRevisionSchema.safeParse({
+      ...revision,
+      decision: "WATCH",
+      plannedMethods: ["INCREASE_PRICE"],
+    }).success).toBe(false);
+  });
+
+  it("requires meaningful revision notes for OTHER reason or method", () => {
+    const revision = {
+      id: "00000000-0000-4000-8000-000000000012",
+      decisionCaseId: "00000000-0000-4000-8000-000000000011",
+      decision: "SLOW_SELL",
+      reasonCodes: ["LOW_DELIVERY_RATE"],
+      plannedMethods: ["OTHER"],
+      actor: "test-ba",
+      decidedAt: "2026-08-14T00:00:00.000Z",
+    };
+
+    expect(BaDecisionRevisionSchema.safeParse({
+      ...revision,
+      reasonCode: "LOW_DELIVERY_RATE",
+      notes: null,
+    }).success).toBe(false);
+    expect(BaDecisionRevisionSchema.safeParse({
+      ...revision,
+      reasonCode: "LOW_DELIVERY_RATE",
+      notes: "\t\n\u0001\u200b\ufeff",
+    }).success).toBe(false);
+    expect(BaDecisionRevisionSchema.safeParse({
+      ...revision,
+      decision: "WATCH",
+      reasonCode: "OTHER",
+      reasonCodes: ["OTHER"],
+      plannedMethods: null,
+      notes: null,
+    }).success).toBe(false);
+  });
+
   it("keeps old BA revisions valid with null planned methods", () => {
     expect(BaDecisionRevisionSchema.parse({
-      id: "00000000-0000-4000-8000-000000000012",
+      id: "00000000-0000-4000-8000-000000000013",
       decisionCaseId: "00000000-0000-4000-8000-000000000011",
       decision: "WATCH",
       reasonCode: "DATA_INCOMPLETE",

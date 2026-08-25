@@ -135,6 +135,12 @@ describe("decision contracts", () => {
       plannedMethods: ["OTHER"],
       notes: "   ",
     }).success).toBe(false);
+    expect(BaDecisionInputSchema.safeParse({
+      decision: "SLOW_SELL",
+      reasonCode: "LOW_DELIVERY_RATE",
+      plannedMethods: ["OTHER"],
+      notes: "\t\n\u0001\u200b\ufeff",
+    }).success).toBe(false);
     expect(BaDecisionInputSchema.parse({
       decision: "SLOW_SELL",
       reasonCode: "LOW_DELIVERY_RATE",

@@ -319,7 +319,7 @@ export function createPersistedDecisionWorkflow(
           ...(input.confidence === undefined ? {} : { confidence: input.confidence }),
           reasonCodes: [...input.reasonCodes],
           ...(input.plannedMethods === undefined ? {} : { plannedMethods: [...input.plannedMethods] }),
-          ...(input.note === undefined ? {} : { note: input.note }),
+          ...(input.notes === undefined ? {} : { notes: input.notes }),
         },
       });
     },

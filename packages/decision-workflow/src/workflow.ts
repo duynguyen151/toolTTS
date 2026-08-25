@@ -73,7 +73,7 @@ export interface DecisionWorkflowStore {
     readonly confidence?: number;
     readonly reasonCodes: readonly BaDecisionReasonCode[];
     readonly plannedMethods?: readonly BaPlannedMethod[];
-    readonly note?: string;
+    readonly notes?: string;
     readonly requestId: string;
   }): Promise<void>;
   recordDryRunExecution(input: {
@@ -281,6 +281,7 @@ export function createDecisionWorkflow(dependencies: {
         notes: input.notes,
       });
       const reasonCodes = parsed.reasonCodes ?? [parsed.reasonCode];
+      const notes = parsed.notes ?? parsed.note;
       await dependencies.store.recordBaDecision({
         requestId: input.requestId ?? newRequestId(),
         decisionCaseId: input.caseId,
@@ -289,7 +290,7 @@ export function createDecisionWorkflow(dependencies: {
         ...(parsed.confidence === undefined ? {} : { confidence: parsed.confidence }),
         reasonCodes,
         ...(parsed.plannedMethods === undefined ? {} : { plannedMethods: parsed.plannedMethods }),
-        ...(parsed.note === undefined ? {} : { note: parsed.note }),
+        ...(notes === undefined ? {} : { notes }),
       });
       return toDecisionReviewView(await dependencies.store.getDecisionReview(input.caseId));
     },

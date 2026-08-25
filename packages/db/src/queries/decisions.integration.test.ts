@@ -388,6 +388,29 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
         '["LOW_DELIVERY_RATE"]'::jsonb, '["OTHER"]'::jsonb, 'raw-sql-test'
       )
     `).rejects.toMatchObject({ constraint_name: "ba_decisions_planned_method_other_requires_notes" });
+    for (const notes of ["\t", "\n\r", "\u0001\u001f", "\u200b\ufeff", "\t\n\u0001\u200b\ufeff"]) {
+      await expect(context.sql`
+        insert into ba_decisions (
+          request_id, decision_case_id, decision, reason_code, reason_codes,
+          planned_methods, notes, actor
+        ) values (
+          ${randomUUID()}, ${firstCase.id}, 'SLOW_SELL', 'LOW_DELIVERY_RATE',
+          '["LOW_DELIVERY_RATE"]'::jsonb, '["OTHER"]'::jsonb, ${notes}, 'raw-sql-test'
+        )
+      `).rejects.toMatchObject({ constraint_name: "ba_decisions_notes_not_blank" });
+    }
+    const validRawNotes = "Giảm giá 5% / operator follow-up ✓";
+    const [validRawDecision] = await context.sql`
+      insert into ba_decisions (
+        request_id, decision_case_id, decision, reason_code, reason_codes,
+        planned_methods, notes, actor, created_at
+      ) values (
+        ${randomUUID()}, ${firstCase.id}, 'SLOW_SELL', 'LOW_DELIVERY_RATE',
+        '["LOW_DELIVERY_RATE"]'::jsonb, '["OTHER"]'::jsonb, ${validRawNotes}, 'raw-sql-test',
+        '2000-01-01T00:00:00.000Z'
+      ) returning notes
+    `;
+    expect(validRawDecision?.notes).toBe(validRawNotes);
 
     const executionRequestId = randomUUID();
     const execution = await recordDryRunExecution(context.db, {

@@ -66,9 +66,11 @@ const BANGKOK_OFFSET_MS = 7 * 60 * 60 * 1000;
 export function resolveAnalyticalDeliveryPeriod(key: AnalyticalDeliveryPeriodKey, now = new Date()): AnalyticalDeliveryPeriod {
   if (key === "ALL_AVAILABLE") return { key, label: "All Available (persisted source data; not lifetime completeness)", start: null, end: null };
   const local = new Date(now.getTime() + BANGKOK_OFFSET_MS);
-  const end = new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() + 1) - BANGKOK_OFFSET_MS);
+  const endLocal = new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() + 1));
+  const end = new Date(endLocal.getTime() - BANGKOK_OFFSET_MS);
   if (key === "TODAY") return { key, label: "Today (Asia/Bangkok)", start: new Date(end.getTime() - 86_400_000), end };
   if (key === "7D") return { key, label: "Last 7 days (Asia/Bangkok)", start: new Date(end.getTime() - 7 * 86_400_000), end };
   if (key === "30D") return { key, label: "Last 30 days (Asia/Bangkok)", start: new Date(end.getTime() - 30 * 86_400_000), end };
-  return { key, label: "Last 12 months (Asia/Bangkok)", start: new Date(Date.UTC(local.getUTCFullYear() - 1, local.getUTCMonth(), local.getUTCDate() + 1) - BANGKOK_OFFSET_MS), end };
+  const startLocal = new Date(Date.UTC(endLocal.getUTCFullYear() - 1, endLocal.getUTCMonth(), endLocal.getUTCDate()));
+  return { key, label: "Last 12 months (Asia/Bangkok)", start: new Date(startLocal.getTime() - BANGKOK_OFFSET_MS), end };
 }

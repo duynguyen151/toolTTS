@@ -4,6 +4,7 @@ import {
   AiDecisionInputSchema,
   BaDecisionInputSchema,
   BaDecisionSchema,
+  BaPlannedMethodSchema,
   CaptureBaDecisionInputSchema,
   CreateDecisionCaseInputSchema,
   DecisionCaseInputSchema,
@@ -83,10 +84,76 @@ describe("decision contracts", () => {
     }).success).toBe(false);
   });
 
-  it.each(["SCALE", "CONTINUE", "WATCH", "PAUSE"] as const)(
+  it.each(["SCALE", "CONTINUE", "WATCH", "PAUSE", "SLOW_SELL"] as const)(
     "accepts the BA decision %s",
     (decision) => {
       expect(BaDecisionSchema.parse(decision)).toBe(decision);
+    },
+  );
+
+  it.each(["DISABLE_FLASH_SALE", "INCREASE_PRICE", "OTHER"] as const)(
+    "accepts the planned method %s",
+    (method) => {
+      expect(BaPlannedMethodSchema.parse(method)).toBe(method);
+    },
+  );
+
+  it("accepts multiple unique planned methods for SLOW_SELL", () => {
+    expect(BaDecisionInputSchema.parse({
+      decision: "SLOW_SELL",
+      reasonCode: "LOW_DELIVERY_RATE",
+      plannedMethods: ["DISABLE_FLASH_SALE", "INCREASE_PRICE"],
+    }).plannedMethods).toEqual(["DISABLE_FLASH_SALE", "INCREASE_PRICE"]);
+  });
+
+  it("rejects missing, duplicate, or unknown SLOW_SELL planned methods", () => {
+    expect(BaDecisionInputSchema.safeParse({
+      decision: "SLOW_SELL",
+      reasonCode: "LOW_DELIVERY_RATE",
+    }).success).toBe(false);
+    expect(BaDecisionInputSchema.safeParse({
+      decision: "SLOW_SELL",
+      reasonCode: "LOW_DELIVERY_RATE",
+      plannedMethods: ["INCREASE_PRICE", "INCREASE_PRICE"],
+    }).success).toBe(false);
+    expect(BaDecisionInputSchema.safeParse({
+      decision: "SLOW_SELL",
+      reasonCode: "LOW_DELIVERY_RATE",
+      plannedMethods: ["UNKNOWN"],
+    }).success).toBe(false);
+  });
+
+  it("requires meaningful notes when the planned method is OTHER", () => {
+    expect(BaDecisionInputSchema.safeParse({
+      decision: "SLOW_SELL",
+      reasonCode: "LOW_DELIVERY_RATE",
+      plannedMethods: ["OTHER"],
+    }).success).toBe(false);
+    expect(BaDecisionInputSchema.safeParse({
+      decision: "SLOW_SELL",
+      reasonCode: "LOW_DELIVERY_RATE",
+      plannedMethods: ["OTHER"],
+      notes: "   ",
+    }).success).toBe(false);
+    expect(BaDecisionInputSchema.parse({
+      decision: "SLOW_SELL",
+      reasonCode: "LOW_DELIVERY_RATE",
+      plannedMethods: ["OTHER", "DISABLE_FLASH_SALE"],
+      notes: "  Review another operator-led option.  ",
+    })).toMatchObject({
+      plannedMethods: ["OTHER", "DISABLE_FLASH_SALE"],
+      notes: "Review another operator-led option.",
+    });
+  });
+
+  it.each(["SCALE", "CONTINUE", "WATCH", "PAUSE"] as const)(
+    "rejects planned methods for non-SLOW_SELL decision %s",
+    (decision) => {
+      expect(BaDecisionInputSchema.safeParse({
+        decision,
+        reasonCode: "LOW_DELIVERY_RATE",
+        plannedMethods: ["INCREASE_PRICE"],
+      }).success).toBe(false);
     },
   );
 

@@ -318,6 +318,7 @@ export function createPersistedDecisionWorkflow(
           reasonCode: input.reasonCode,
           ...(input.confidence === undefined ? {} : { confidence: input.confidence }),
           reasonCodes: [...input.reasonCodes],
+          ...(input.plannedMethods === undefined ? {} : { plannedMethods: [...input.plannedMethods] }),
           ...(input.note === undefined ? {} : { note: input.note }),
         },
       });

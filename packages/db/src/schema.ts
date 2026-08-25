@@ -21,6 +21,7 @@ import type {
   AiFailureCode,
   AiDecisionContext,
   BaDecisionReasonCode,
+  BaPlannedMethod,
   DecisionCoverageSnapshot,
   DecisionFinanceSnapshot,
   DecisionMetricsSnapshot,
@@ -106,7 +107,8 @@ export const baDecisionEnum = pgEnum("ba_decision", [
   "SCALE",
   "CONTINUE",
   "WATCH",
-  "PAUSE"
+  "PAUSE",
+  "SLOW_SELL"
 ]);
 
 export const decisionDataOriginEnum = pgEnum("decision_data_origin", [
@@ -763,6 +765,7 @@ export const baDecisions = pgTable(
     reasonCode: text("reason_code").$type<BaDecisionReasonCode>().notNull().default("OTHER"),
     confidence: numeric("confidence", { precision: 7, scale: 6 }),
     reasonCodes: jsonb("reason_codes").$type<BaDecisionReasonCode[]>().notNull(),
+    plannedMethods: jsonb("planned_methods").$type<BaPlannedMethod[]>(),
     note: text("note"),
     notes: text("notes"),
     actor: text("actor").notNull().default("LEGACY_UNATTRIBUTED"),
@@ -782,6 +785,27 @@ export const baDecisions = pgTable(
       sql`${table.confidence} is null or (${table.confidence} >= 0 and ${table.confidence} <= 1)`
     ),
     check("ba_decisions_reason_codes_array", sql`jsonb_typeof(${table.reasonCodes}) = 'array'`),
+    check(
+      "ba_decisions_planned_methods_valid",
+      sql`case
+        when ${table.decision}::text = 'SLOW_SELL' then
+          ${table.plannedMethods} is not null
+          and jsonb_typeof(${table.plannedMethods}) = 'array'
+          and jsonb_array_length(${table.plannedMethods}) > 0
+          and ${table.plannedMethods} <@ '["DISABLE_FLASH_SALE", "INCREASE_PRICE", "OTHER"]'::jsonb
+          and jsonb_array_length(${table.plannedMethods}) =
+            case when ${table.plannedMethods} ? 'DISABLE_FLASH_SALE' then 1 else 0 end
+            + case when ${table.plannedMethods} ? 'INCREASE_PRICE' then 1 else 0 end
+            + case when ${table.plannedMethods} ? 'OTHER' then 1 else 0 end
+        else ${table.plannedMethods} is null
+      end`
+    ),
+    check(
+      "ba_decisions_planned_method_other_requires_notes",
+      sql`${table.plannedMethods} is null
+        or not (${table.plannedMethods} ? 'OTHER')
+        or coalesce(${table.notes}, ${table.note}) is not null`
+    ),
     check("ba_decisions_note_not_blank", sql`${table.note} is null or length(btrim(${table.note})) > 0`),
     check("ba_decisions_notes_not_blank", sql`${table.notes} is null or length(btrim(${table.notes})) > 0`),
     check("ba_decisions_actor_not_blank", sql`length(btrim(${table.actor})) > 0`),

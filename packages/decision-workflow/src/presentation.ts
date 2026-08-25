@@ -1,6 +1,7 @@
 import type {
   BaDecision,
   BaDecisionReasonCode,
+  BaPlannedMethod,
   DecisionCoverageSnapshot,
   DecisionDataCoverage,
   DecisionRuleResult,
@@ -115,6 +116,7 @@ export interface PersistedDecisionReview {
     readonly decision: BaDecision;
     readonly confidence: number | null;
     readonly reasonCodes: readonly BaDecisionReasonCode[];
+    readonly plannedMethods: readonly BaPlannedMethod[] | null;
     readonly note: string | null;
     readonly decidedAt: Date;
   } | null;
@@ -185,6 +187,7 @@ export interface DecisionReviewView {
         readonly decision: BaDecision;
         readonly confidence: number | null;
         readonly reasonCodes: readonly BaDecisionReasonCode[];
+        readonly plannedMethods: readonly BaPlannedMethod[] | null;
         readonly note: string | null;
         readonly decidedAt: string;
       }
@@ -256,6 +259,7 @@ export function toDecisionReviewView(review: PersistedDecisionReview): DecisionR
           decision: review.ba.decision,
           confidence: review.ba.confidence,
           reasonCodes: review.ba.reasonCodes,
+          plannedMethods: review.ba.plannedMethods,
           note: review.ba.note,
           decidedAt: review.ba.decidedAt.toISOString(),
         },

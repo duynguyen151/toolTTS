@@ -309,6 +309,86 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
       baDecision.id,
     ]);
 
+    const slowSellDecision = await recordBaDecisionForCase(context.db, {
+      requestId: randomUUID(),
+      decisionCaseId: firstCase.id,
+      baDecision: {
+        decision: "SLOW_SELL",
+        reasonCode: "LOW_DELIVERY_RATE",
+        plannedMethods: ["DISABLE_FLASH_SALE", "INCREASE_PRICE"],
+      },
+    });
+    expect((await recordBaDecisionForCase(context.db, {
+      requestId: slowSellDecision.requestId,
+      decisionCaseId: firstCase.id,
+      baDecision: {
+        decision: "SLOW_SELL",
+        reasonCode: "LOW_DELIVERY_RATE",
+        plannedMethods: ["DISABLE_FLASH_SALE", "INCREASE_PRICE"],
+      },
+    })).id).toBe(slowSellDecision.id);
+    await expect(recordBaDecisionForCase(context.db, {
+      requestId: slowSellDecision.requestId,
+      decisionCaseId: firstCase.id,
+      baDecision: {
+        decision: "SLOW_SELL",
+        reasonCode: "LOW_DELIVERY_RATE",
+        plannedMethods: ["OTHER"],
+        notes: "Different retry intent",
+      },
+    })).rejects.toThrow("different input");
+    const slowSellReview = await getDecisionReview(context.db, firstCase.id);
+    expect(slowSellReview?.ba).toMatchObject({
+      id: slowSellDecision.id,
+      decision: "SLOW_SELL",
+      plannedMethods: ["DISABLE_FLASH_SALE", "INCREASE_PRICE"],
+    });
+    expect(slowSellReview?.baHistory.map((revision) => ({
+      id: revision.id,
+      plannedMethods: revision.plannedMethods,
+    }))).toEqual([
+      { id: slowSellDecision.id, plannedMethods: ["DISABLE_FLASH_SALE", "INCREASE_PRICE"] },
+      { id: latestBaDecision.id, plannedMethods: null },
+      { id: baDecision.id, plannedMethods: null },
+    ]);
+    await expect(context.sql`
+      update ba_decisions set planned_methods = '["OTHER"]'::jsonb where id = ${slowSellDecision.id}
+    `).rejects.toThrow("ba_decisions is append-only");
+    await expect(recordDryRunExecution(context.db, {
+      requestId: randomUUID(),
+      decisionCaseId: firstCase.id,
+      baDecisionId: slowSellDecision.id,
+      requestedAction: "HOLIDAY_MODE_ON",
+      executionMode: "DRY_RUN",
+    })).rejects.toThrow("requires a PAUSE BA decision");
+    for (const invalid of [
+      { decision: "SLOW_SELL", plannedMethods: null },
+      { decision: "SLOW_SELL", plannedMethods: [] },
+      { decision: "SLOW_SELL", plannedMethods: ["INCREASE_PRICE", "INCREASE_PRICE"] },
+      { decision: "SLOW_SELL", plannedMethods: ["UNKNOWN"] },
+      { decision: "WATCH", plannedMethods: ["INCREASE_PRICE"] },
+    ] as const) {
+      await expect(context.sql`
+        insert into ba_decisions (
+          request_id, decision_case_id, decision, reason_code, reason_codes,
+          planned_methods, actor
+        ) values (
+          ${randomUUID()}, ${firstCase.id}, ${invalid.decision}, 'LOW_DELIVERY_RATE',
+          '["LOW_DELIVERY_RATE"]'::jsonb, ${JSON.stringify(invalid.plannedMethods)}::jsonb,
+          'raw-sql-test'
+        )
+      `).rejects.toMatchObject({ constraint_name: "ba_decisions_planned_methods_valid" });
+    }
+    await expect(context.sql`
+      insert into ba_decisions (
+        request_id, decision_case_id, decision, reason_code, reason_codes,
+        planned_methods, actor
+      ) values (
+        ${randomUUID()}, ${firstCase.id}, 'SLOW_SELL', 'LOW_DELIVERY_RATE',
+        '["LOW_DELIVERY_RATE"]'::jsonb, '["OTHER"]'::jsonb, 'raw-sql-test'
+      )
+    `).rejects.toMatchObject({ constraint_name: "ba_decisions_planned_method_other_requires_notes" });
+
     const executionRequestId = randomUUID();
     const execution = await recordDryRunExecution(context.db, {
       requestId: executionRequestId,
@@ -337,7 +417,11 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
         },
       },
       ai: { status: "UNAVAILABLE", failureCode: "CONFIG_MISSING" },
-      ba: { id: latestBaDecision.id, decision: "WATCH" },
+      ba: {
+        id: slowSellDecision.id,
+        decision: "SLOW_SELL",
+        plannedMethods: ["DISABLE_FLASH_SALE", "INCREASE_PRICE"],
+      },
       execution: {
         requestedAction: "HOLIDAY_MODE_ON",
         mode: "DRY_RUN",

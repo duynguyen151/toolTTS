@@ -16,6 +16,7 @@ import {
   type AiDecisionContext,
   type BaDecision,
   type BaDecisionReasonCode,
+  type BaPlannedMethod,
   type CaptureBaDecisionInput,
   type CreateDecisionCaseInput,
   type DecisionDataCoverage,
@@ -70,6 +71,7 @@ export interface DecisionBaRevision {
   reasonCode: BaDecisionReasonCode;
   confidence: number | null;
   reasonCodes: BaDecisionReasonCode[];
+  plannedMethods: BaPlannedMethod[] | null;
   note: string | null;
   notes: string | null;
   actor: string;
@@ -174,6 +176,7 @@ export interface DecisionReviewRecord {
     reasonCode: BaDecisionReasonCode;
     confidence: number | null;
     reasonCodes: BaDecisionReasonCode[];
+    plannedMethods: BaPlannedMethod[] | null;
     note: string | null;
     notes: string | null;
     actor: string;
@@ -538,6 +541,7 @@ export async function recordBaDecisionForCase(
       ? null
       : parsed.baDecision.confidence.toString(),
     reasonCodes: ba.reasonCodes,
+    plannedMethods: parsed.baDecision.plannedMethods ?? null,
     note: ba.note ?? null,
     notes: ba.note ?? null,
     actor,
@@ -552,8 +556,9 @@ export async function recordBaDecisionForCase(
     existing.decision !== parsed.baDecision.decision ||
     (existing.confidence === null ? undefined : Number(existing.confidence))
       !== parsed.baDecision.confidence ||
-    !isDeepStrictEqual(existing.reasonCodes, parsed.baDecision.reasonCodes) ||
-    existing.note !== (parsed.baDecision.note ?? null)
+    !isDeepStrictEqual(existing.reasonCodes, parsed.baDecision.reasonCodes ?? [parsed.baDecision.reasonCode]) ||
+    !isDeepStrictEqual(existing.plannedMethods, parsed.baDecision.plannedMethods ?? null) ||
+    existing.note !== (parsed.baDecision.notes ?? parsed.baDecision.note ?? null)
   ) {
     throw new Error("BA request ID was already used with different input");
   }
@@ -793,6 +798,7 @@ function makeReview(
       reasonCode: baDecision.reasonCode,
       confidence: baDecision.confidence === null ? null : Number(baDecision.confidence),
       reasonCodes: baDecision.reasonCodes,
+      plannedMethods: baDecision.plannedMethods,
       note: baDecision.note,
       notes: baDecision.notes,
       actor: baDecision.actor,
@@ -804,6 +810,7 @@ function makeReview(
       reasonCode: revision.reasonCode,
       confidence: revision.confidence === null ? null : Number(revision.confidence),
       reasonCodes: revision.reasonCodes,
+      plannedMethods: revision.plannedMethods,
       note: revision.note,
       notes: revision.notes,
       actor: revision.actor,
@@ -964,6 +971,7 @@ export async function captureBaDecision(
         ? null
         : parsed.baDecision.confidence.toString(),
       reasonCodes: ba.reasonCodes,
+      plannedMethods: parsed.baDecision.plannedMethods ?? null,
       note: ba.note ?? null,
       notes: ba.note ?? null,
       actor,

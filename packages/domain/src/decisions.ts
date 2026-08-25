@@ -14,6 +14,13 @@ export const BaDecisionSchema = z.enum([
   "CONTINUE",
   "WATCH",
   "PAUSE",
+  "SLOW_SELL",
+]);
+
+export const BaPlannedMethodSchema = z.enum([
+  "DISABLE_FLASH_SALE",
+  "INCREASE_PRICE",
+  "OTHER",
 ]);
 
 export const DecisionDataOriginSchema = z.enum(["LIVE", "DEMO_SANITIZED"]);
@@ -258,6 +265,13 @@ const BaReasonCodesInputSchema = z
     message: "BA reason codes must not contain duplicates",
   });
 
+const BaPlannedMethodsInputSchema = z
+  .array(BaPlannedMethodSchema)
+  .min(1)
+  .refine((values) => new Set(values).size === values.length, {
+    message: "BA planned methods must not contain duplicates",
+  });
+
 export const BaDecisionInputSchema = z
   .object({
     decision: BaDecisionSchema,
@@ -265,6 +279,7 @@ export const BaDecisionInputSchema = z
     // reasonCodes/note are retained as a compatibility input for existing V1 callers.
     reasonCode: BaDecisionReasonCodeSchema,
     reasonCodes: BaReasonCodesInputSchema.optional(),
+    plannedMethods: BaPlannedMethodsInputSchema.optional(),
     notes: z.string().trim().min(1).optional(),
     note: z.string().trim().min(1).optional(),
   })
@@ -279,6 +294,15 @@ export const BaDecisionInputSchema = z
     }
     if (reasonCode === "OTHER" && value.notes === undefined && value.note === undefined) {
       context.addIssue({ code: "custom", path: ["notes"], message: "BA notes are required for OTHER" });
+    }
+    if (value.decision === "SLOW_SELL" && value.plannedMethods === undefined) {
+      context.addIssue({ code: "custom", path: ["plannedMethods"], message: "SLOW_SELL requires at least one planned method" });
+    }
+    if (value.decision !== "SLOW_SELL" && value.plannedMethods !== undefined) {
+      context.addIssue({ code: "custom", path: ["plannedMethods"], message: "Only SLOW_SELL can have planned methods" });
+    }
+    if (value.plannedMethods?.includes("OTHER") === true && value.notes === undefined && value.note === undefined) {
+      context.addIssue({ code: "custom", path: ["notes"], message: "BA notes are required for planned method OTHER" });
     }
     if (value.notes !== undefined && value.note !== undefined && value.notes !== value.note) {
       context.addIssue({ code: "custom", path: ["notes"], message: "BA notes must match note" });
@@ -428,6 +452,7 @@ export function mapRiskResultToRuleDecision(
 }
 
 export type BaDecision = z.infer<typeof BaDecisionSchema>;
+export type BaPlannedMethod = z.infer<typeof BaPlannedMethodSchema>;
 export type BaDecisionReasonCode = z.infer<typeof BaDecisionReasonCodeSchema>;
 export type DecisionDataOrigin = z.infer<typeof DecisionDataOriginSchema>;
 export type DecisionDataCoverage = z.infer<typeof DecisionDataCoverageSchema>;

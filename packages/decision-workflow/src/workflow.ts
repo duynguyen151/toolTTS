@@ -20,7 +20,7 @@ import type {
   BaselineAiInputRecord,
   BaselineAiResult,
 } from "@shop-health/decision-ai";
-import type { BaDecision, BaDecisionReasonCode } from "@shop-health/domain";
+import type { BaDecision, BaDecisionReasonCode, BaPlannedMethod } from "@shop-health/domain";
 
 import {
   toDecisionHistoryPage,
@@ -72,6 +72,7 @@ export interface DecisionWorkflowStore {
     readonly reasonCode: BaDecisionReasonCode;
     readonly confidence?: number;
     readonly reasonCodes: readonly BaDecisionReasonCode[];
+    readonly plannedMethods?: readonly BaPlannedMethod[];
     readonly note?: string;
     readonly requestId: string;
   }): Promise<void>;
@@ -113,6 +114,7 @@ export interface DecisionWorkflow {
     readonly confidence?: number;
     readonly reasonCodes?: readonly BaDecisionReasonCode[];
     readonly reasonCode: BaDecisionReasonCode;
+    readonly plannedMethods?: readonly BaPlannedMethod[];
     readonly note?: string;
     readonly notes?: string;
     readonly requestId?: string;
@@ -274,6 +276,7 @@ export function createDecisionWorkflow(dependencies: {
         confidence: input.confidence,
         reasonCode: input.reasonCode,
         reasonCodes: input.reasonCodes,
+        plannedMethods: input.plannedMethods,
         note: input.note,
         notes: input.notes,
       });
@@ -285,6 +288,7 @@ export function createDecisionWorkflow(dependencies: {
         reasonCode: parsed.reasonCode,
         ...(parsed.confidence === undefined ? {} : { confidence: parsed.confidence }),
         reasonCodes,
+        ...(parsed.plannedMethods === undefined ? {} : { plannedMethods: parsed.plannedMethods }),
         ...(parsed.note === undefined ? {} : { note: parsed.note }),
       });
       return toDecisionReviewView(await dependencies.store.getDecisionReview(input.caseId));

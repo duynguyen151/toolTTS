@@ -262,6 +262,7 @@ function createStore(): DecisionWorkflowStore & {
           decision: input.decision,
           confidence: input.confidence ?? null,
           reasonCodes: input.reasonCodes,
+          plannedMethods: input.plannedMethods ?? null,
           note: input.note ?? null,
           decidedAt: now,
         },
@@ -418,6 +419,18 @@ describe("decision workflow", () => {
       decision: "WATCH",
       reasonCode: "DATA_INCOMPLETE",
       reasonCodes: ["DATA_INCOMPLETE"],
+    });
+    await expect(workflow.execute({ caseId, confirm: true })).rejects.toEqual(
+      expect.objectContaining<Partial<DecisionWorkflowError>>({ code: "PAUSE_DECISION_REQUIRED" }),
+    );
+    expect(store.executionRecords).toHaveLength(0);
+
+    await workflow.decide({
+      caseId,
+      decision: "SLOW_SELL",
+      reasonCode: "LOW_DELIVERY_RATE",
+      reasonCodes: ["LOW_DELIVERY_RATE"],
+      plannedMethods: ["DISABLE_FLASH_SALE"],
     });
     await expect(workflow.execute({ caseId, confirm: true })).rejects.toEqual(
       expect.objectContaining<Partial<DecisionWorkflowError>>({ code: "PAUSE_DECISION_REQUIRED" }),

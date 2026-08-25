@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   AiDecisionContextSchema,
+  BaDecisionRevisionSchema,
   BaReviewCommandSchema,
   MetricComparisonSchema,
   ReviewQueueReasonSchema,
@@ -22,6 +23,33 @@ describe("V1 shared contracts", () => {
     expect(ReviewQueueReasonSchema.parse("RULE_AI_DISAGREEMENT")).toBe(
       "RULE_AI_DISAGREEMENT",
     );
+  });
+
+  it("round-trips SLOW_SELL planned methods in BA revisions", () => {
+    expect(BaDecisionRevisionSchema.parse({
+      id: "00000000-0000-4000-8000-000000000010",
+      decisionCaseId: "00000000-0000-4000-8000-000000000011",
+      decision: "SLOW_SELL",
+      reasonCode: "LOW_DELIVERY_RATE",
+      reasonCodes: ["LOW_DELIVERY_RATE"],
+      plannedMethods: ["DISABLE_FLASH_SALE", "INCREASE_PRICE"],
+      notes: null,
+      actor: "test-ba",
+      decidedAt: "2026-08-14T00:00:00.000Z",
+    }).plannedMethods).toEqual(["DISABLE_FLASH_SALE", "INCREASE_PRICE"]);
+  });
+
+  it("keeps old BA revisions valid with null planned methods", () => {
+    expect(BaDecisionRevisionSchema.parse({
+      id: "00000000-0000-4000-8000-000000000012",
+      decisionCaseId: "00000000-0000-4000-8000-000000000011",
+      decision: "WATCH",
+      reasonCode: "DATA_INCOMPLETE",
+      reasonCodes: ["DATA_INCOMPLETE"],
+      notes: null,
+      actor: "LEGACY_UNATTRIBUTED",
+      decidedAt: "2026-08-14T00:00:00.000Z",
+    }).plannedMethods).toBeNull();
   });
 
   it("keeps dashboard snapshot decision layers separate", () => {

@@ -338,6 +338,7 @@ describe("captureBaDecision", () => {
         reasonCode: "HIGH_ABSOLUTE_EXPOSURE",
         confidence: "0.75",
         reasonCodes: ["HIGH_ABSOLUTE_EXPOSURE"],
+        plannedMethods: null,
         note: "Monitor settlement",
         notes: "Monitor settlement",
         actor: "test-ba",
@@ -752,6 +753,85 @@ describe("decision workflow persistence boundaries", () => {
         failureCode: "MISSING_API_KEY",
       } as never),
     ).rejects.toBeInstanceOf(ZodError);
+  });
+
+  it("persists SLOW_SELL planned methods as operator intent only", async () => {
+    const inserted: unknown[] = [];
+    const row = {
+      id: "00000000-0000-4000-8000-000000000030",
+      requestId: "00000000-0000-4000-8000-000000000031",
+      decisionCaseId: "00000000-0000-4000-8000-000000000021",
+      decision: "SLOW_SELL" as const,
+      reasonCode: "LOW_DELIVERY_RATE" as const,
+      confidence: null,
+      reasonCodes: ["LOW_DELIVERY_RATE"] as const,
+      plannedMethods: ["DISABLE_FLASH_SALE", "INCREASE_PRICE"] as const,
+      note: null,
+      notes: null,
+      actor: "test-ba",
+      createdAt: new Date("2026-08-14T00:01:00.000Z"),
+    };
+    const db = {
+      insert(table: unknown) {
+        expect(table).toBe(baDecisions);
+        return {
+          values(values: unknown) {
+            inserted.push(values);
+            return {
+              onConflictDoNothing() {
+                return { async returning() { return [row]; } };
+              },
+            };
+          },
+        };
+      },
+    } as unknown as Database;
+
+    await expect(recordBaDecisionForCase(db, {
+      requestId: row.requestId,
+      decisionCaseId: row.decisionCaseId,
+      baDecision: {
+        decision: "SLOW_SELL",
+        reasonCode: "LOW_DELIVERY_RATE",
+        plannedMethods: ["DISABLE_FLASH_SALE", "INCREASE_PRICE"],
+      },
+    })).resolves.toBe(row);
+    expect(inserted).toEqual([expect.objectContaining({
+      decision: "SLOW_SELL",
+      plannedMethods: ["DISABLE_FLASH_SALE", "INCREASE_PRICE"],
+    })]);
+  });
+
+  it("rejects SLOW_SELL Holiday Mode execution before creating an execution", async () => {
+    let insertCalled = false;
+    const db = {
+      transaction: async (callback: (transaction: unknown) => Promise<unknown>) => callback({
+        select() {
+          return {
+            from() {
+              return {
+                where() {
+                  return { async limit() { return [{ decision: "SLOW_SELL" }]; } };
+                },
+              };
+            },
+          };
+        },
+        insert() {
+          insertCalled = true;
+          throw new Error("execution insert must not be reached");
+        },
+      }),
+    } as unknown as Database;
+
+    await expect(recordDryRunExecution(db, {
+      requestId: "00000000-0000-4000-8000-000000000032",
+      decisionCaseId: "00000000-0000-4000-8000-000000000021",
+      baDecisionId: "00000000-0000-4000-8000-000000000030",
+      requestedAction: "HOLIDAY_MODE_ON",
+      executionMode: "DRY_RUN",
+    })).rejects.toThrow("requires a PAUSE BA decision");
+    expect(insertCalled).toBe(false);
   });
 
   it("validates BA and execution request IDs before touching the database", async () => {

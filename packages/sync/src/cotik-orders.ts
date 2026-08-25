@@ -101,6 +101,9 @@ export async function runCotikOrdersSync(input: RunCotikOrdersSyncInput): Promis
       // ingestCotikOrders invokes this exactly once, after ALL pages succeed.
       saveCheckpoint: async (checkpoint) => {
         savedBinding = await updateShopProviderBindingCheckpoint(context.db, shop.id, "COTIK", checkpoint);
+        if (savedBinding === null) {
+          throw new Error("COTIK binding became inactive before its checkpoint could be committed");
+        }
       },
       ...(input.now === undefined ? {} : { now: input.now }),
       ...(input.pageSize === undefined ? {} : { pageSize: input.pageSize })

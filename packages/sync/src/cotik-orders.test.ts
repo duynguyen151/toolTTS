@@ -78,6 +78,19 @@ describe("runCotikOrdersSync binding-driven COTIK order sync", () => {
     expect(result.binding!.checkpoint).toEqual(result.checkpoint ? { ...result.checkpoint } : null);
   });
 
+  it("fails closed when the binding disappears before its checkpoint can be committed", async () => {
+    db.findEnabledShopProviderBinding.mockResolvedValue(cotikBinding());
+    db.upsertOrderBatch.mockResolvedValue({ rowsRead: 1, rowsWritten: 1 });
+    db.updateShopProviderBindingCheckpoint.mockResolvedValue(null);
+    const client = pageClient([{ listorders: [rawCotikOrder("o1")], totalsize: 1 }]);
+
+    await expect(
+      runCotikOrdersSync({ context: {} as DatabaseContext, shop: shopRow(), client: client as unknown as CotikClient, now }),
+    ).rejects.toThrow(/binding.*checkpoint/i);
+
+    expect(db.updateShopProviderBindingCheckpoint).toHaveBeenCalledTimes(1);
+  });
+
   it("threads the stored binding checkpoint into incremental update polling", async () => {
     const stored = { schemaVersion: COTIK_ORDERS_CHECKPOINT_SCHEMA_VERSION, lastUpdatedAtMs: FIXED_NOW.valueOf() - 5_000 };
     db.findEnabledShopProviderBinding.mockResolvedValue(cotikBinding(stored));

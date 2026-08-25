@@ -514,7 +514,7 @@ export const riskPolicyRevisions = pgTable(
   "risk_policy_revisions",
   {
     revisionId: uuid("revision_id").defaultRandom().primaryKey(),
-    sequence: bigint("sequence", { mode: "number" }).generatedAlwaysAsIdentity(),
+    sequence: bigint("sequence", { mode: "bigint" }).generatedAlwaysAsIdentity(),
     scope: riskPolicyScopeEnum("scope").notNull(),
     shopId: uuid("shop_id").references(() => shops.id, {
       onDelete: "restrict",
@@ -541,7 +541,121 @@ export const riskPolicyRevisions = pgTable(
       sql`(${table.scope} = 'GLOBAL' and ${table.shopId} is null and ${table.enabled})
         or (${table.scope} = 'SHOP' and ${table.shopId} is not null)`,
     ),
-    check("risk_policy_revisions_payload_object", sql`jsonb_typeof(${table.payload}) = 'object'`),
+    check(
+      "risk_policy_revisions_effective_from_finite",
+      sql`${table.effectiveFrom} not in ('infinity'::timestamptz, '-infinity'::timestamptz)`,
+    ),
+    check(
+      "risk_policy_revisions_payload_valid",
+      sql`
+        case
+          when ${table.scope} = 'GLOBAL' then
+            jsonb_typeof(${table.payload}) = 'object'
+            and ${table.payload} ?& array['version', 'currency', 'thresholds', 'caution']
+            and (${table.payload} - array['version', 'currency', 'thresholds', 'caution']) = '{}'::jsonb
+            and jsonb_typeof(${table.payload}->'version') = 'string'
+            and length(btrim(${table.payload}->>'version')) > 0
+            and jsonb_typeof(${table.payload}->'currency') = 'string'
+            and (${table.payload}->>'currency') ~ '^[A-Z]{3}$'
+            and jsonb_typeof(${table.payload}->'thresholds') = 'object'
+            and (${table.payload}->'thresholds') ?& array[
+              'stopOnHoldValueAt', 'stopDeliveryRateBelow', 'minimumOrdersForRateRule',
+              'resumeOnHoldValueBelow', 'resumeDeliveryRateAt', 'stableCyclesBeforeResume'
+            ]
+            and ((${table.payload}->'thresholds') - array[
+              'stopOnHoldValueAt', 'stopDeliveryRateBelow', 'minimumOrdersForRateRule',
+              'resumeOnHoldValueBelow', 'resumeDeliveryRateAt', 'stableCyclesBeforeResume'
+            ]) = '{}'::jsonb
+            and jsonb_typeof(${table.payload}->'caution') = 'object'
+            and (${table.payload}->'caution') ?& array['onHoldValue', 'deliveryRate']
+            and ((${table.payload}->'caution') - array['onHoldValue', 'deliveryRate']) = '{}'::jsonb
+          when ${table.scope} = 'SHOP' and not ${table.enabled} then
+            ${table.payload} = '{"thresholds": {}, "caution": {}}'::jsonb
+          when ${table.scope} = 'SHOP' then
+            jsonb_typeof(${table.payload}) = 'object'
+            and ${table.payload} ?& array['thresholds', 'caution']
+            and (${table.payload} - array['thresholds', 'caution']) = '{}'::jsonb
+            and jsonb_typeof(${table.payload}->'thresholds') = 'object'
+            and ((${table.payload}->'thresholds') - array[
+              'stopOnHoldValueAt', 'stopDeliveryRateBelow', 'minimumOrdersForRateRule',
+              'resumeOnHoldValueBelow', 'resumeDeliveryRateAt', 'stableCyclesBeforeResume'
+            ]) = '{}'::jsonb
+            and jsonb_typeof(${table.payload}->'caution') = 'object'
+            and ((${table.payload}->'caution') - array['onHoldValue', 'deliveryRate']) = '{}'::jsonb
+          else false
+        end
+        and case when (${table.payload}->'thresholds') ? 'stopOnHoldValueAt' then
+          jsonb_typeof(${table.payload}->'thresholds'->'stopOnHoldValueAt') = 'string'
+          and (${table.payload}->'thresholds'->>'stopOnHoldValueAt') ~ '^[0-9]+([.][0-9]+)?$'
+        else true end
+        and case when (${table.payload}->'thresholds') ? 'resumeOnHoldValueBelow' then
+          jsonb_typeof(${table.payload}->'thresholds'->'resumeOnHoldValueBelow') = 'string'
+          and (${table.payload}->'thresholds'->>'resumeOnHoldValueBelow') ~ '^[0-9]+([.][0-9]+)?$'
+        else true end
+        and case when (${table.payload}->'thresholds') ? 'stopDeliveryRateBelow' then
+          jsonb_typeof(${table.payload}->'thresholds'->'stopDeliveryRateBelow') = 'number'
+          and (${table.payload}->'thresholds'->>'stopDeliveryRateBelow')::numeric between 0 and 1
+        else true end
+        and case when (${table.payload}->'thresholds') ? 'resumeDeliveryRateAt' then
+          jsonb_typeof(${table.payload}->'thresholds'->'resumeDeliveryRateAt') = 'number'
+          and (${table.payload}->'thresholds'->>'resumeDeliveryRateAt')::numeric between 0 and 1
+        else true end
+        and case when (${table.payload}->'thresholds') ? 'minimumOrdersForRateRule' then
+          jsonb_typeof(${table.payload}->'thresholds'->'minimumOrdersForRateRule') = 'number'
+          and (${table.payload}->'thresholds'->>'minimumOrdersForRateRule')::numeric >= 0
+          and mod((${table.payload}->'thresholds'->>'minimumOrdersForRateRule')::numeric, 1) = 0
+          and (${table.payload}->'thresholds'->>'minimumOrdersForRateRule')::numeric <= 9007199254740991
+        else true end
+        and case when (${table.payload}->'thresholds') ? 'stableCyclesBeforeResume' then
+          jsonb_typeof(${table.payload}->'thresholds'->'stableCyclesBeforeResume') = 'number'
+          and (${table.payload}->'thresholds'->>'stableCyclesBeforeResume')::numeric > 0
+          and mod((${table.payload}->'thresholds'->>'stableCyclesBeforeResume')::numeric, 1) = 0
+          and (${table.payload}->'thresholds'->>'stableCyclesBeforeResume')::numeric <= 9007199254740991
+        else true end
+        and case when (${table.payload}->'caution') ? 'onHoldValue' then
+          jsonb_typeof(${table.payload}->'caution'->'onHoldValue') = 'object'
+          and case ${table.payload}->'caution'->'onHoldValue'->>'mode'
+            when 'DISABLED' then ${table.payload}->'caution'->'onHoldValue' = '{"mode": "DISABLED"}'::jsonb
+            when 'ABSOLUTE_BUFFER' then
+              ${table.payload}->'caution'->'onHoldValue' ?& array['mode', 'buffer']
+              and jsonb_typeof(${table.payload}->'caution'->'onHoldValue'->'buffer') = 'string'
+              and (${table.payload}->'caution'->'onHoldValue'->>'buffer') ~ '^[0-9]+([.][0-9]+)?$'
+              and ((${table.payload}->'caution'->'onHoldValue') - array['mode', 'buffer']) = '{}'::jsonb
+            when 'RELATIVE_RATIO' then
+              ${table.payload}->'caution'->'onHoldValue' ?& array['mode', 'ratio']
+              and jsonb_typeof(${table.payload}->'caution'->'onHoldValue'->'ratio') = 'number'
+              and (${table.payload}->'caution'->'onHoldValue'->>'ratio')::numeric > 0
+              and (${table.payload}->'caution'->'onHoldValue'->>'ratio')::numeric <= 1
+              and ((${table.payload}->'caution'->'onHoldValue') - array['mode', 'ratio']) = '{}'::jsonb
+            else false
+          end
+        else true end
+        and case when (${table.payload}->'caution') ? 'deliveryRate' then
+          jsonb_typeof(${table.payload}->'caution'->'deliveryRate') = 'object'
+          and case ${table.payload}->'caution'->'deliveryRate'->>'mode'
+            when 'DISABLED' then ${table.payload}->'caution'->'deliveryRate' = '{"mode": "DISABLED"}'::jsonb
+            when 'ABSOLUTE_BUFFER' then
+              ${table.payload}->'caution'->'deliveryRate' ?& array['mode', 'buffer']
+              and jsonb_typeof(${table.payload}->'caution'->'deliveryRate'->'buffer') = 'string'
+              and (${table.payload}->'caution'->'deliveryRate'->>'buffer') ~ '^[0-9]+([.][0-9]+)?$'
+              and ((${table.payload}->'caution'->'deliveryRate') - array['mode', 'buffer']) = '{}'::jsonb
+            when 'RELATIVE_RATIO' then
+              ${table.payload}->'caution'->'deliveryRate' ?& array['mode', 'ratio']
+              and jsonb_typeof(${table.payload}->'caution'->'deliveryRate'->'ratio') = 'number'
+              and (${table.payload}->'caution'->'deliveryRate'->>'ratio')::numeric > 0
+              and (${table.payload}->'caution'->'deliveryRate'->>'ratio')::numeric <= 1
+              and ((${table.payload}->'caution'->'deliveryRate') - array['mode', 'ratio']) = '{}'::jsonb
+            else false
+          end
+        else true end
+        and case when ${table.scope} = 'GLOBAL' then
+          (${table.payload}->'thresholds'->>'resumeDeliveryRateAt')::numeric >=
+            (${table.payload}->'thresholds'->>'stopDeliveryRateBelow')::numeric
+          and (${table.payload}->'thresholds'->>'resumeOnHoldValueBelow')::numeric <=
+            (${table.payload}->'thresholds'->>'stopOnHoldValueAt')::numeric
+        else true end
+      `,
+    ),
   ],
 );
 

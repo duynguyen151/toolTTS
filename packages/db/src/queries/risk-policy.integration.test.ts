@@ -77,6 +77,41 @@ describeWithDatabase("risk policy PostgreSQL persistence", () => {
     ]));
   });
 
+  it("rejects malformed raw GLOBAL, SHOP, tombstone, and non-finite effective rows", async () => {
+    const validGlobal = {
+      version: "risk-control-policy.v2",
+      currency: "USD",
+      thresholds: globalInput().thresholds,
+      caution: globalInput().caution,
+    };
+    const validShop = {
+      thresholds: { stopDeliveryRateBelow: 0.74 },
+      caution: { deliveryRate: { mode: "DISABLED" } },
+    };
+    const attempts = [
+      { scope: "GLOBAL", owner: null, enabled: true, payload: { ...validGlobal, extra: true }, effectiveFrom: T0 },
+      { scope: "GLOBAL", owner: null, enabled: true, payload: { ...validGlobal, thresholds: { ...validGlobal.thresholds, stableCyclesBeforeResume: 1.5 } }, effectiveFrom: T0 },
+      { scope: "GLOBAL", owner: null, enabled: true, payload: { ...validGlobal, thresholds: { ...validGlobal.thresholds, minimumOrdersForRateRule: 9007199254740992 } }, effectiveFrom: T0 },
+      { scope: "GLOBAL", owner: null, enabled: true, payload: { ...validGlobal, caution: { ...validGlobal.caution, deliveryRate: { mode: "RELATIVE_RATIO", ratio: 1.1 } } }, effectiveFrom: T0 },
+      { scope: "SHOP", owner: shopId, enabled: true, payload: { ...validShop, thresholds: { unknown: 1 } }, effectiveFrom: T0 },
+      { scope: "SHOP", owner: shopId, enabled: true, payload: { ...validShop, caution: { onHoldValue: { mode: "ABSOLUTE_BUFFER", buffer: -1 } } }, effectiveFrom: T0 },
+      { scope: "SHOP", owner: shopId, enabled: false, payload: validShop, effectiveFrom: T0 },
+      { scope: "SHOP", owner: shopId, enabled: false, payload: { thresholds: {}, caution: {}, extra: true }, effectiveFrom: T0 },
+      { scope: "SHOP", owner: shopId, enabled: true, payload: validShop, effectiveFrom: "infinity" },
+    ] as const;
+
+    for (const attempt of attempts) {
+      await expect(context.sql`
+        insert into risk_policy_revisions (scope, shop_id, enabled, payload, effective_from)
+        values (
+          ${attempt.scope}, ${attempt.owner}, ${attempt.enabled},
+          ${JSON.stringify(attempt.payload)}::jsonb,
+          ${attempt.effectiveFrom instanceof Date ? attempt.effectiveFrom.toISOString() : attempt.effectiveFrom}::timestamptz
+        )
+      `).rejects.toMatchObject({ constraint_name: expect.stringMatching(/^risk_policy_revisions_(payload_valid|effective_from_finite)$/) });
+    }
+  });
+
   it("appends immutable revisions and forbids historical update/delete", async () => {
     const first = await appendGlobalRiskPolicyRevision(context.db, globalInput());
     const second = await appendGlobalRiskPolicyRevision(context.db, globalInput({
@@ -85,11 +120,31 @@ describeWithDatabase("risk policy PostgreSQL persistence", () => {
     }));
     revisionIds.push(first.revisionId, second.revisionId);
 
+    expect(typeof first.sequence).toBe("bigint");
     expect(second.sequence).toBeGreaterThan(first.sequence);
     await expect(context.db.update(riskPolicyRevisions).set({ enabled: false }).where(eq(riskPolicyRevisions.revisionId, first.revisionId)))
       .rejects.toMatchObject({ cause: expect.objectContaining({ message: "risk_policy_revisions are append-only" }) });
     await expect(context.db.delete(riskPolicyRevisions).where(eq(riskPolicyRevisions.revisionId, first.revisionId)))
       .rejects.toMatchObject({ cause: expect.objectContaining({ message: "risk_policy_revisions are append-only" }) });
+  });
+
+  it("preserves sequence values beyond the JavaScript safe integer boundary", async () => {
+    await context.sql`
+      select setval(
+        pg_get_serial_sequence('risk_policy_revisions', 'sequence'),
+        greatest(
+          (select coalesce(max(sequence), 0) from risk_policy_revisions),
+          9007199254740992
+        )
+      )
+    `;
+    const created = await appendGlobalRiskPolicyRevision(context.db, globalInput({
+      effectiveFrom: new Date("2030-01-01T00:00:00.000Z"),
+    }));
+    revisionIds.push(created.revisionId);
+
+    expect(typeof created.sequence).toBe("bigint");
+    expect(created.sequence).toBeGreaterThan(BigInt(Number.MAX_SAFE_INTEGER));
   });
 
   it("serializes concurrent same-scope appends with an explicit monotonic tie-break", async () => {

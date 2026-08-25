@@ -45,6 +45,16 @@ describe("risk policy repository input validation", () => {
     })).rejects.toThrow();
   });
 
+  it("rejects unknown SHOP contract keys before touching the database", async () => {
+    await expect(appendShopRiskPolicyOverrideRevision(unusedDb, {
+      shopId: "00000000-0000-4000-8000-000000000001",
+      thresholds: {},
+      caution: {},
+      effectiveFrom: globalPolicy.effectiveFrom,
+      unexpected: true,
+    } as Parameters<typeof appendShopRiskPolicyOverrideRevision>[1])).rejects.toThrow();
+  });
+
   it("rejects invalid effective dates for disabling and effective reads", async () => {
     await expect(disableShopRiskPolicyOverride(unusedDb, {
       shopId: "00000000-0000-4000-8000-000000000001",

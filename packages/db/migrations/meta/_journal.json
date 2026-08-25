@@ -169,6 +169,20 @@
       "when": 1787620000000,
       "tag": "0023_risk_policy_revisions",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1787641582628,
+      "tag": "0024_risk_policy_constraints",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1787642286536,
+      "tag": "0025_risk_policy_safe_integers",
+      "breakpoints": true
     }
   ]
 }

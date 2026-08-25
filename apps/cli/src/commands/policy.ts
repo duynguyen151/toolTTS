@@ -24,8 +24,25 @@ interface EffectiveOptions {
 }
 
 function parseDate(value: string, option: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.exec(value);
+  const invalid = `${option} must be an ISO timestamp with an explicit UTC or offset`;
+  if (match === null) throw new Error(invalid);
+
+  const [, year, month, day, hour, minute, second] = match;
+  const calendarDate = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)));
+  if (
+    calendarDate.getUTCFullYear() !== Number(year)
+    || calendarDate.getUTCMonth() !== Number(month) - 1
+    || calendarDate.getUTCDate() !== Number(day)
+    || calendarDate.getUTCHours() !== Number(hour)
+    || calendarDate.getUTCMinutes() !== Number(minute)
+    || calendarDate.getUTCSeconds() !== Number(second)
+  ) {
+    throw new Error(invalid);
+  }
+
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) throw new Error(`${option} must be an ISO timestamp`);
+  if (Number.isNaN(date.getTime())) throw new Error(invalid);
   return date;
 }
 
@@ -50,12 +67,16 @@ async function requireShop(db: Parameters<typeof findShopByProfileNo>[0], profil
 
 function printRevision(scope: "GLOBAL" | "SHOP", revision: {
   revisionId: string;
-  sequence: number;
+  sequence: bigint;
   enabled: boolean;
   effectiveFrom: Date;
 }, json: boolean | undefined): void {
   if (json === true) {
-    printJson({ schemaVersion: "risk-policy-revision.v1", scope, revision });
+    printJson({
+      schemaVersion: "risk-policy-revision.v1",
+      scope,
+      revision: { ...revision, sequence: revision.sequence.toString() },
+    });
     return;
   }
   printKeyValues([
@@ -104,8 +125,8 @@ export function registerPolicyCommands(program: Command, runtime: CliRuntime): v
         const revision = await withDatabase(runtime, async ({ db }) => {
           const shop = await requireShop(db, profileNo);
           return appendShopRiskPolicyOverrideRevision(db, {
-            shopId: shop.id,
             ...(payload as Record<string, unknown>),
+            shopId: shop.id,
             effectiveFrom: parseDate(options.effectiveFrom, "--effective-from"),
           } as Parameters<typeof appendShopRiskPolicyOverrideRevision>[1]);
         });

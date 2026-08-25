@@ -252,6 +252,7 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
     expect(unchangedCase?.resolvedPolicySnapshot).toEqual(snapshotBeforePolicyChange);
     await expect(getDecisionReviewByRequestId(context.db, caseRequestId)).resolves.toMatchObject({
       case: { id: firstCase.id },
+      resolvedPolicySnapshot: snapshotBeforePolicyChange,
       ai: null,
     });
 

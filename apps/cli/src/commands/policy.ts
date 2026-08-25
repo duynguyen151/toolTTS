@@ -29,6 +29,10 @@ function parseDate(value: string, option: string): Date {
   if (match === null) throw new Error(invalid);
 
   const [, year, month, day, hour, minute, second] = match;
+  const offset = /([+-])(\d{2}):(\d{2})$/.exec(value);
+  if (offset !== null && (Number(offset[2]) > 14 || (Number(offset[2]) === 14 && Number(offset[3]) !== 0))) {
+    throw new Error(invalid);
+  }
   const calendarDate = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)));
   if (
     calendarDate.getUTCFullYear() !== Number(year)

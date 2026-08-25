@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { closeDatabase, createDatabase, type DatabaseContext } from "../client.js";
 import { migrateDatabase } from "../migrations.js";
@@ -534,6 +534,96 @@ describeWithDatabase.sequential("finance immutable-capture PostgreSQL integratio
     await failSyncRun(context.db, { runId: run.id, failureType: "TEST", failureMessage: "expected structural mismatch" });
   });
 
+  it("rejects a non-running detour into successful Finance evidence", async () => {
+    const shopId = await createShop();
+    const capturedAt = new Date("2026-08-28T04:40:00.000Z");
+    const snapshot = await insertFinancialSnapshot(context.db, financialSnapshot(
+      shopId,
+      capturedAt,
+      "detour",
+      "10.0000",
+    ));
+    const run = await beginSyncRun(context.db, { shopId, mode: "FINANCE" });
+    await context.db.insert(financeCaptures).values({
+      shopId,
+      syncRunId: run.id,
+      capturedAt,
+      snapshotId: snapshot.row!.id,
+      snapshotHash: snapshot.row!.snapshotHash,
+      populationHash: "d".repeat(64),
+      currency: "USD",
+      officialOnHoldAmount: "10.0000",
+      itemCount: 0,
+      sourceSchemaVersion: "integration.v1",
+    });
+    await context.db.update(syncRuns).set({ status: "FAILED" }).where(eq(syncRuns.id, run.id));
+
+    await expect(context.db.update(syncRuns).set({
+      status: "SUCCEEDED",
+      sourceComplete: true,
+      sourceCapturedAt: capturedAt,
+      finishedAt: new Date(),
+    }).where(eq(syncRuns.id, run.id))).rejects.toMatchObject({
+      cause: expect.objectContaining({ message: expect.stringMatching(/running.*succeeded/i) }),
+    });
+    await expect(getFinanceSummary(context.db, shopId, capturedAt)).resolves.toMatchObject({
+      proofStatus: "PROOF_UNAVAILABLE",
+    });
+  });
+
+  it("serializes item insertion with successful evidence completion", async () => {
+    const shopId = await createShop();
+    const capturedAt = new Date("2026-08-28T04:42:00.000Z");
+    const snapshot = await insertFinancialSnapshot(context.db, financialSnapshot(
+      shopId,
+      capturedAt,
+      "insert-race",
+      "1.0000",
+    ));
+    const run = await beginSyncRun(context.db, { shopId, mode: "FINANCE" });
+    const [capture] = await context.db.insert(financeCaptures).values({
+      shopId,
+      syncRunId: run.id,
+      capturedAt,
+      snapshotId: snapshot.row!.id,
+      snapshotHash: snapshot.row!.snapshotHash,
+      populationHash: "e".repeat(64),
+      currency: "USD",
+      officialOnHoldAmount: "1.0000",
+      itemCount: 1,
+      sourceSchemaVersion: "integration.v1",
+    }).returning();
+    await context.db.insert(financeCaptureItems).values(evidenceItem(capture!.id, shopId, "BASE", "1.0000"));
+
+    let releaseInsert!: () => void;
+    let inserted!: () => void;
+    const release = new Promise<void>((resolve) => { releaseInsert = resolve; });
+    const ready = new Promise<void>((resolve) => { inserted = resolve; });
+    const lateInsert = context.db.transaction(async (transaction) => {
+      await transaction.insert(financeCaptureItems).values(evidenceItem(capture!.id, shopId, "LATE", "0.0000"));
+      inserted();
+      await release;
+    });
+    await ready;
+    const completion = context.db.update(syncRuns).set({
+      status: "SUCCEEDED",
+      sourceComplete: true,
+      sourceCapturedAt: capturedAt,
+      finishedAt: new Date(),
+    }).where(eq(syncRuns.id, run.id)).then(() => undefined);
+    const stateBeforeRelease = await Promise.race([
+      completion.then(() => "completed" as const, () => "rejected" as const),
+      context.db.execute(sql`select pg_sleep(0.2)`).then(() => "blocked" as const),
+    ]);
+    releaseInsert();
+    await lateInsert;
+
+    expect(stateBeforeRelease).toBe("blocked");
+    await expect(completion).rejects.toMatchObject({
+      cause: expect.objectContaining({ message: expect.stringMatching(/stored capture evidence/i) }),
+    });
+  });
+
   it("rejects raw evidence items without explicit statement identity", async () => {
     const shopId = await createShop();
     const capturedAt = new Date("2026-08-28T04:45:00.000Z");
@@ -604,19 +694,23 @@ describeWithDatabase.sequential("finance immutable-capture PostgreSQL integratio
     }))).rejects.toThrow(/decimal/i);
     await failSyncRun(context.db, { runId: run.id, failureType: "TEST", failureMessage: "expected over-scale" });
 
-    const negativeExpectedRun = await beginSyncRun(context.db, { shopId, mode: "FINANCE" });
+    const signedExpectedRun = await beginSyncRun(context.db, { shopId, mode: "FINANCE" });
     await expect(context.db.transaction((transaction) => finalizeFinanceSyncRun(transaction, {
-      runId: negativeExpectedRun.id,
+      runId: signedExpectedRun.id,
       shopId,
       checkpoint: null,
-      rowsRead: 2,
-      rowsWritten: 1,
+      rowsRead: 3,
+      rowsWritten: 2,
       sourceComplete: true,
       sourceReconciled: true,
       snapshot: { ...valid, capturedAt: new Date("2026-08-28T05:01:00.000Z") },
-      settlements: [settlement(shopId, "NEGATIVE-EXPECTED", "-0.0001")],
-    }))).rejects.toThrow(/expected settlement amount must be nonnegative/i);
-    await failSyncRun(context.db, { runId: negativeExpectedRun.id, failureType: "TEST", failureMessage: "expected negative On Hold amount" });
+      settlements: [
+        settlement(shopId, "SIGNED-NEGATIVE", "-0.4100"),
+        settlement(shopId, "SIGNED-POSITIVE", "1.4100"),
+      ],
+    }))).resolves.toMatchObject({ captureInserted: true, evidenceItemsInserted: 2 });
+    await expect(getFinanceSummary(context.db, shopId, new Date("2026-08-28T05:01:00.000Z")))
+      .resolves.toMatchObject({ proofStatus: "PROVEN", onHoldExpectedAmount: "1.0000" });
 
     const negativeSettledRun = await beginSyncRun(context.db, { shopId, mode: "FINANCE" });
     await expect(context.db.transaction((transaction) => finalizeFinanceSyncRun(transaction, {
@@ -714,6 +808,24 @@ describeWithDatabase.sequential("finance immutable-capture PostgreSQL integratio
     }));
   }
 });
+
+function evidenceItem(captureId: string, shopId: string, id: string, amount: string) {
+  return {
+    captureId,
+    shopId,
+    sourceStatementDetailId: id,
+    sourceStatementId: `statement-${id}`,
+    sourceStatementVersion: "1",
+    expectedSettlementAmount: amount,
+    settledAmount: null,
+    currency: "USD",
+    sourceSettlementStatus: "ON_HOLD",
+    settlementState: "ON_HOLD" as const,
+    onHoldReason: "WAITING_FOR_PACKAGE_DELIVERY",
+    sourceHash: hash(`evidence-${id}`),
+    sourceSchemaVersion: "integration.v1",
+  };
+}
 
 function settlement(
   shopId: string,

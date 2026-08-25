@@ -439,9 +439,7 @@ function authoritativeCaptureItem(item: FinanceCaptureItemInput): AuthoritativeF
   if (item.sourceSchemaVersion.trim().length === 0 || item.sourceSettlementStatus.trim().length === 0) {
     throw new Error("Finance capture source provenance is unavailable");
   }
-  if (item.expectedSettlementAmount !== null && scaledMoney(item.expectedSettlementAmount) < 0n) {
-    throw new Error("Finance capture expected settlement amount must be nonnegative");
-  }
+  if (item.expectedSettlementAmount !== null) scaledMoney(item.expectedSettlementAmount);
   if (item.settledAmount !== null && scaledMoney(item.settledAmount) < 0n) {
     throw new Error("Finance capture settled amount must be nonnegative");
   }

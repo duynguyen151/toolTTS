@@ -522,7 +522,6 @@ export const financeCaptureItems = pgTable(
     check("finance_capture_items_currency_format", sql`${table.currency} ~ '^[A-Z]{3}$'`),
     check("finance_capture_items_source_id_not_blank", sql`length(btrim(${table.sourceStatementDetailId})) > 0`),
     check("finance_capture_items_statement_identity_complete", sql`${table.sourceStatementId} is not null and length(btrim(${table.sourceStatementId})) > 0 and ${table.sourceStatementVersion} is not null and length(btrim(${table.sourceStatementVersion})) > 0`),
-    check("finance_capture_items_expected_nonnegative", sql`${table.expectedSettlementAmount} is null or ${table.expectedSettlementAmount} >= 0`),
     check("finance_capture_items_settled_nonnegative", sql`${table.settledAmount} is null or ${table.settledAmount} >= 0`),
     check("finance_capture_items_source_status_not_blank", sql`length(btrim(${table.sourceSettlementStatus})) > 0`),
     check("finance_capture_items_source_hash_sha256", sql`${table.sourceHash} ~ '^[0-9a-f]{64}$'`),

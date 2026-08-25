@@ -12,6 +12,8 @@ const slowSellSnapshotUrl = new URL("../migrations/meta/0026_snapshot.json", imp
 const notesRepairSnapshotUrl = new URL("../migrations/meta/0027_snapshot.json", import.meta.url);
 const financeRepairMigrationUrl = new URL("../migrations/0029_finance_evidence_authorization.sql", import.meta.url);
 const financeRepairSnapshotUrl = new URL("../migrations/meta/0029_snapshot.json", import.meta.url);
+const financeCompletionMigrationUrl = new URL("../migrations/0030_finance_evidence_completion_lock.sql", import.meta.url);
+const financeCompletionSnapshotUrl = new URL("../migrations/meta/0030_snapshot.json", import.meta.url);
 const financePreviousSnapshotUrl = new URL("../migrations/meta/0028_snapshot.json", import.meta.url);
 const previousSnapshotUrl = new URL("../migrations/meta/0025_snapshot.json", import.meta.url);
 const journalUrl = new URL("../migrations/meta/_journal.json", import.meta.url);
@@ -73,6 +75,32 @@ describe("W5-T01 Finance repair migration", () => {
     expect(journal.entries[29]).toEqual(expect.objectContaining({
       idx: 29,
       tag: "0029_finance_evidence_authorization",
+    }));
+  });
+
+  it("repairs signed line evidence and serializes completion in forward 0030", async () => {
+    const [sql, snapshotText, previousSnapshotText, journalText] = await Promise.all([
+      readFile(financeCompletionMigrationUrl, "utf8"),
+      readFile(financeCompletionSnapshotUrl, "utf8"),
+      readFile(financeRepairSnapshotUrl, "utf8"),
+      readFile(journalUrl, "utf8"),
+    ]);
+    const snapshot = JSON.parse(snapshotText) as {
+      prevId: string;
+      tables: Record<string, { checkConstraints: Record<string, unknown> }>;
+    };
+    const previousSnapshot = JSON.parse(previousSnapshotText) as { id: string };
+    const journal = JSON.parse(journalText) as { entries: Array<{ idx: number; tag: string }> };
+
+    expect(sql).toContain('DROP CONSTRAINT "finance_capture_items_expected_nonnegative"');
+    expect(sql).toContain("FOR UPDATE OF sr");
+    expect(sql).toContain("OLD.status <> 'RUNNING'");
+    expect(snapshot.prevId).toBe(previousSnapshot.id);
+    expect(snapshot.tables["public.finance_capture_items"]?.checkConstraints)
+      .not.toHaveProperty("finance_capture_items_expected_nonnegative");
+    expect(journal.entries[30]).toEqual(expect.objectContaining({
+      idx: 30,
+      tag: "0030_finance_evidence_completion_lock",
     }));
   });
 });

@@ -31,7 +31,10 @@ import type {
 
 export const canonicalOrderStatusEnum = pgEnum("canonical_order_status", [
   "PENDING",
+  "UNPAID",
+  "ON_HOLD",
   "AWAITING_SHIPMENT",
+  "AWAITING_COLLECTION",
   "IN_TRANSIT",
   "DELIVERED",
   "COMPLETED",

@@ -9,7 +9,10 @@ import { SourceProviderSchema } from "./source.js";
 
 export const CanonicalOrderStatusSchema = z.enum([
   "PENDING",
+  "UNPAID",
+  "ON_HOLD",
   "AWAITING_SHIPMENT",
+  "AWAITING_COLLECTION",
   "IN_TRANSIT",
   "DELIVERED",
   "COMPLETED",

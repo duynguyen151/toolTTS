@@ -147,6 +147,9 @@ importers:
 
   packages/cotik:
     dependencies:
+      '@shop-health/domain':
+        specifier: workspace:*
+        version: link:../domain
       zod:
         specifier: ^4.0.0
         version: 4.4.3

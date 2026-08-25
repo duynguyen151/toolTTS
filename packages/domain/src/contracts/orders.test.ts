@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import { NormalizedOrderBatchSchema, NormalizedOrderSchema } from "./orders.js";
+import { CanonicalOrderStatusSchema, NormalizedOrderBatchSchema, NormalizedOrderSchema } from "./orders.js";
+
+describe("CanonicalOrderStatusSchema", () => {
+  it.each(["UNPAID", "ON_HOLD", "AWAITING_COLLECTION"])(
+    "accepts the additive COTIK-era status %s",
+    (status) => {
+      expect(CanonicalOrderStatusSchema.parse(status)).toBe(status);
+    },
+  );
+
+  it.each(["PENDING", "CANCELED", "UNKNOWN"])("keeps the pre-existing status %s", (status) => {
+    expect(CanonicalOrderStatusSchema.parse(status)).toBe(status);
+  });
+});
 
 describe("NormalizedOrderSchema", () => {
   it("keeps Ready-to-Ship separate from delivery timestamps", () => {

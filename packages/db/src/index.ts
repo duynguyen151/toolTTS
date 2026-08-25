@@ -123,6 +123,19 @@ export {
   type UpsertBatchResult
 } from "./queries/orders.js";
 export {
+  buildOrderExplorerSummary,
+  getOrderExplorerDetail,
+  listOrderExplorerItems,
+  summarizeOrderExplorerRecords,
+  toOrderExplorerDetail,
+  toOrderExplorerListItem,
+  type ListOrderExplorerInput,
+  type OrderExplorerDetail,
+  type OrderExplorerListItem,
+  type OrderExplorerStatusBucket,
+  type OrderExplorerSummary,
+} from "./queries/order-explorer.js";
+export {
   getRiskControlState,
   recordHolidayModeObservation,
   recordRiskControlAction,

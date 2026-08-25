@@ -1,3 +1,4 @@
+import { Decimal } from "decimal.js";
 import { z } from "zod";
 
 import {
@@ -236,7 +237,10 @@ export const DecisionCaseInputSchema = z
         ["currency", resolvedPolicySnapshot.currency, financeSnapshot.currency],
       ] as const;
       for (const [path, actual, expected] of matchingEvidence) {
-        if (actual !== expected) {
+        const matches = path === "thresholds.stopOnHoldValueAt"
+          ? new Decimal(actual).eq(new Decimal(expected))
+          : actual === expected;
+        if (!matches) {
           context.addIssue({
             code: "custom",
             path: ["resolvedPolicySnapshot", ...path.split(".")],

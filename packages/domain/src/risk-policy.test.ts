@@ -639,6 +639,17 @@ describe("risk control policy contracts", () => {
       });
     }
 
+    it("accepts numerically equivalent decimal threshold formatting", () => {
+      const snapshot = matchingResolvedPolicy();
+      const parsed = DecisionCaseInputSchema.parse({
+        ...validCase,
+        riskSnapshot: { ...validCase.riskSnapshot, stopOnHoldValueAt: "4321" },
+        resolvedPolicySnapshot: snapshot,
+      });
+
+      expect(parsed.resolvedPolicySnapshot?.thresholds.stopOnHoldValueAt).toBe("4321.0000");
+    });
+
     it("accepts a resolved policy snapshot matching the case evidence", () => {
       const parsed = DecisionCaseInputSchema.parse({
         ...validCase,

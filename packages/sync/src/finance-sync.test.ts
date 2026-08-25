@@ -86,7 +86,10 @@ describe("finance sync persistence", () => {
     expect(db.markShopSynced).not.toHaveBeenCalled();
   });
 
-  it("uses only the final Finance batch proof when a source yields multiple batches", async () => {
+  it.each([
+    ["a final unreconciled batch", false],
+    ["individually reconciled batches", true],
+  ])("refuses authoritative Finance proof for multiple batches with %s", async (_description, finalReconciled) => {
     const result = await runShopSync({
       context: { db: {}, sql: {} } as never,
       source: financeSource([
@@ -97,7 +100,7 @@ describe("finance sync persistence", () => {
           snapshot: {
             ...financialSnapshot(),
             capturedAt: new Date("2026-08-14T00:01:00.000Z"),
-            reasonTotalsReconcileToOfficialOnHold: false,
+            reasonTotalsReconcileToOfficialOnHold: finalReconciled,
           },
         },
       ]),
@@ -108,8 +111,10 @@ describe("finance sync persistence", () => {
     expect(result.complete).toBe(false);
     expect(result.financeProof).toBeUndefined();
     expect(db.finalizeFinanceSyncRun).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      sourceComplete: false,
       sourceReconciled: false,
       snapshot: expect.objectContaining({ capturedAt: new Date("2026-08-14T00:01:00.000Z") }),
+      settlements: [],
     }));
     expect(db.markShopSynced).not.toHaveBeenCalled();
   });

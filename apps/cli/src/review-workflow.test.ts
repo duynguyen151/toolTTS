@@ -1,6 +1,22 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
+
+const db = vi.hoisted(() => ({
+  findShopByProfileNo: vi.fn(),
+  getEffectiveRiskPolicy: vi.fn(),
+  getFinanceSummary: vi.fn(),
+  getFullPersistedRiskOrderFacts: vi.fn(),
+  findLatestSuccessfulSyncRun: vi.fn(),
+  getLatestDecisionContext: vi.fn(),
+  getRiskControlState: vi.fn(),
+}));
+
+vi.mock("@shop-health/db", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@shop-health/db")>(),
+  ...db,
+}));
 
 import {
+  createDbDecisionWorkflowStore,
   normalizeRiskFacts,
   resolveFullHistoryPeriod,
   toAiPersistenceInput,
@@ -20,6 +36,61 @@ const provenance = {
 };
 
 describe("review workflow DB mapping", () => {
+  afterEach(() => vi.clearAllMocks());
+
+  test("keeps unproven Finance snapshot values out of a Decision Case source", async () => {
+    const capturedAt = new Date("2026-08-14T00:00:00.000Z");
+    db.findShopByProfileNo.mockResolvedValue({
+      id: "shop-1",
+      profileId: "profile-1",
+      profileNo: "957",
+      tiktokShopId: "seller-957",
+      displayName: "Shop 957",
+      currency: "USD",
+      dataOrigin: "LIVE",
+      lastOrdersSyncedAt: null,
+      lastFinanceSyncedAt: null,
+    });
+    db.getFullPersistedRiskOrderFacts.mockResolvedValue([]);
+    db.getFinanceSummary.mockResolvedValue({
+      proofStatus: "PROOF_UNAVAILABLE",
+      latestSnapshot: {
+        capturedAt,
+        currency: "USD",
+        availableBalance: "100.0000",
+        frozenBalance: "200.0000",
+        totalBalance: "300.0000",
+        toSettleBalance: "400.0000",
+        onHoldBalance: "500.0000",
+        officialOnHoldAmount: "500.0000",
+      },
+      statementCount: 8,
+      onHoldCount: 4,
+    });
+    db.findLatestSuccessfulSyncRun.mockResolvedValue(null);
+    db.getRiskControlState.mockResolvedValue(null);
+    db.getLatestDecisionContext.mockResolvedValue(null);
+    db.getEffectiveRiskPolicy.mockResolvedValue({ version: "policy.v1" });
+
+    const source = await createDbDecisionWorkflowStore({} as never).loadReviewStartSource(
+      "957",
+      new Date("2026-08-15T00:00:00.000Z"),
+    );
+
+    expect(source.financeSnapshot).toEqual({
+      capturedAt: null,
+      currency: "USD",
+      availableBalance: null,
+      frozenBalance: null,
+      totalBalance: null,
+      toSettleBalance: null,
+      onHoldBalance: null,
+      officialOnHoldAmount: null,
+      settlementCount: 0,
+      onHoldSettlementCount: 0,
+    });
+  });
+
   test("uses the earliest persisted fact even when it predates shop creation", () => {
     const periodEnd = new Date("2026-08-14T08:30:00.000Z");
     const period = resolveFullHistoryPeriod([

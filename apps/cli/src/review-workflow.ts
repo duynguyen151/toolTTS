@@ -173,7 +173,9 @@ export function createDbDecisionWorkflowStore(
       ]);
       const normalizedFacts = normalizeRiskFacts(facts);
       const period = resolveFullHistoryPeriod(normalizedFacts, effectiveAt);
-      const snapshot = finance.latestSnapshot;
+      const snapshot = finance.proofStatus === "PROVEN" ? finance.latestSnapshot : null;
+      const statementCount = finance.proofStatus === "PROVEN" ? finance.statementCount : 0;
+      const onHoldCount = finance.proofStatus === "PROVEN" ? finance.onHoldCount : 0;
       return {
         shop: {
           id: shop.id,
@@ -196,8 +198,8 @@ export function createDbDecisionWorkflowStore(
           toSettleBalance: snapshot?.toSettleBalance ?? null,
           onHoldBalance: snapshot?.onHoldBalance ?? null,
           officialOnHoldAmount: snapshot?.officialOnHoldAmount ?? null,
-          settlementCount: finance.statementCount,
-          onHoldSettlementCount: finance.onHoldCount,
+          settlementCount: statementCount,
+          onHoldSettlementCount: onHoldCount,
         },
         sourceSyncRunId: shop.dataOrigin === "DEMO_SANITIZED"
           ? null
@@ -240,7 +242,7 @@ export function createDbDecisionWorkflowStore(
           reasonCode: input.reasonCode,
           reasonCodes: [...input.reasonCodes],
           ...(input.confidence === undefined ? {} : { confidence: input.confidence }),
-          ...(input.note === undefined ? {} : { note: input.note }),
+          ...(input.notes === undefined ? {} : { notes: input.notes }),
         },
       });
     },

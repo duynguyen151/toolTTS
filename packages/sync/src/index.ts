@@ -218,8 +218,10 @@ export async function runShopSync(input: RunSyncInput): Promise<SyncResult> {
         }
       }
 
+      const multipleFinanceBatches = financeBatches.length > 1;
+      if (multipleFinanceBatches) financeProof = undefined;
       const syncComplete = input.kind === "finance"
-        ? complete && financeProof !== undefined
+        ? !multipleFinanceBatches && complete && financeProof !== undefined
         : complete;
       if (input.kind === "finance") {
         if (financeBatches.length === 0) {
@@ -233,9 +235,6 @@ export async function runShopSync(input: RunSyncInput): Promise<SyncResult> {
           });
         } else {
           const completedFinanceBatch = financeBatches[financeBatches.length - 1]!;
-          const precedingSettlements = financeBatches
-            .slice(0, -1)
-            .flatMap((batch) => batch.settlements);
           const finalized = await withTransactionalShopLock(input.context, input.shop.id, (transaction) =>
             finalizeFinanceSyncRun(transaction, {
               runId: run.id,
@@ -243,10 +242,10 @@ export async function runShopSync(input: RunSyncInput): Promise<SyncResult> {
               checkpoint: checkpoint === null ? null : { cursor: checkpoint },
               rowsRead,
               rowsWritten,
-              sourceComplete: completedFinanceBatch.complete,
-              sourceReconciled: completedFinanceBatch.snapshot?.reasonTotalsReconcileToOfficialOnHold === true,
+              sourceComplete: !multipleFinanceBatches && completedFinanceBatch.complete,
+              sourceReconciled: !multipleFinanceBatches && completedFinanceBatch.snapshot?.reasonTotalsReconcileToOfficialOnHold === true,
               snapshot: completedFinanceBatch.snapshot,
-              settlements: [...precedingSettlements, ...completedFinanceBatch.settlements],
+              settlements: multipleFinanceBatches ? [] : completedFinanceBatch.settlements,
             })
           );
           rowsWritten += finalized.snapshotInserted ? 1 : 0;

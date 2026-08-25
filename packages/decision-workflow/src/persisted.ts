@@ -204,9 +204,10 @@ export function createPersistedDecisionWorkflow(
       ]);
       const financeCaptureAt = resolveVerifiedFinanceCaptureAt(latestFinanceRun, latestProvenFinanceRun);
       const financeSummary = await getFinanceSummary(db, shop.id, financeCaptureAt);
-      const snapshot = financeSummary.latestSnapshot;
+      const snapshot = financeSummary.proofStatus === "PROVEN" ? financeSummary.latestSnapshot : null;
+      const provenFinanceCaptureAt = financeSummary.proofStatus === "PROVEN" ? financeCaptureAt : null;
       const financeSnapshot = buildDecisionFinanceSnapshot({
-        capturedAt: financeCaptureAt,
+        capturedAt: provenFinanceCaptureAt,
         currency: snapshot?.currency ?? shop.currency,
         availableBalance: snapshot?.availableBalance ?? null,
         frozenBalance: snapshot?.frozenBalance ?? null,
@@ -239,13 +240,13 @@ export function createPersistedDecisionWorkflow(
       const financeRequiredSourceComplete = latestFinanceRun === null
         ? null
         : latestFinanceRun.sourceComplete === true &&
-          financeCaptureAt !== null && snapshot !== null &&
+          provenFinanceCaptureAt !== null && snapshot !== null &&
           financeSummary.proofStatus === "PROVEN";
       const complete = isCompleteDecisionCoverage({
         sourceCoverage: coverageProof,
         ordersSourceComplete,
         financeSourceComplete: financeRequiredSourceComplete,
-        financeSnapshotCapturedAt: financeCaptureAt,
+        financeSnapshotCapturedAt: provenFinanceCaptureAt,
         sourceReconciled: typedFinanceSnapshot.reasonTotalsReconcileToOfficialOnHold,
       });
       const freshness = assessDecisionFreshness({
@@ -253,7 +254,7 @@ export function createPersistedDecisionWorkflow(
         freshnessWindowMs,
         ordersSyncAt: latestOrdersRun?.finishedAt ?? null,
         financeSyncAt: latestFinanceRun?.finishedAt ?? null,
-        financeCapturedAt: financeCaptureAt,
+        financeCapturedAt: provenFinanceCaptureAt,
       });
       const dataCoverage = complete && freshness === "FRESH" ? "COMPLETE" as const : "PARTIAL" as const;
       const coverageSnapshot: DecisionCoverageSnapshot = {
@@ -267,7 +268,7 @@ export function createPersistedDecisionWorkflow(
         financeRequiredSourceComplete,
         sourceReconciled: typedFinanceSnapshot.reasonTotalsReconcileToOfficialOnHold,
         latestSuccessfulSyncAt: latestSuccessfulSyncAt?.toISOString() ?? null,
-        financeCapturedAt: financeCaptureAt?.toISOString() ?? null,
+        financeCapturedAt: provenFinanceCaptureAt?.toISOString() ?? null,
         freshness,
       };
       const period = resolveDecisionPeriod(facts, effectiveAt);

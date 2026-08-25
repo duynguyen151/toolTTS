@@ -10,6 +10,9 @@ const notesRepairMigrationUrl = new URL("../migrations/0027_meaningful_ba_notes.
 const snapshotUrl = new URL("../migrations/meta/0023_snapshot.json", import.meta.url);
 const slowSellSnapshotUrl = new URL("../migrations/meta/0026_snapshot.json", import.meta.url);
 const notesRepairSnapshotUrl = new URL("../migrations/meta/0027_snapshot.json", import.meta.url);
+const financeRepairMigrationUrl = new URL("../migrations/0029_finance_evidence_authorization.sql", import.meta.url);
+const financeRepairSnapshotUrl = new URL("../migrations/meta/0029_snapshot.json", import.meta.url);
+const financePreviousSnapshotUrl = new URL("../migrations/meta/0028_snapshot.json", import.meta.url);
 const previousSnapshotUrl = new URL("../migrations/meta/0025_snapshot.json", import.meta.url);
 const journalUrl = new URL("../migrations/meta/_journal.json", import.meta.url);
 
@@ -37,6 +40,40 @@ describe("W13-T02 migration", () => {
     expect(repairSql).toContain('"risk_policy_revisions_payload_valid"');
     expect(repairSql).toContain(`"risk_policy_revisions"."payload" = '{"thresholds": {}, "caution": {}}'::jsonb`);
     expect(paritySql).toContain("9007199254740991");
+  });
+});
+
+describe("W5-T01 Finance repair migration", () => {
+  it("ships forward 0029 identity, append-only, authorization, poison-value, and lineage enforcement", async () => {
+    const [sql, snapshotText, previousSnapshotText, journalText] = await Promise.all([
+      readFile(financeRepairMigrationUrl, "utf8"),
+      readFile(financeRepairSnapshotUrl, "utf8"),
+      readFile(financePreviousSnapshotUrl, "utf8"),
+      readFile(journalUrl, "utf8"),
+    ]);
+    const snapshot = JSON.parse(snapshotText) as {
+      prevId: string;
+      tables: Record<string, { columns: Record<string, unknown>; checkConstraints: Record<string, unknown> }>;
+    };
+    const previousSnapshot = JSON.parse(previousSnapshotText) as { id: string };
+    const journal = JSON.parse(journalText) as { entries: Array<{ idx: number; tag: string }> };
+
+    expect(sql).toContain('ADD COLUMN "source_statement_id" text');
+    expect(sql).toContain('ADD COLUMN "source_statement_version" text');
+    expect(sql).toContain('BEFORE UPDATE OR DELETE ON "financial_snapshots"');
+    expect(sql).toContain('BEFORE INSERT ON "finance_captures"');
+    expect(sql).toContain('BEFORE UPDATE OR DELETE ON "sync_runs"');
+    expect(sql).toContain('DROP INDEX IF EXISTS "finance_captures_shop_captured_idx"');
+    expect(sql).toContain("NOT VALID");
+    expect(snapshot.prevId).toBe(previousSnapshot.id);
+    expect(snapshot.tables["public.finance_capture_items"]?.columns).toMatchObject({
+      source_statement_id: expect.anything(),
+      source_statement_version: expect.anything(),
+    });
+    expect(journal.entries[29]).toEqual(expect.objectContaining({
+      idx: 29,
+      tag: "0029_finance_evidence_authorization",
+    }));
   });
 });
 

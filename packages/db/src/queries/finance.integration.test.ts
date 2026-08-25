@@ -234,6 +234,27 @@ describeWithDatabase.sequential("finance immutable-capture PostgreSQL integratio
     await failSyncRun(context.db, { runId: run.id, failureType: "TEST", failureMessage: "expected mismatch" });
   });
 
+  it("rejects missing On Hold amounts instead of treating them as zero", async () => {
+    const shopId = await createShop();
+    const capturedAt = new Date("2026-08-23T12:00:00.000Z");
+    const run = await beginSyncRun(context.db, { shopId, mode: "FINANCE" });
+
+    await expect(context.db.transaction((transaction) => finalizeFinanceSyncRun(transaction, {
+      runId: run.id,
+      shopId,
+      checkpoint: null,
+      rowsRead: 2,
+      rowsWritten: 1,
+      sourceComplete: true,
+      sourceReconciled: true,
+      snapshot: financialSnapshot(shopId, capturedAt, "missing-amount", "0.0000"),
+      settlements: [settlement(shopId, "MISSING", "0.0000", { expectedSettlementAmount: null })],
+    }))).rejects.toThrow(/amount is unavailable/i);
+    await expect(context.db.select().from(financeCaptures).where(eq(financeCaptures.shopId, shopId)))
+      .resolves.toHaveLength(0);
+    await failSyncRun(context.db, { runId: run.id, failureType: "TEST", failureMessage: "expected missing amount" });
+  });
+
   it("commits evidence atomically with a complete run and never authorizes incomplete captures", async () => {
     const shopId = await createShop();
     const rollbackAt = new Date("2026-08-24T00:00:00.000Z");

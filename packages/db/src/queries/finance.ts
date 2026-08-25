@@ -422,6 +422,9 @@ function assertFinanceCaptureReconciled(
   if (items.some((item) => item.currency !== snapshot.currency)) {
     throw new Error("Finance capture item currency does not match its official snapshot");
   }
+  if (items.some((item) => item.settlementState === "ON_HOLD" && item.expectedSettlementAmount === null)) {
+    throw new Error("Finance capture On Hold amount is unavailable");
+  }
   const onHoldAmount = items
     .filter((item) => item.settlementState === "ON_HOLD")
     .reduce((sum, item) => sum + scaledMoney(item.expectedSettlementAmount), 0n);

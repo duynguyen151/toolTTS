@@ -292,3 +292,11 @@ export async function runShopSync(input: RunSyncInput): Promise<SyncResult> {
     complete: false
   };
 }
+
+// --- W2-T02 appended exports (isolated hunk; do not merge with pre-existing WIP) ---
+export {
+  runCotikOrdersSync,
+  type CotikOrdersSyncResult,
+  type CotikOrdersSyncSkipReason,
+  type RunCotikOrdersSyncInput
+} from "./cotik-orders.js";

@@ -179,3 +179,9 @@ export {
   type ShopProviderBindingRow,
   type UpsertShopProviderBindingInput
 } from "./queries/provider-bindings.js";
+
+// --- W2-T02 appended exports (isolated hunk; do not merge with pre-existing WIP) ---
+export {
+  shopProviderBindingCheckpointSchema,
+  updateShopProviderBindingCheckpoint
+} from "./queries/provider-bindings.js";

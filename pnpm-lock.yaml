@@ -225,6 +225,9 @@ importers:
 
   packages/sync:
     dependencies:
+      '@shop-health/cotik':
+        specifier: workspace:*
+        version: link:../cotik
       '@shop-health/db':
         specifier: workspace:*
         version: link:../db

@@ -9,6 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@shop-health/cotik": "workspace:*",
     "@shop-health/db": "workspace:*",
     "@shop-health/domain": "workspace:*",
     "@shop-health/seller-center": "workspace:*",

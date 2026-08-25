@@ -122,3 +122,58 @@ export async function disableShopProviderBinding(
 
   return binding ?? null;
 }
+
+const FORBIDDEN_CHECKPOINT_KEY_PATTERN = /token|secret|password|cookie|credential|api[_-]?key/i;
+
+/**
+ * Binding checkpoints are opaque operational bookkeeping read back by provider
+ * sync entrypoints. They must stay plain JSON objects and may never carry
+ * credential-shaped keys across this persistence trust boundary.
+ */
+export const shopProviderBindingCheckpointSchema = z
+  .record(z.string(), z.unknown())
+  .superRefine((checkpoint, context) => {
+    for (const key of Object.keys(checkpoint)) {
+      if (FORBIDDEN_CHECKPOINT_KEY_PATTERN.test(key)) {
+        context.addIssue({
+          code: "custom",
+          path: [key],
+          message: `Checkpoint field "${key}" looks credential-shaped`
+        });
+      }
+    }
+  });
+
+/**
+ * Advances ONLY the checkpoint (and collection instant) of one ENABLED binding
+ * row and returns the fresh row, or null when disabled/missing — nothing is
+ * created. Canonical shop data and binding identity/provenance are untouched.
+ * Called by provider order-sync entrypoints exactly once per complete run so a
+ * mid-run failure leaves the prior checkpoint standing for idempotent replay.
+ */
+export async function updateShopProviderBindingCheckpoint(
+  db: Database,
+  shopId: string,
+  provider: ShopProviderBindingRow["provider"],
+  checkpoint: Record<string, unknown>,
+  collectedAt?: Date
+): Promise<ShopProviderBindingRow | null> {
+  const parsedCheckpoint = shopProviderBindingCheckpointSchema.parse(checkpoint);
+  const [binding] = await db
+    .update(shopProviderBindings)
+    .set({
+      checkpoint: parsedCheckpoint,
+      collectedAt: collectedAt ?? new Date(),
+      updatedAt: new Date()
+    })
+    .where(
+      and(
+        eq(shopProviderBindings.shopId, shopId),
+        eq(shopProviderBindings.provider, provider),
+        eq(shopProviderBindings.enabled, true)
+      )
+    )
+    .returning();
+
+  return binding ?? null;
+}

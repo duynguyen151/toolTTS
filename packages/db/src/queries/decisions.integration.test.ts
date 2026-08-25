@@ -7,9 +7,10 @@ import { eq } from "drizzle-orm";
 
 import { closeDatabase, createDatabase, type DatabaseContext } from "../client.js";
 import { migrateDatabase } from "../migrations.js";
-import { orders, shops, syncRuns } from "../schema.js";
+import { decisionCases, orders, shops, syncRuns } from "../schema.js";
 import { getFullPersistedRiskOrderFacts } from "./orders.js";
 import { findLatestSuccessfulSyncRun } from "./sync-runs.js";
+import { appendGlobalRiskPolicyRevision, getEffectiveRiskPolicy } from "./risk-policy.js";
 import {
   createDecisionCase,
   getDecisionAiInput,
@@ -112,6 +113,27 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
     ]);
 
     const caseRequestId = randomUUID();
+    await appendGlobalRiskPolicyRevision(context.db, {
+      version: "risk-control-policy.v1",
+      currency: "USD",
+      thresholds: {
+        stopOnHoldValueAt: "4321.0000",
+        stopDeliveryRateBelow: 0.73,
+        minimumOrdersForRateRule: 25,
+        resumeOnHoldValueBelow: "4321.0000",
+        resumeDeliveryRateAt: 0.73,
+        stableCyclesBeforeResume: 1,
+      },
+      caution: {
+        onHoldValue: { mode: "DISABLED" },
+        deliveryRate: { mode: "DISABLED" },
+      },
+      effectiveFrom: new Date("2026-08-14T00:00:00.000Z"),
+    });
+    const resolvedPolicySnapshot = await getEffectiveRiskPolicy(context.db, {
+      shopId: shop!.id,
+      effectiveAt: new Date("2026-08-14T00:00:00.000Z"),
+    });
     const caseInput = {
       requestId: caseRequestId,
       caseOrigin: "LIVE" as const,
@@ -165,6 +187,7 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
       ruleTriggers: ["DELIVERY_RATE" as const],
       dataCoverage: "UNKNOWN" as const,
       sourceSyncRunId: null,
+      resolvedPolicySnapshot,
     };
     const {
       stopOnHoldValueAt: _stopOnHoldValueAt,
@@ -212,6 +235,21 @@ describeWithDatabase("decision workflow PostgreSQL integration", () => {
       ruleTriggers: ["DELIVERY_RATE"],
       decisionContextSnapshot: null,
     });
+    const snapshotBeforePolicyChange = firstCase.resolvedPolicySnapshot;
+    await appendGlobalRiskPolicyRevision(context.db, {
+      version: "risk-control-policy.v3",
+      currency: "USD",
+      thresholds: {
+        ...resolvedPolicySnapshot.thresholds,
+        stopOnHoldValueAt: "9000.0000",
+        resumeOnHoldValueBelow: "9000.0000",
+      },
+      caution: resolvedPolicySnapshot.caution,
+      effectiveFrom: new Date("2026-08-15T00:00:00.000Z"),
+    });
+    const [unchangedCase] = await context.db.select().from(decisionCases)
+      .where(eq(decisionCases.id, firstCase.id)).limit(1);
+    expect(unchangedCase?.resolvedPolicySnapshot).toEqual(snapshotBeforePolicyChange);
     await expect(getDecisionReviewByRequestId(context.db, caseRequestId)).resolves.toMatchObject({
       case: { id: firstCase.id },
       ai: null,

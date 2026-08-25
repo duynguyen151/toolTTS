@@ -4,6 +4,7 @@ import {
   BaDecisionInputSchema,
   evaluateRiskControlFacts,
   mapRiskResultToRuleDecision,
+  toRiskControlPolicy,
   type DecisionCaseInput,
   type DecisionFinanceSnapshot,
   type DecisionCoverageSnapshot,
@@ -12,6 +13,7 @@ import {
   type DecisionRuleTrigger,
   type RiskOrderFact,
   type AiDecisionContext,
+  type ResolvedRiskPolicySnapshot,
 } from "@shop-health/domain";
 import type {
   BaselineAiClient,
@@ -47,12 +49,13 @@ export interface ReviewStartSource {
     readonly locale: "en-US";
   };
   readonly previousDecisionContext: AiDecisionContext | null;
+  readonly resolvedPolicySnapshot: ResolvedRiskPolicySnapshot;
 }
 
 export interface DecisionWorkflowStore {
   getDecisionReviewByRequestId(requestId: string): Promise<PersistedDecisionReview | null>;
   getDecisionAiInput(caseId: string): Promise<BaselineAiInputRecord>;
-  loadReviewStartSource(profileNo: string): Promise<ReviewStartSource>;
+  loadReviewStartSource(profileNo: string, effectiveAt: Date): Promise<ReviewStartSource>;
   createDecisionCase(input: {
     readonly requestId: string;
     readonly caseOrigin: DataOrigin;
@@ -166,11 +169,12 @@ export function createDecisionWorkflow(dependencies: {
             : toDecisionReviewView(existing);
         }
       }
-      const source = await dependencies.store.loadReviewStartSource(input.profileNo);
       const observedAt = now();
+      const source = await dependencies.store.loadReviewStartSource(input.profileNo, observedAt);
       const requestId = input.requestId ?? newRequestId();
       const risk = evaluateRiskControlFacts({
         facts: source.facts,
+        policy: toRiskControlPolicy(source.resolvedPolicySnapshot),
         holidayModeCurrentlyEnabled: source.holidayModeCurrentlyEnabled,
         consecutiveSafeCycles: source.consecutiveSafeCycles,
       });
@@ -250,6 +254,7 @@ export function createDecisionWorkflow(dependencies: {
           ruleTriggers: triggers,
           dataCoverage: source.shop.dataCoverage,
           sourceSyncRunId: source.sourceSyncRunId,
+          resolvedPolicySnapshot: source.resolvedPolicySnapshot,
           decisionContextSnapshot,
         },
       });

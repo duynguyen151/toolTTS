@@ -38,6 +38,8 @@ export {
   riskActionStatusEnum,
   riskControlStates,
   riskDesiredStateEnum,
+  riskPolicyRevisions,
+  riskPolicyScopeEnum,
   settlementRecords,
   settlementStateEnum,
   shops,
@@ -56,6 +58,7 @@ export {
   type KpiSnapshotRow,
   type OrderRow,
   type RiskControlStateRow,
+  type RiskPolicyRevisionRow,
   type SettlementRecordRow,
   type ShopRow,
   type SyncRunRow
@@ -135,6 +138,16 @@ export {
   type OrderExplorerStatusBucket,
   type OrderExplorerSummary,
 } from "./queries/order-explorer.js";
+export {
+  appendGlobalRiskPolicyRevision,
+  appendShopRiskPolicyOverrideRevision,
+  disableShopRiskPolicyOverride,
+  getEffectiveRiskPolicy,
+  type AppendGlobalRiskPolicyRevisionInput,
+  type AppendShopRiskPolicyOverrideRevisionInput,
+  type DisableShopRiskPolicyOverrideInput,
+  type GetEffectiveRiskPolicyInput,
+} from "./queries/risk-policy.js";
 export {
   getRiskControlState,
   recordHolidayModeObservation,

@@ -22,6 +22,7 @@ const review: PersistedDecisionReview = {
     dataCoverage: "UNKNOWN",
     lastSyncAt: null,
   },
+  resolvedPolicySnapshot: null,
   coverageSnapshot: {
     coverageState: "UNKNOWN",
     persistedMetricsWindow: "FULL_PERSISTED_HISTORY",

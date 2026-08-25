@@ -9,6 +9,7 @@ import {
   getFinanceSummary,
   getFullPersistedRiskOrderFacts,
   getRiskControlState,
+  getEffectiveRiskPolicy,
   listDecisionHistory,
   recordAiDecision,
   recordBaDecisionForCase,
@@ -159,18 +160,19 @@ export function createDbDecisionWorkflowStore(
       return input as BaselineAiInput;
     },
 
-    async loadReviewStartSource(profileNo) {
+    async loadReviewStartSource(profileNo, effectiveAt) {
       const shop = await findShopByProfileNo(db, profileNo);
       if (shop === null) throw notFound("shop", profileNo);
-      const [facts, finance, latestSuccessfulSync, riskState, previousDecisionContext] = await Promise.all([
+      const [facts, finance, latestSuccessfulSync, riskState, previousDecisionContext, resolvedPolicySnapshot] = await Promise.all([
         getFullPersistedRiskOrderFacts(db, shop.id),
         getFinanceSummary(db, shop.id),
         findLatestSuccessfulSyncRun(db, shop.id),
         getRiskControlState(db, shop.id),
         getLatestDecisionContext(db, shop.id),
+        getEffectiveRiskPolicy(db, { shopId: shop.id, effectiveAt }),
       ]);
       const normalizedFacts = normalizeRiskFacts(facts);
-      const period = resolveFullHistoryPeriod(normalizedFacts, now());
+      const period = resolveFullHistoryPeriod(normalizedFacts, effectiveAt);
       const snapshot = finance.latestSnapshot;
       return {
         shop: {
@@ -209,6 +211,7 @@ export function createDbDecisionWorkflowStore(
           locale: "en-US",
         },
         previousDecisionContext,
+        resolvedPolicySnapshot,
       };
     },
 

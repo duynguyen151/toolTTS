@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { BaselineAiInputRecord } from "@shop-health/decision-ai";
+import { resolveEffectiveRiskPolicy } from "@shop-health/domain";
 
 import {
   createDecisionWorkflow,
@@ -12,6 +13,10 @@ import {
 const caseId = "0df4a641-4555-4f4d-bb32-595f95ad3c7c";
 const shopId = "d91ef278-d9f0-4322-aaf9-f9683d6143e4";
 const now = new Date("2026-08-14T08:30:00.000Z");
+const resolvedPolicySnapshot = resolveEffectiveRiskPolicy({
+  globalRevisions: [],
+  effectiveAt: now,
+});
 
 const source: ReviewStartSource = {
   shop: {
@@ -63,6 +68,7 @@ const source: ReviewStartSource = {
     locale: "en-US",
   },
   previousDecisionContext: null,
+  resolvedPolicySnapshot,
 };
 
 const persistedAiInput: BaselineAiInputRecord = {
@@ -124,6 +130,7 @@ function review(overrides: Partial<PersistedDecisionReview> = {}): PersistedDeci
   return {
     case: { id: caseId, origin: "DEMO_SANITIZED", observedAt: now, createdAt: now },
     shop: source.shop,
+    resolvedPolicySnapshot,
     coverageSnapshot: {
       coverageState: "UNKNOWN",
       persistedMetricsWindow: "FULL_PERSISTED_HISTORY",
@@ -352,6 +359,7 @@ describe("decision workflow", () => {
         ruleTriggers: ["ONHOLD_VALUE"],
         dataCoverage: "UNKNOWN",
         sourceSyncRunId: null,
+        resolvedPolicySnapshot,
         metricsSnapshot: {
           totalOrders: 10,
           onHoldValue: "4400.0000",

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   check,
   foreignKey,
@@ -25,6 +26,9 @@ import type {
   DecisionMetricsSnapshot,
   DecisionRiskSnapshot,
   DecisionRuleTrigger,
+  GlobalRiskPolicyRevision,
+  ResolvedRiskPolicySnapshot,
+  ShopRiskPolicyOverrideRevision,
   SourceCoverageProof,
   SourceProvenance
 } from "@shop-health/domain";
@@ -504,6 +508,43 @@ export const riskControlStates = pgTable(
   ]
 );
 
+export const riskPolicyScopeEnum = pgEnum("risk_policy_scope", ["GLOBAL", "SHOP"]);
+
+export const riskPolicyRevisions = pgTable(
+  "risk_policy_revisions",
+  {
+    revisionId: uuid("revision_id").defaultRandom().primaryKey(),
+    sequence: bigint("sequence", { mode: "number" }).generatedAlwaysAsIdentity(),
+    scope: riskPolicyScopeEnum("scope").notNull(),
+    shopId: uuid("shop_id").references(() => shops.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    enabled: boolean("enabled").notNull().default(true),
+    payload: jsonb("payload").$type<
+      | Omit<GlobalRiskPolicyRevision, "revisionId" | "effectiveFrom">
+      | Omit<ShopRiskPolicyOverrideRevision, "revisionId" | "shopId" | "effectiveFrom">
+    >().notNull(),
+    effectiveFrom: timestamp("effective_from", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("risk_policy_revisions_sequence_unique").on(table.sequence),
+    index("risk_policy_revisions_global_effective_idx")
+      .on(table.effectiveFrom, table.sequence)
+      .where(sql`${table.scope} = 'GLOBAL'`),
+    index("risk_policy_revisions_shop_effective_idx")
+      .on(table.shopId, table.effectiveFrom, table.sequence)
+      .where(sql`${table.scope} = 'SHOP'`),
+    check(
+      "risk_policy_revisions_scope_shop_consistent",
+      sql`(${table.scope} = 'GLOBAL' and ${table.shopId} is null and ${table.enabled})
+        or (${table.scope} = 'SHOP' and ${table.shopId} is not null)`,
+    ),
+    check("risk_policy_revisions_payload_object", sql`jsonb_typeof(${table.payload}) = 'object'`),
+  ],
+);
+
 export const decisionCases = pgTable(
   "decision_cases",
   {
@@ -518,6 +559,7 @@ export const decisionCases = pgTable(
     riskSnapshot: jsonb("risk_snapshot").$type<DecisionRiskSnapshot>().notNull(),
     financeSnapshot: jsonb("finance_snapshot").$type<DecisionFinanceSnapshot>().notNull(),
     coverageSnapshot: jsonb("coverage_snapshot").$type<DecisionCoverageSnapshot>(),
+    resolvedPolicySnapshot: jsonb("resolved_policy_snapshot").$type<ResolvedRiskPolicySnapshot>(),
     decisionContextSnapshot: jsonb("decision_context_snapshot").$type<AiDecisionContext>(),
     ruleDecision: decisionRuleResultEnum("rule_decision").notNull(),
     ruleTriggers: jsonb("rule_triggers").$type<DecisionRuleTrigger[]>().notNull().default(sql`'[]'::jsonb`),
@@ -575,6 +617,10 @@ export const decisionCases = pgTable(
     check(
       "decision_cases_coverage_snapshot_object",
       sql`${table.coverageSnapshot} is null or jsonb_typeof(${table.coverageSnapshot}) = 'object'`
+    ),
+    check(
+      "decision_cases_resolved_policy_snapshot_object",
+      sql`${table.resolvedPolicySnapshot} is null or jsonb_typeof(${table.resolvedPolicySnapshot}) = 'object'`
     ),
     check(
       "decision_cases_decision_context_snapshot_object",
@@ -851,6 +897,7 @@ export type SyncRunRow = typeof syncRuns.$inferSelect;
 export type KpiSnapshotRow = typeof kpiSnapshots.$inferSelect;
 export type RiskControlStateRow = typeof riskControlStates.$inferSelect;
 export type DecisionCaseRow = typeof decisionCases.$inferSelect;
+export type RiskPolicyRevisionRow = typeof riskPolicyRevisions.$inferSelect;
 export type BaDecisionRow = typeof baDecisions.$inferSelect;
 export type AiDecisionRow = typeof aiDecisions.$inferSelect;
 export type DecisionExecutionRow = typeof decisionExecutions.$inferSelect;

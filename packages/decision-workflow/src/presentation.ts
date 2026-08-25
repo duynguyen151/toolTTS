@@ -5,6 +5,7 @@ import type {
   DecisionDataCoverage,
   DecisionRuleResult,
   DecisionRuleTrigger,
+  ResolvedRiskPolicySnapshot,
 } from "@shop-health/domain";
 
 export type DataOrigin = "LIVE" | "DEMO_SANITIZED";
@@ -30,6 +31,7 @@ export interface PersistedDecisionReview {
     readonly lastSyncAt: Date | null;
   };
   readonly coverageSnapshot: DecisionCoverageSnapshot;
+  readonly resolvedPolicySnapshot: ResolvedRiskPolicySnapshot | null;
   readonly metrics: {
     readonly totalOrders: number;
     readonly onHoldValue: string | null;

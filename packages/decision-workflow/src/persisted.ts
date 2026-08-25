@@ -10,6 +10,7 @@ import {
   getFinanceSummary,
   getFullPersistedRiskOrderFacts,
   getRiskControlState,
+  getEffectiveRiskPolicy,
   listDecisionHistory,
   recordAiDecision,
   recordBaDecisionForCase,
@@ -178,7 +179,6 @@ function aiInputForPersistence(
 export function createPersistedDecisionWorkflow(
   options: PersistedDecisionWorkflowOptions,
 ) {
-  const now = options.now ?? (() => new Date());
   const freshnessWindowMs = options.freshnessWindowMs ?? 86_400_000;
   const db = options.context.db;
   const store: DecisionWorkflowStore = {
@@ -190,16 +190,17 @@ export function createPersistedDecisionWorkflow(
       if (input === null) throw new Error(`Decision case not found: ${caseId}`);
       return input satisfies BaselineAiInputRecord;
     },
-    async loadReviewStartSource(profileNo): Promise<ReviewStartSource> {
+    async loadReviewStartSource(profileNo, effectiveAt): Promise<ReviewStartSource> {
       const shop = await findShopByProfileNo(db, profileNo);
       if (shop === null) throw new Error(`Shop not found: ${profileNo}`);
-      const [facts, latestOrdersRun, latestFinanceRun, latestProvenFinanceRun, riskState, previousDecisionContext] = await Promise.all([
+      const [facts, latestOrdersRun, latestFinanceRun, latestProvenFinanceRun, riskState, previousDecisionContext, resolvedPolicySnapshot] = await Promise.all([
         getFullPersistedRiskOrderFacts(db, shop.id),
         findLatestSuccessfulSyncRun(db, shop.id, "ORDERS"),
         findLatestSuccessfulSyncRun(db, shop.id, "FINANCE"),
         findLatestSuccessfulSyncRun(db, shop.id, "FINANCE", true),
         getRiskControlState(db, shop.id),
         getLatestDecisionContext(db, shop.id),
+        getEffectiveRiskPolicy(db, { shopId: shop.id, effectiveAt }),
       ]);
       const financeCaptureAt = resolveVerifiedFinanceCaptureAt(latestFinanceRun, latestProvenFinanceRun);
       const financeSummary = await getFinanceSummary(db, shop.id, financeCaptureAt);
@@ -247,7 +248,7 @@ export function createPersistedDecisionWorkflow(
         sourceReconciled: typedFinanceSnapshot.reasonTotalsReconcileToOfficialOnHold,
       });
       const freshness = assessDecisionFreshness({
-        now: now(),
+        now: effectiveAt,
         freshnessWindowMs,
         ordersSyncAt: latestOrdersRun?.finishedAt ?? null,
         financeSyncAt: latestFinanceRun?.finishedAt ?? null,
@@ -268,7 +269,7 @@ export function createPersistedDecisionWorkflow(
         financeCapturedAt: financeCaptureAt?.toISOString() ?? null,
         freshness,
       };
-      const period = resolveDecisionPeriod(facts, now());
+      const period = resolveDecisionPeriod(facts, effectiveAt);
       return {
         shop: {
           id: shop.id,
@@ -294,6 +295,7 @@ export function createPersistedDecisionWorkflow(
           locale: "en-US",
         },
         previousDecisionContext,
+        resolvedPolicySnapshot,
       };
     },
     async createDecisionCase(input) {

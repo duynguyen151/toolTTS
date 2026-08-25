@@ -9,6 +9,7 @@ import {
   DecisionFinanceSnapshotSchema,
   DecisionMetricsSnapshotSchema,
   DecisionRiskSnapshotSchema,
+  ResolvedRiskPolicySnapshotSchema,
   RecordBaDecisionForCaseInputSchema,
   RecordDryRunExecutionInputSchema,
   type AiDecisionInput,
@@ -24,6 +25,7 @@ import {
   type DecisionMetricsSnapshot,
   type DecisionRiskSnapshot,
   type DecisionRuleResult,
+  type ResolvedRiskPolicySnapshot,
   type DecisionRuleTrigger,
   type RecordBaDecisionForCaseInput,
   type RecordDryRunExecutionInput,
@@ -87,6 +89,7 @@ export interface DecisionReviewRecord {
   };
   coverageSnapshot: DecisionCoverageSnapshot;
   decisionContextSnapshot: AiDecisionContext | null;
+  resolvedPolicySnapshot: ResolvedRiskPolicySnapshot | null;
   metrics: {
     totalOrders: number;
     onHoldValue: string | null;
@@ -680,6 +683,9 @@ function makeReview(
     },
     coverageSnapshot,
     decisionContextSnapshot,
+    resolvedPolicySnapshot: decisionCase.resolvedPolicySnapshot == null
+      ? null
+      : ResolvedRiskPolicySnapshotSchema.parse(decisionCase.resolvedPolicySnapshot),
     metrics: {
       totalOrders: metrics.totalOrders,
       onHoldValue: metrics.onHoldValue,

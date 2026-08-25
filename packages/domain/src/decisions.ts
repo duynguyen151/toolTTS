@@ -5,6 +5,7 @@ import {
   DecimalStringSchema,
   NonNegativeDecimalStringSchema,
 } from "./contracts/common.js";
+import { ResolvedRiskPolicySnapshotSchema } from "./risk-policy.js";
 import type { RiskControlDecision } from "./risk-control.js";
 
 export const BaDecisionSchema = z.enum([
@@ -175,6 +176,9 @@ export const DecisionCaseInputSchema = z
     ruleTriggers: UniqueRuleTriggersSchema,
     dataCoverage: DecisionDataCoverageSchema,
     sourceSyncRunId: z.string().uuid().nullable(),
+    // Optional for backward compatibility; new cases can freeze the exact
+    // resolved revision/value/provenance state used by their rule.
+    resolvedPolicySnapshot: ResolvedRiskPolicySnapshotSchema.optional(),
     // Parsed by the persistence boundary to avoid a contract-module cycle.
     decisionContextSnapshot: z.unknown().nullable().optional(),
   })

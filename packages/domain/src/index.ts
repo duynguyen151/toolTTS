@@ -12,3 +12,4 @@ export * from "./recommendation/evaluate.js";
 export * from "./recommendation/policy.js";
 export * from "./report.js";
 export * from "./risk-control.js";
+export * from "./risk-policy.js";

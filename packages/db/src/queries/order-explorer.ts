@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, ilike, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, lt, or, sql, type SQL } from "drizzle-orm";
 
 import type { Database } from "../client.js";
 import { orders, type OrderRow } from "../schema.js";
@@ -135,16 +135,21 @@ export function buildOrderExplorerSummary(records: readonly OrderExplorerRecord[
   };
 }
 
-async function listOrderExplorerRecords(db: Database, input: ListOrderExplorerInput): Promise<OrderExplorerRecord[]> {
-  const conditions = [eq(orders.shopId, input.shopId)];
+function explorerConditions(input: Omit<ListOrderExplorerInput, "limit" | "offset">): SQL[] {
+  const conditions: SQL[] = [eq(orders.shopId, input.shopId)];
   if (input.start) conditions.push(gte(orders.paidAt, input.start));
   if (input.end) conditions.push(lt(orders.paidAt, input.end));
   if (input.canonicalStatus) conditions.push(eq(orders.canonicalStatus, input.canonicalStatus));
   const search = input.search?.trim();
   if (search) {
-    const pattern = `%${search.replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
-    conditions.push(or(ilike(orders.sourceOrderId, pattern), ilike(orders.trackingNumber, pattern))!);
+    const escaped = search.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
+    conditions.push(or(ilike(orders.sourceOrderId, `%${escaped}%`), ilike(orders.trackingNumber, `%${escaped}%`))!);
   }
+  return conditions;
+}
+
+async function listOrderExplorerRecords(db: Database, input: ListOrderExplorerInput): Promise<OrderExplorerRecord[]> {
+  const conditions = explorerConditions(input);
 
   const rows = await db.select(explorerSelection).from(orders)
     .where(and(...conditions))
@@ -166,15 +171,7 @@ export async function getOrderExplorerDetail(db: Database, shopId: string, sourc
 }
 
 export async function summarizeOrderExplorerRecords(db: Database, input: Omit<ListOrderExplorerInput, "limit" | "offset">): Promise<OrderExplorerSummary> {
-  const conditions = [eq(orders.shopId, input.shopId)];
-  if (input.start) conditions.push(gte(orders.paidAt, input.start));
-  if (input.end) conditions.push(lt(orders.paidAt, input.end));
-  if (input.canonicalStatus) conditions.push(eq(orders.canonicalStatus, input.canonicalStatus));
-  const search = input.search?.trim();
-  if (search) {
-    const pattern = `%${search.replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
-    conditions.push(or(ilike(orders.sourceOrderId, pattern), ilike(orders.trackingNumber, pattern))!);
-  }
+  const conditions = explorerConditions(input);
   const rows = await db.select({
     canonicalStatus: orders.canonicalStatus,
     count: sql<number>`count(*)::integer`,

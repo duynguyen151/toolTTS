@@ -239,7 +239,8 @@ export function createPersistedDecisionWorkflow(
       const financeRequiredSourceComplete = latestFinanceRun === null
         ? null
         : latestFinanceRun.sourceComplete === true &&
-          financeCaptureAt !== null && snapshot !== null;
+          financeCaptureAt !== null && snapshot !== null &&
+          financeSummary.proofStatus === "PROVEN";
       const complete = isCompleteDecisionCoverage({
         sourceCoverage: coverageProof,
         ordersSourceComplete,

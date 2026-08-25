@@ -1,6 +1,6 @@
 import { and, desc, eq, lt, sql } from "drizzle-orm";
 
-import type { Database } from "../client.js";
+import type { Database, DatabaseTransaction } from "../client.js";
 import { syncRuns, type SyncRunRow } from "../schema.js";
 import type { SourceCoverageProof } from "@shop-health/domain";
 
@@ -39,7 +39,7 @@ export interface CompleteSyncRunInput {
   sourceCapturedAt?: Date | null;
 }
 
-export async function completeSyncRun(db: Database, input: CompleteSyncRunInput): Promise<void> {
+export async function completeSyncRun(db: Database | DatabaseTransaction, input: CompleteSyncRunInput): Promise<void> {
   const now = new Date();
   const result = await db
     .update(syncRuns)

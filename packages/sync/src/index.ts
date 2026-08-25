@@ -2,7 +2,7 @@ import {
   beginSyncRun,
   completeSyncRun,
   failSyncRun,
-  insertFinancialSnapshot,
+  finalizeFinanceSyncRun,
   getFullPersistedRiskOrderFacts,
   getRiskControlState,
   markShopSynced,
@@ -24,6 +24,7 @@ import {
   evaluateRiskControlFacts
 } from "@shop-health/domain";
 import type {
+  NormalizedFinancialBatch,
   RiskControlDecision,
   SourceCoverageProof,
   SellerDataSource,
@@ -155,6 +156,7 @@ export async function runShopSync(input: RunSyncInput): Promise<SyncResult> {
     let complete = false;
     let sourceCoverageProof: SourceCoverageProof | undefined;
     let financeProof: FinanceCompletionProof | undefined;
+    const financeBatches: NormalizedFinancialBatch[] = [];
     let sourceCapturedAt: Date | null = null;
     const request: SyncRequest = {
       shop: sourceConfig(input.shop),
@@ -192,28 +194,26 @@ export async function runShopSync(input: RunSyncInput): Promise<SyncResult> {
               batch.settlements,
               batch.snapshot?.capturedAt ?? null
             );
-            const snapshot = batch.snapshot === null
-              ? { inserted: false }
-              : await insertFinancialSnapshot(transaction, batch.snapshot);
             return {
               rowsRead: settlement.rowsRead + (batch.snapshot === null ? 0 : 1),
-              rowsWritten: settlement.rowsWritten + (snapshot.inserted ? 1 : 0)
+              rowsWritten: settlement.rowsWritten,
             };
           });
           rowsRead += write.rowsRead;
           rowsWritten += write.rowsWritten;
           checkpoint = batch.checkpoint;
           complete = batch.complete;
+          financeBatches.push(batch);
           sourceCapturedAt = batch.snapshot?.capturedAt ?? null;
-          if (batch.snapshot !== null &&
+          financeProof = batch.snapshot !== null &&
             batch.snapshot.officialOnHoldAmount !== null &&
-            batch.snapshot.reasonTotalsReconcileToOfficialOnHold === true) {
-            financeProof = {
-              capturedAt: batch.snapshot.capturedAt,
-              officialOnHoldAmount: batch.snapshot.officialOnHoldAmount,
-              reasonTotalsReconcileToOfficialOnHold: true,
-            };
-          }
+            batch.snapshot.reasonTotalsReconcileToOfficialOnHold === true
+            ? {
+                capturedAt: batch.snapshot.capturedAt,
+                officialOnHoldAmount: batch.snapshot.officialOnHoldAmount,
+                reasonTotalsReconcileToOfficialOnHold: true,
+              }
+            : undefined;
           await updateSyncCheckpoint(input.context.db, run.id, checkpoint === null ? null : { cursor: checkpoint }, rowsRead, rowsWritten);
         }
       }
@@ -221,15 +221,47 @@ export async function runShopSync(input: RunSyncInput): Promise<SyncResult> {
       const syncComplete = input.kind === "finance"
         ? complete && financeProof !== undefined
         : complete;
-      await completeSyncRun(input.context.db, {
-        runId: run.id,
-        checkpoint: checkpoint === null ? null : { cursor: checkpoint },
-        rowsRead,
-        rowsWritten,
-        ...(sourceCoverageProof === undefined ? {} : { sourceCoverage: sourceCoverageProof }),
-        sourceComplete: syncComplete,
-        sourceCapturedAt,
-      });
+      if (input.kind === "finance") {
+        if (financeBatches.length === 0) {
+          await completeSyncRun(input.context.db, {
+            runId: run.id,
+            checkpoint: checkpoint === null ? null : { cursor: checkpoint },
+            rowsRead,
+            rowsWritten,
+            sourceComplete: false,
+            sourceCapturedAt: null,
+          });
+        } else {
+          const completedFinanceBatch = financeBatches[financeBatches.length - 1]!;
+          const precedingSettlements = financeBatches
+            .slice(0, -1)
+            .flatMap((batch) => batch.settlements);
+          const finalized = await withTransactionalShopLock(input.context, input.shop.id, (transaction) =>
+            finalizeFinanceSyncRun(transaction, {
+              runId: run.id,
+              shopId: input.shop.id,
+              checkpoint: checkpoint === null ? null : { cursor: checkpoint },
+              rowsRead,
+              rowsWritten,
+              sourceComplete: completedFinanceBatch.complete,
+              sourceReconciled: completedFinanceBatch.snapshot?.reasonTotalsReconcileToOfficialOnHold === true,
+              snapshot: completedFinanceBatch.snapshot,
+              settlements: [...precedingSettlements, ...completedFinanceBatch.settlements],
+            })
+          );
+          rowsWritten += finalized.snapshotInserted ? 1 : 0;
+        }
+      } else {
+        await completeSyncRun(input.context.db, {
+          runId: run.id,
+          checkpoint: checkpoint === null ? null : { cursor: checkpoint },
+          rowsRead,
+          rowsWritten,
+          ...(sourceCoverageProof === undefined ? {} : { sourceCoverage: sourceCoverageProof }),
+          sourceComplete: syncComplete,
+          sourceCapturedAt,
+        });
+      }
       if (syncComplete) {
         await markShopSynced(input.context.db, input.shop.id, input.kind);
       }

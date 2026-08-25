@@ -31,6 +31,8 @@ export {
   decisionExecutions,
   decisionRuleResultEnum,
   evaluationStatusEnum,
+  financeCaptureItems,
+  financeCaptures,
   financialSnapshots,
   kpiSnapshots,
   orders,
@@ -54,6 +56,8 @@ export {
   type BaDecisionRow,
   type DecisionCaseRow,
   type DecisionExecutionRow,
+  type FinanceCaptureItemRow,
+  type FinanceCaptureRow,
   type FinancialSnapshotRow,
   type KpiSnapshotRow,
   type OrderRow,
@@ -90,6 +94,7 @@ export {
 } from "./queries/decisions.js";
 export {
   buildDecisionFinanceSnapshot,
+  finalizeFinanceSyncRun,
   getFinanceSummary,
   getLatestFinancialSnapshotAtOrBefore,
   getLatestFinancialSnapshot,
@@ -101,6 +106,8 @@ export {
   type FinanceSummary,
   type DecisionFinanceSnapshotInput,
   type DecisionFinanceReasonSummary,
+  type FinalizeFinanceSyncRunInput,
+  type FinalizeFinanceSyncRunResult,
   type FinancialSnapshotInput,
   type SettlementUpsertInput
 } from "./queries/finance.js";

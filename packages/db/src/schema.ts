@@ -384,7 +384,13 @@ export const financialSnapshots = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => [
-    uniqueIndex("financial_snapshots_shop_hash_unique").on(table.shopId, table.snapshotHash),
+    unique("financial_snapshots_id_shop_unique").on(table.id, table.shopId),
+    uniqueIndex("financial_snapshots_shop_capture_hash_unique").on(
+      table.shopId,
+      table.capturedAt,
+      table.snapshotHash,
+    ),
+    index("financial_snapshots_shop_hash_idx").on(table.shopId, table.snapshotHash),
     index("financial_snapshots_shop_captured_idx").on(table.shopId, table.capturedAt),
     check("financial_snapshots_available_nonnegative", sql`${table.availableBalance} is null or ${table.availableBalance} >= 0`),
     check("financial_snapshots_frozen_nonnegative", sql`${table.frozenBalance} is null or ${table.frozenBalance} >= 0`),
@@ -432,6 +438,86 @@ export const syncRuns = pgTable(
       sql`${table.sourceCoverage} is null or jsonb_typeof(${table.sourceCoverage}) = 'object'`
     )
   ]
+);
+
+export const financeCaptures = pgTable(
+  "finance_captures",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    shopId: uuid("shop_id").notNull(),
+    syncRunId: uuid("sync_run_id").notNull(),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+    snapshotId: uuid("snapshot_id").notNull(),
+    snapshotHash: text("snapshot_hash").notNull(),
+    populationHash: text("population_hash").notNull(),
+    currency: text("currency").notNull(),
+    officialOnHoldAmount: numeric("official_on_hold_amount", { precision: 20, scale: 4 }).notNull(),
+    itemCount: integer("item_count").notNull(),
+    sourceSchemaVersion: text("source_schema_version").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("finance_captures_id_shop_unique").on(table.id, table.shopId),
+    uniqueIndex("finance_captures_shop_captured_unique").on(table.shopId, table.capturedAt),
+    uniqueIndex("finance_captures_sync_run_unique").on(table.syncRunId),
+    index("finance_captures_shop_captured_idx").on(table.shopId, table.capturedAt),
+    foreignKey({
+      columns: [table.syncRunId, table.shopId],
+      foreignColumns: [syncRuns.id, syncRuns.shopId],
+      name: "finance_captures_sync_run_shop_fk",
+    }).onDelete("restrict").onUpdate("cascade"),
+    foreignKey({
+      columns: [table.snapshotId, table.shopId],
+      foreignColumns: [financialSnapshots.id, financialSnapshots.shopId],
+      name: "finance_captures_snapshot_shop_fk",
+    }).onDelete("restrict").onUpdate("cascade"),
+    check("finance_captures_snapshot_hash_not_blank", sql`length(btrim(${table.snapshotHash})) > 0`),
+    check("finance_captures_population_hash_not_blank", sql`length(btrim(${table.populationHash})) > 0`),
+    check("finance_captures_currency_format", sql`${table.currency} ~ '^[A-Z]{3}$'`),
+    check("finance_captures_item_count_nonnegative", sql`${table.itemCount} >= 0`),
+    check("finance_captures_source_schema_version_not_blank", sql`length(btrim(${table.sourceSchemaVersion})) > 0`),
+  ],
+);
+
+export const financeCaptureItems = pgTable(
+  "finance_capture_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    captureId: uuid("capture_id").notNull(),
+    shopId: uuid("shop_id").notNull(),
+    sourceStatementDetailId: text("source_statement_detail_id").notNull(),
+    expectedSettlementAmount: numeric("expected_settlement_amount", { precision: 20, scale: 4 }),
+    settledAmount: numeric("settled_amount", { precision: 20, scale: 4 }),
+    currency: text("currency").notNull(),
+    sourceSettlementStatus: text("source_settlement_status").notNull(),
+    settlementState: settlementStateEnum("settlement_state").notNull(),
+    onHoldReason: text("on_hold_reason"),
+    sourceHash: text("source_hash").notNull(),
+    sourceSchemaVersion: text("source_schema_version").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("finance_capture_items_capture_source_unique").on(
+      table.captureId,
+      table.sourceStatementDetailId,
+    ),
+    index("finance_capture_items_shop_capture_idx").on(table.shopId, table.captureId),
+    index("finance_capture_items_capture_state_reason_idx").on(
+      table.captureId,
+      table.settlementState,
+      table.onHoldReason,
+    ),
+    foreignKey({
+      columns: [table.captureId, table.shopId],
+      foreignColumns: [financeCaptures.id, financeCaptures.shopId],
+      name: "finance_capture_items_capture_shop_fk",
+    }).onDelete("restrict").onUpdate("cascade"),
+    check("finance_capture_items_currency_format", sql`${table.currency} ~ '^[A-Z]{3}$'`),
+    check("finance_capture_items_source_id_not_blank", sql`length(btrim(${table.sourceStatementDetailId})) > 0`),
+    check("finance_capture_items_source_status_not_blank", sql`length(btrim(${table.sourceSettlementStatus})) > 0`),
+    check("finance_capture_items_source_hash_not_blank", sql`length(btrim(${table.sourceHash})) > 0`),
+    check("finance_capture_items_source_schema_version_not_blank", sql`length(btrim(${table.sourceSchemaVersion})) > 0`),
+  ],
 );
 
 export const kpiSnapshots = pgTable(
@@ -1041,6 +1127,8 @@ export type AdsPowerProfileRow = typeof adspowerProfiles.$inferSelect;
 export type OrderRow = typeof orders.$inferSelect;
 export type SettlementRecordRow = typeof settlementRecords.$inferSelect;
 export type FinancialSnapshotRow = typeof financialSnapshots.$inferSelect;
+export type FinanceCaptureRow = typeof financeCaptures.$inferSelect;
+export type FinanceCaptureItemRow = typeof financeCaptureItems.$inferSelect;
 export type SyncRunRow = typeof syncRuns.$inferSelect;
 export type KpiSnapshotRow = typeof kpiSnapshots.$inferSelect;
 export type RiskControlStateRow = typeof riskControlStates.$inferSelect;

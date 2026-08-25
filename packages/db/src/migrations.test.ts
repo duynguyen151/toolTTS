@@ -101,7 +101,7 @@ describe("W16-T01 migration", () => {
     expect(checks?.ba_decisions_notes_not_blank?.value).toContain("regexp_replace");
     expect(checks?.ba_decisions_planned_method_other_requires_notes?.value).toContain("regexp_replace");
     expect(checks?.ba_decisions_other_requires_notes?.value).toContain("LEGACY_UNATTRIBUTED");
-    expect(journal.entries.at(-1)).toEqual(expect.objectContaining({
+    expect(journal.entries[27]).toEqual(expect.objectContaining({
       idx: 27,
       tag: "0027_meaningful_ba_notes",
     }));

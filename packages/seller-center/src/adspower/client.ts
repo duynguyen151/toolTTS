@@ -46,10 +46,13 @@ const configuredProxySoftware = new Set([
   "brightdata",
   "brightauto",
   "oxylabsauto",
+  "922s5auto",
   "ipfoxyauto",
+  "922s5auth",
   "kookauto",
   "lumiproxyauto",
   "luminati",
+  "ssh",
   "other",
 ]);
 

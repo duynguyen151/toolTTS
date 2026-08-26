@@ -17,6 +17,14 @@ describe("AdsPower proxy capability", () => {
       .resolves.toEqual({ status: "CONFIGURED", reasonCode: "PROXY_CONFIGURED" });
   });
 
+  it.each([" 922S5AuTo ", "922s5AuTh", "SsH"])(
+    "reports each documented configured proxy software after normalization: %s",
+    async (proxySoft) => {
+      await expect(clientForProxySoftware(proxySoft).getProxyCapability("profile-1", { timeoutMs: 25 }))
+        .resolves.toEqual({ status: "CONFIGURED", reasonCode: "PROXY_CONFIGURED" });
+    },
+  );
+
   it("fails closed for unknown nonblank proxy software", async () => {
     await expect(clientForProxySoftware("socks5").getProxyCapability("profile-1", { timeoutMs: 25 }))
       .resolves.toEqual({ status: "UNAVAILABLE", reasonCode: "PROXY_UNKNOWN" });

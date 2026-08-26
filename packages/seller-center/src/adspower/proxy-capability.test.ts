@@ -29,4 +29,9 @@ describe("AdsPower proxy capability", () => {
     await expect(clientForProxySoftware("socks5").getProxyCapability("profile-1", { timeoutMs: 25 }))
       .resolves.toEqual({ status: "UNAVAILABLE", reasonCode: "PROXY_UNKNOWN" });
   });
+
+  it("fails closed for unsupported lumiproxyauto proxy software", async () => {
+    await expect(clientForProxySoftware("lumiproxyauto").getProxyCapability("profile-1", { timeoutMs: 25 }))
+      .resolves.toEqual({ status: "UNAVAILABLE", reasonCode: "PROXY_UNKNOWN" });
+  });
 });

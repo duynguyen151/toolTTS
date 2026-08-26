@@ -50,7 +50,6 @@ const configuredProxySoftware = new Set([
   "ipfoxyauto",
   "922s5auth",
   "kookauto",
-  "lumiproxyauto",
   "luminati",
   "ssh",
   "other",

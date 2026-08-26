@@ -1,4 +1,4 @@
-import { and, asc, eq, isNotNull, lt } from "drizzle-orm";
+import { and, asc, eq, gte, isNotNull } from "drizzle-orm";
 import { RefreshObservedStatusSchema } from "@shop-health/domain";
 import { z } from "zod";
 
@@ -90,7 +90,7 @@ export async function listAutomaticRefreshEligibleAdsPowerProfileShops(
       eq(adspowerProfiles.eligibilityStatus, "ELIGIBLE"),
       eq(adspowerProfiles.observedStatus, "active"),
       isNotNull(adspowerProfiles.observedStatusAt),
-      lt(adspowerProfiles.observedStatusAt, observedStatusCutoff),
+      gte(adspowerProfiles.observedStatusAt, observedStatusCutoff),
       eq(shops.enabled, true),
       eq(shops.syncState, "ACTIVE"),
       eq(shops.verificationStatus, "VERIFIED"),

@@ -6,7 +6,7 @@ import type { Database } from "../client.js";
 import { listAutomaticRefreshEligibleAdsPowerProfileShops } from "./adspower-profiles.js";
 
 describe("listAutomaticRefreshEligibleAdsPowerProfileShops", () => {
-  it("selects an active observation older than the freshness cutoff", async () => {
+  it("selects active observations at or after the freshness cutoff", async () => {
     let where: SQL | undefined;
     const query = {
       innerJoin: () => query,
@@ -25,7 +25,7 @@ describe("listAutomaticRefreshEligibleAdsPowerProfileShops", () => {
 
     const compiled = new PgDialect().sqlToQuery(where!);
     expect(compiled.sql).toContain('"adspower_profiles"."observed_status_at" is not null');
-    expect(compiled.sql).toMatch(/"adspower_profiles"\."observed_status_at" < \$\d+/);
+    expect(compiled.sql).toMatch(/"adspower_profiles"\."observed_status_at" >= \$\d+/);
     expect(compiled.params).toContain("2026-01-15T00:02:00.000Z");
   });
 });

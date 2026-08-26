@@ -86,14 +86,26 @@ describeWithDatabase("AdsPower profile PostgreSQL persistence", () => {
     await expect(listAutomaticRefreshEligibleAdsPowerProfileShops(context.db, new Date("2026-01-15T00:02:00.000Z"))).resolves.not.toContainEqual(
       expect.objectContaining({ id: shop!.id }),
     );
+    const now = new Date("2026-01-15T00:12:00.000Z");
     await setAdsPowerProfileObservedStatus(context.db, profile.id, {
       observedStatus: "active",
-      observedAt: new Date("2026-01-15T00:01:00.000Z"),
+      observedAt: new Date("2026-01-15T00:02:00.000Z"),
     });
-    await expect(listAutomaticRefreshEligibleAdsPowerProfileShops(context.db, new Date("2026-01-15T00:02:00.000Z"))).resolves.not.toContainEqual(
+    await expect(listAutomaticRefreshEligibleAdsPowerProfileShops(context.db, now)).resolves.toContainEqual(
       expect.objectContaining({ id: shop!.id }),
     );
-    await expect(listAutomaticRefreshEligibleAdsPowerProfileShops(context.db, new Date("2026-01-15T00:12:00.001Z"))).resolves.toContainEqual(
+    await setAdsPowerProfileObservedStatus(context.db, profile.id, {
+      observedStatus: "active",
+      observedAt: new Date("2026-01-15T00:11:00.000Z"),
+    });
+    await expect(listAutomaticRefreshEligibleAdsPowerProfileShops(context.db, now)).resolves.toContainEqual(
+      expect.objectContaining({ id: shop!.id }),
+    );
+    await setAdsPowerProfileObservedStatus(context.db, profile.id, {
+      observedStatus: "active",
+      observedAt: new Date("2026-01-15T00:01:59.999Z"),
+    });
+    await expect(listAutomaticRefreshEligibleAdsPowerProfileShops(context.db, now)).resolves.not.toContainEqual(
       expect.objectContaining({ id: shop!.id }),
     );
   });

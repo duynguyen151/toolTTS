@@ -57,6 +57,17 @@ describeWithDatabase("AI task config PostgreSQL persistence", () => {
     `).rejects.toMatchObject({ constraint_name: "ai_task_configs_effective_from_finite" });
   });
 
+  it("accepts port 65535 and rejects port 99999 at the direct SQL boundary", async () => {
+    await expect(context.sql`
+      insert into ai_task_configs (task_id, provider, base_url, model, parameters, secret_ref, enabled, status, effective_from)
+      values ('SHOP_HEALTH_REVIEWER', '9router', 'http://127.0.0.1:65535/v1', 'oc/deepseek-v4-flash-free', '{}'::jsonb, 'TOOL_AI_API_KEY', true, 'ENABLED', ${T0.toISOString()}::timestamptz)
+    `).resolves.toBeDefined();
+    await expect(context.sql`
+      insert into ai_task_configs (task_id, provider, base_url, model, parameters, secret_ref, enabled, status, effective_from)
+      values ('SHOP_HEALTH_REVIEWER', '9router', 'http://127.0.0.1:99999/v1', 'oc/deepseek-v4-flash-free', '{}'::jsonb, 'TOOL_AI_API_KEY', true, 'ENABLED', ${T0.toISOString()}::timestamptz)
+    `).rejects.toMatchObject({ constraint_name: "ai_task_configs_base_url_valid" });
+  });
+
   it("appends immutable revisions and deterministically resolves the latest effective revision", async () => {
     const [first, second] = await Promise.all([
       appendAiTaskConfigRevision(context.db, reviewer({ model: "oc/deepseek-v4-flash-free" })),

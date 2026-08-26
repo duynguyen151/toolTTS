@@ -86,7 +86,7 @@ export type AiTaskConfigInput = z.input<typeof AiTaskConfigInputSchema>;
 export type PersistedAiTaskConfig = z.infer<typeof PersistedAiTaskConfigSchema>;
 
 /** Non-secret configuration handed to W14-T02's future provider factory. */
-export interface ResolvedAiTaskConfig {
+type ResolvedConfiguredAiTaskConfig = {
   readonly taskId: AiTaskId;
   readonly source: "PERSISTED" | "ENVIRONMENT";
   readonly revisionId: string | null;
@@ -99,7 +99,24 @@ export interface ResolvedAiTaskConfig {
   readonly status: "ENABLED" | "DISABLED";
   readonly availability: "AVAILABLE" | "UNAVAILABLE";
   readonly registry: ToolAiModelRegistry | null;
-}
+};
+
+export type ResolvedAiTaskConfig =
+  | ResolvedConfiguredAiTaskConfig
+  | {
+      readonly taskId: AiTaskId;
+      readonly source: "UNSET";
+      readonly revisionId: null;
+      readonly provider: null;
+      readonly baseUrl: null;
+      readonly model: null;
+      readonly parameters: null;
+      readonly secretRef: null;
+      readonly enabled: false;
+      readonly status: "DISABLED";
+      readonly availability: "UNAVAILABLE";
+      readonly registry: null;
+    };
 
 function registryFor(config: Pick<PersistedAiTaskConfig, "provider" | "model">): ToolAiModelRegistry | null {
   return config.provider === "9router"
@@ -112,7 +129,7 @@ function registryFor(config: Pick<PersistedAiTaskConfig, "provider" | "model">):
     : null;
 }
 
-function persistedConfig(config: PersistedAiTaskConfig): ResolvedAiTaskConfig {
+function persistedConfig(config: PersistedAiTaskConfig): ResolvedConfiguredAiTaskConfig {
   return {
     taskId: config.taskId,
     source: "PERSISTED",
@@ -129,7 +146,7 @@ function persistedConfig(config: PersistedAiTaskConfig): ResolvedAiTaskConfig {
   };
 }
 
-function environmentConfig(environment: NodeJS.ProcessEnv): ResolvedAiTaskConfig {
+function environmentConfig(environment: NodeJS.ProcessEnv): ResolvedConfiguredAiTaskConfig {
   const config = readBaselineAiConfig(environment);
   return {
     taskId: "SHOP_HEALTH_REVIEWER",
@@ -147,11 +164,35 @@ function environmentConfig(environment: NodeJS.ProcessEnv): ResolvedAiTaskConfig
   };
 }
 
+function unsetConfig(taskId: AiTaskId): Extract<ResolvedAiTaskConfig, { source: "UNSET" }> {
+  return {
+    taskId,
+    source: "UNSET",
+    revisionId: null,
+    provider: null,
+    baseUrl: null,
+    model: null,
+    parameters: null,
+    secretRef: null,
+    registry: null,
+    enabled: false,
+    status: "DISABLED",
+    availability: "UNAVAILABLE",
+  };
+}
+
 /** No migration seed is written: existing deployments retain the current env baseline until an operator appends a revision. */
 export function resolveAiTaskConfig(
+  taskId: AiTaskId,
   current: PersistedAiTaskConfig | null,
   environment: NodeJS.ProcessEnv = process.env,
 ): ResolvedAiTaskConfig {
-  if (current === null) return environmentConfig(environment);
-  return persistedConfig(PersistedAiTaskConfigSchema.parse(current));
+  if (current !== null) {
+    const persisted = PersistedAiTaskConfigSchema.parse(current);
+    if (persisted.taskId !== taskId) {
+      throw new Error(`Persisted AI task ${persisted.taskId} does not match requested task ${taskId}`);
+    }
+    return persistedConfig(persisted);
+  }
+  return taskId === "SHOP_HEALTH_REVIEWER" ? environmentConfig(environment) : unsetConfig(taskId);
 }

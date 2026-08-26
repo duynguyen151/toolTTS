@@ -88,7 +88,7 @@ describe("AI task registry contract", () => {
   });
 
   it("resolves persisted enabled reviewer over env and exposes only metadata", () => {
-    const resolved = resolveAiTaskConfig(current, environment({ TOOL_AI_DEFAULT_MODEL: "oc/big-pickle" }));
+    const resolved = resolveAiTaskConfig("SHOP_HEALTH_REVIEWER", current, environment({ TOOL_AI_DEFAULT_MODEL: "oc/big-pickle" }));
     expect(resolved).toMatchObject({
       taskId: "SHOP_HEALTH_REVIEWER",
       source: "PERSISTED",
@@ -103,7 +103,7 @@ describe("AI task registry contract", () => {
   });
 
   it("falls back unchanged to the env baseline when reviewer has no persisted current revision", () => {
-    const resolved = resolveAiTaskConfig(null, environment({ TOOL_AI_DEFAULT_MODEL: "oc/big-pickle" }));
+    const resolved = resolveAiTaskConfig("SHOP_HEALTH_REVIEWER", null, environment({ TOOL_AI_DEFAULT_MODEL: "oc/big-pickle" }));
     expect(resolved).toMatchObject({
       taskId: "SHOP_HEALTH_REVIEWER",
       source: "ENVIRONMENT",
@@ -118,24 +118,48 @@ describe("AI task registry contract", () => {
 
   it("reports disabled persisted reviewer unavailable and keeps future slots disabled", () => {
     const disabled = { ...current, enabled: false, status: "DISABLED" as const };
-    expect(resolveAiTaskConfig(disabled, environment())).toMatchObject({
+    expect(resolveAiTaskConfig("SHOP_HEALTH_REVIEWER", disabled, environment())).toMatchObject({
       taskId: "SHOP_HEALTH_REVIEWER",
       source: "PERSISTED",
       enabled: false,
       status: "DISABLED",
       availability: "UNAVAILABLE",
     });
-    expect(resolveAiTaskConfig({ ...disabled, taskId: "FINANCE_SPECIALIST" }, environment())).toMatchObject({
+    expect(resolveAiTaskConfig("FINANCE_SPECIALIST", { ...disabled, taskId: "FINANCE_SPECIALIST" }, environment())).toMatchObject({
       taskId: "FINANCE_SPECIALIST",
+      source: "PERSISTED",
       enabled: false,
       status: "DISABLED",
       availability: "UNAVAILABLE",
     });
   });
+
+  it("returns an explicit unavailable UNSET result for future tasks without a matching persisted revision", () => {
+    const resolved = resolveAiTaskConfig("FINANCE_SPECIALIST", null, environment());
+
+    expect(resolved).toEqual({
+      taskId: "FINANCE_SPECIALIST",
+      source: "UNSET",
+      revisionId: null,
+      provider: null,
+      baseUrl: null,
+      model: null,
+      parameters: null,
+      secretRef: null,
+      registry: null,
+      enabled: false,
+      status: "DISABLED",
+      availability: "UNAVAILABLE",
+    });
+  });
+
+  it("rejects a persisted revision for a different requested task", () => {
+    expect(() => resolveAiTaskConfig("FINANCE_SPECIALIST", current, environment())).toThrow("does not match requested task");
+  });
 });
 
 describe("AI task resolution safety", () => {
   it("rejects invalid persisted metadata before resolution", () => {
-    expect(() => resolveAiTaskConfig({ ...current, model: "oc/unverified-free" }, environment())).toThrow();
+    expect(() => resolveAiTaskConfig("SHOP_HEALTH_REVIEWER", { ...current, model: "oc/unverified-free" }, environment())).toThrow();
   });
 });

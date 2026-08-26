@@ -782,7 +782,7 @@ export const aiTaskConfigs = pgTable(
     check("ai_task_configs_provider_valid", sql`${table.provider} in ('9router', 'openai-compatible', 'huggingface-hosted')`),
     check("ai_task_configs_model_not_blank", sql`length(btrim(${table.model})) > 0`),
     check("ai_task_configs_model_valid", sql`(${table.provider} <> '9router' or ${table.model} in ('oc/deepseek-v4-flash-free', 'oc/big-pickle', 'oc/hy3-free', 'oc/laguna-s-2.1-free', 'oc/nemotron-3-ultra-free', 'oc/nemotron-3.5-lightning-free'))`),
-    check("ai_task_configs_base_url_valid", sql`${table.baseUrl} ~ '^https?://([A-Za-z0-9.-]+|\\[[0-9A-Fa-f:.]+\\])(:[0-9]{1,5})?(/[^?#[:space:]]*)?$'`),
+    check("ai_task_configs_base_url_valid", sql`${table.baseUrl} ~ '^https?://([A-Za-z0-9.-]+|\\[[0-9A-Fa-f:.]+\\])(:([0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(/[^?#[:space:]]*)?$'`),
     check("ai_task_configs_secret_ref_not_blank", sql`length(btrim(${table.secretRef})) > 0`),
     check("ai_task_configs_secret_ref_valid", sql`${table.secretRef} ~ '^[A-Z][A-Z0-9_]{0,127}$'`),
     check("ai_task_configs_status_enabled_consistent", sql`(${table.enabled} and ${table.status} = 'ENABLED' and ${table.taskId} = 'SHOP_HEALTH_REVIEWER') or (not ${table.enabled} and ${table.status} = 'DISABLED')`),

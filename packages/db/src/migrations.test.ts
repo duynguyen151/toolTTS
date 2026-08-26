@@ -17,6 +17,10 @@ const financeCompletionSnapshotUrl = new URL("../migrations/meta/0030_snapshot.j
 const financeHealthMigrationUrl = new URL("../migrations/0031_finance_health_reconciliation.sql", import.meta.url);
 const financeHealthSnapshotUrl = new URL("../migrations/meta/0031_snapshot.json", import.meta.url);
 const financePreviousSnapshotUrl = new URL("../migrations/meta/0028_snapshot.json", import.meta.url);
+const aiTaskMigrationUrl = new URL("../migrations/0032_pretty_black_panther.sql", import.meta.url);
+const aiTaskSnapshotUrl = new URL("../migrations/meta/0032_snapshot.json", import.meta.url);
+const aiTaskPreviousSnapshotUrl = new URL("../migrations/meta/0031_snapshot.json", import.meta.url);
+const schemaUrl = new URL("./schema.ts", import.meta.url);
 const previousSnapshotUrl = new URL("../migrations/meta/0025_snapshot.json", import.meta.url);
 const journalUrl = new URL("../migrations/meta/_journal.json", import.meta.url);
 
@@ -133,6 +137,38 @@ describe("W5-T02 Finance health migration", () => {
     expect(journal.entries[31]).toEqual(expect.objectContaining({
       idx: 31,
       tag: "0031_finance_health_reconciliation",
+    }));
+  });
+});
+
+describe("W14-T01 AI task migration", () => {
+  it("accepts port 65535 but rejects port 99999 in migration, schema, and snapshot constraints", async () => {
+    const [migrationSql, snapshotText, previousSnapshotText, schemaText, journalText] = await Promise.all([
+      readFile(aiTaskMigrationUrl, "utf8"),
+      readFile(aiTaskSnapshotUrl, "utf8"),
+      readFile(aiTaskPreviousSnapshotUrl, "utf8"),
+      readFile(schemaUrl, "utf8"),
+      readFile(journalUrl, "utf8"),
+    ]);
+    const snapshot = JSON.parse(snapshotText) as {
+      prevId: string;
+      tables: Record<string, { checkConstraints: Record<string, { value: string }> }>;
+    };
+    const previousSnapshot = JSON.parse(previousSnapshotText) as { id: string };
+    const journal = JSON.parse(journalText) as { entries: Array<{ idx: number; tag: string }> };
+    const constraint = snapshot.tables["public.ai_task_configs"]?.checkConstraints.ai_task_configs_base_url_valid?.value;
+
+    const portPattern = /^(?:[0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$/;
+    expect(portPattern.test("65535")).toBe(true);
+    expect(portPattern.test("99999")).toBe(false);
+    for (const source of [migrationSql, schemaText, constraint]) {
+      expect(source).toContain("6553[0-5]");
+      expect(source).not.toContain(":[0-9]{1,5}");
+    }
+    expect(snapshot.prevId).toBe(previousSnapshot.id);
+    expect(journal.entries[32]).toEqual(expect.objectContaining({
+      idx: 32,
+      tag: "0032_pretty_black_panther",
     }));
   });
 });

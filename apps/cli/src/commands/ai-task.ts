@@ -42,11 +42,48 @@ function parsePayload(value: string): Record<string, unknown> {
   }
 }
 
+type AiTaskConfigJson = {
+  readonly revisionId: string;
+  readonly sequence: string;
+  readonly taskId: string;
+  readonly provider: string;
+  readonly baseUrl: string;
+  readonly model: string;
+  readonly parameters: { readonly timeoutMs?: number | undefined };
+  readonly secretRef: string;
+  readonly enabled: boolean;
+  readonly status: string;
+  readonly effectiveFrom: string;
+  readonly createdAt: string;
+};
+
+function serializeAiTaskConfig(config: {
+  revisionId: string; sequence: bigint; taskId: string; provider: string; baseUrl: string; model: string;
+  parameters: { readonly timeoutMs?: number | undefined }; secretRef: string; enabled: boolean; status: string;
+  effectiveFrom: Date; createdAt: Date;
+}): AiTaskConfigJson {
+  return {
+    revisionId: config.revisionId,
+    sequence: config.sequence.toString(),
+    taskId: config.taskId,
+    provider: config.provider,
+    baseUrl: config.baseUrl,
+    model: config.model,
+    parameters: config.parameters,
+    secretRef: config.secretRef,
+    enabled: config.enabled,
+    status: config.status,
+    effectiveFrom: config.effectiveFrom.toISOString(),
+    createdAt: config.createdAt.toISOString(),
+  };
+}
+
 function outputRevision(revision: {
-  revisionId: string; sequence: bigint; taskId: string; enabled: boolean; status: string; effectiveFrom: Date;
+  revisionId: string; sequence: bigint; taskId: string; provider: string; baseUrl: string; model: string;
+  parameters: { readonly timeoutMs?: number | undefined }; secretRef: string; enabled: boolean; status: string;
+  effectiveFrom: Date; createdAt: Date;
 }, json: boolean | undefined): void {
-  const safe = { ...revision, sequence: revision.sequence.toString(), effectiveFrom: revision.effectiveFrom.toISOString() };
-  if (json) printJson({ schemaVersion: "ai-task-config-revision.v1", revision: safe });
+  if (json) printJson({ schemaVersion: "ai-task-config-revision.v1", revision: serializeAiTaskConfig(revision) });
   else printKeyValues([
     ["Task", revision.taskId], ["Revision ID", revision.revisionId], ["Sequence", String(revision.sequence)],
     ["Enabled", String(revision.enabled)], ["Status", revision.status], ["Effective From", revision.effectiveFrom.toISOString()],
@@ -75,7 +112,11 @@ export function registerAiTaskCommands(program: Command, runtime: CliRuntime): v
         taskId: parseTaskId(taskId),
         effectiveAt: parseDate(options.effectiveAt, "--effective-at"),
       }));
-      if (options.json) printJson({ schemaVersion: "ai-task-config-current.v1", taskId, config: current });
+      if (options.json) printJson({
+        schemaVersion: "ai-task-config-current.v1",
+        taskId,
+        config: current === null ? null : serializeAiTaskConfig(current),
+      });
       else printKeyValues([["Task", taskId], ["Current Revision", current?.revisionId ?? "-"], ["Status", current?.status ?? "UNSET"]]);
     });
 }

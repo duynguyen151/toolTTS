@@ -47,7 +47,9 @@ describe("AI task commands", () => {
     mocks.getCurrentAiTaskConfig.mockReset();
     mocks.appendAiTaskConfigRevision.mockResolvedValue({
       revisionId: "00000000-0000-4000-8000-000000000001", sequence: 1n,
-      taskId: "SHOP_HEALTH_REVIEWER", enabled: true, status: "ENABLED", effectiveFrom: new Date(effectiveFrom),
+      taskId: "SHOP_HEALTH_REVIEWER", provider: "9router", baseUrl: "http://127.0.0.1:20128/v1", model: "oc/big-pickle",
+      parameters: {}, secretRef: "TOOL_AI_API_KEY", enabled: true, status: "ENABLED",
+      effectiveFrom: new Date(effectiveFrom), createdAt: new Date(effectiveFrom),
     });
     mocks.getCurrentAiTaskConfig.mockResolvedValue(null);
   });
@@ -63,9 +65,44 @@ describe("AI task commands", () => {
   });
 
   it("reads an exact effective task revision and rejects unknown task IDs", async () => {
-    await run(["ai-task", "read-effective", "SHOP_HEALTH_REVIEWER", "--effective-at", effectiveFrom, "--json"]);
+    const current = {
+      revisionId: "00000000-0000-4000-8000-000000000001",
+      sequence: 9007199254740993n,
+      taskId: "SHOP_HEALTH_REVIEWER",
+      provider: "9router",
+      baseUrl: "http://127.0.0.1:20128/v1",
+      model: "oc/big-pickle",
+      parameters: { timeoutMs: 30_000 },
+      secretRef: "TOOL_AI_API_KEY",
+      enabled: true,
+      status: "ENABLED",
+      effectiveFrom: new Date(effectiveFrom),
+      createdAt: new Date("2026-08-25T00:01:00.000Z"),
+    };
+    mocks.getCurrentAiTaskConfig.mockResolvedValueOnce(current);
+
+    const output = await run(["ai-task", "read-effective", "SHOP_HEALTH_REVIEWER", "--effective-at", effectiveFrom, "--json"]);
+
     expect(mocks.getCurrentAiTaskConfig).toHaveBeenCalledWith({}, {
       taskId: "SHOP_HEALTH_REVIEWER", effectiveAt: new Date(effectiveFrom),
+    });
+    expect(JSON.parse(output)).toEqual({
+      schemaVersion: "ai-task-config-current.v1",
+      taskId: "SHOP_HEALTH_REVIEWER",
+      config: {
+        revisionId: "00000000-0000-4000-8000-000000000001",
+        sequence: "9007199254740993",
+        taskId: "SHOP_HEALTH_REVIEWER",
+        provider: "9router",
+        baseUrl: "http://127.0.0.1:20128/v1",
+        model: "oc/big-pickle",
+        parameters: { timeoutMs: 30_000 },
+        secretRef: "TOOL_AI_API_KEY",
+        enabled: true,
+        status: "ENABLED",
+        effectiveFrom,
+        createdAt: "2026-08-25T00:01:00.000Z",
+      },
     });
     await expect(run(["ai-task", "set", "UNKNOWN", "--effective-from", effectiveFrom, "--payload", JSON.stringify(payload)])).rejects.toThrow("Unknown AI task ID");
   });

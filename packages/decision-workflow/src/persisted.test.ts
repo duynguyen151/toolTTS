@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { assessDecisionFreshness, isCompleteDecisionCoverage, resolveDecisionPeriod, resolveFinanceCaptureAt, resolveVerifiedFinanceCaptureAt } from "./persisted.js";
+import { assessDecisionFreshness, isCompleteDecisionCoverage, resolveDecisionFinanceHealth, resolveDecisionPeriod, resolveFinanceCaptureAt, resolveVerifiedFinanceCaptureAt } from "./persisted.js";
 
 describe("assessDecisionFreshness", () => {
   it("requires Orders sync, Finance sync, and Finance capture all within the window", () => {
@@ -22,6 +22,107 @@ describe("assessDecisionFreshness", () => {
       financeSyncAt: null,
       financeCapturedAt: null,
     })).toBe("UNKNOWN");
+  });
+});
+
+describe("resolveDecisionFinanceHealth", () => {
+  it("keeps proven Finance evidence while exposing a later failed refresh", () => {
+    expect(resolveDecisionFinanceHealth({
+      evaluatedAt: new Date("2026-08-15T00:00:00.000Z"),
+      freshnessWindowMs: 86_400_000,
+      latestRefreshRun: { status: "FAILED" },
+      selectedFinanceRun: {
+        status: "SUCCEEDED",
+        sourceComplete: true,
+        sourceCapturedAt: new Date("2026-08-14T12:00:00.000Z"),
+      },
+      financeSummary: { proofStatus: "PROVEN" },
+      reconciled: true,
+    })).toMatchObject({
+      provider: "SELLER_CENTER",
+      capability: "OFFICIAL_ON_HOLD",
+      collectedAt: "2026-08-14T12:00:00.000Z",
+      health: "FRESH",
+      officialOnHoldAvailability: "AVAILABLE",
+      refreshState: "FAILED",
+    });
+  });
+
+  it("preserves an explicit contract-proven provider update separately from collection time", () => {
+    expect(resolveDecisionFinanceHealth({
+      evaluatedAt: new Date("2026-08-15T00:00:00.000Z"),
+      freshnessWindowMs: 86_400_000,
+      latestRefreshRun: { status: "SUCCEEDED" },
+      selectedFinanceRun: {
+        status: "SUCCEEDED",
+        sourceComplete: true,
+        sourceCapturedAt: new Date("2026-08-14T12:00:00.000Z"),
+      },
+      providerBinding: {
+        provenance: { source: "SELLER_CENTER", capabilities: ["OFFICIAL_ON_HOLD"] },
+        providerUpdatedAt: new Date("2026-08-13T00:00:00.000Z"),
+      },
+      financeSummary: { proofStatus: "PROVEN" },
+      reconciled: true,
+    })).toMatchObject({
+      providerUpdatedAt: "2026-08-13T00:00:00.000Z",
+      collectedAt: "2026-08-14T12:00:00.000Z",
+      ageMs: 43_200_000,
+      health: "FRESH",
+    });
+  });
+
+  it("preserves persisted reconciliation failure separately from incomplete collection", () => {
+    expect(resolveDecisionFinanceHealth({
+      evaluatedAt: new Date("2026-08-15T00:00:00.000Z"),
+      freshnessWindowMs: 86_400_000,
+      latestRefreshRun: { status: "SUCCEEDED" },
+      selectedFinanceRun: {
+        status: "SUCCEEDED",
+        sourceComplete: true,
+        sourceCapturedAt: new Date("2026-08-14T12:00:00.000Z"),
+        sourceReconciled: false,
+      },
+      financeSummary: { proofStatus: "PROOF_UNAVAILABLE" },
+      reconciled: null,
+    })).toMatchObject({
+      completeness: "COMPLETE",
+      reconciliation: "FAILED",
+      health: "RECONCILIATION_FAILED",
+      officialOnHoldAvailability: "UNAVAILABLE",
+    });
+  });
+
+  it("does not relabel a generic binding timestamp as provider-updated Finance time", () => {
+    expect(resolveDecisionFinanceHealth({
+      evaluatedAt: new Date("2026-08-15T00:00:00.000Z"),
+      freshnessWindowMs: 86_400_000,
+      latestRefreshRun: null,
+      selectedFinanceRun: null,
+      providerBinding: {
+        provenance: { source: "SELLER_CENTER", capabilities: ["ORDERS"] },
+        providerUpdatedAt: new Date("2026-08-13T00:00:00.000Z"),
+      },
+      financeSummary: { proofStatus: "PROOF_UNAVAILABLE" },
+      reconciled: null,
+    })).toMatchObject({ providerUpdatedAt: null });
+  });
+
+  it("keeps provider-updated time unknown when no explicit provider contract supplies it", () => {
+    expect(resolveDecisionFinanceHealth({
+      evaluatedAt: new Date("2026-08-15T00:00:00.000Z"),
+      freshnessWindowMs: 86_400_000,
+      latestRefreshRun: null,
+      selectedFinanceRun: null,
+      financeSummary: { proofStatus: "PROOF_UNAVAILABLE" },
+      reconciled: null,
+    })).toMatchObject({
+      providerUpdatedAt: null,
+      collectedAt: null,
+      health: "UNKNOWN",
+      officialOnHoldAvailability: "UNAVAILABLE",
+      refreshState: "NOT_REQUESTED",
+    });
   });
 });
 

@@ -6,6 +6,7 @@ import {
   DecimalStringSchema,
   NonNegativeDecimalStringSchema,
 } from "./contracts/common.js";
+import { FinanceHealthSnapshotSchema } from "./finance-health.js";
 import { ResolvedRiskPolicySnapshotSchema } from "./risk-policy.js";
 import type { RiskControlDecision } from "./risk-control.js";
 
@@ -136,6 +137,7 @@ export const DecisionCoverageSnapshotSchema = z
     latestSuccessfulSyncAt: z.string().datetime().nullable().optional(),
     financeCapturedAt: z.string().datetime().nullable().optional(),
     freshness: z.enum(["FRESH", "STALE", "UNKNOWN"]).optional(),
+    financeHealth: FinanceHealthSnapshotSchema.optional(),
   })
   .strict()
   .superRefine((coverage, context) => {

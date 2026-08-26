@@ -231,6 +231,7 @@ export async function runShopSync(input: RunSyncInput): Promise<SyncResult> {
             rowsRead,
             rowsWritten,
             sourceComplete: false,
+            sourceReconciled: false,
             sourceCapturedAt: null,
           });
         } else {

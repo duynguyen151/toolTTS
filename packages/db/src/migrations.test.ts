@@ -14,6 +14,8 @@ const financeRepairMigrationUrl = new URL("../migrations/0029_finance_evidence_a
 const financeRepairSnapshotUrl = new URL("../migrations/meta/0029_snapshot.json", import.meta.url);
 const financeCompletionMigrationUrl = new URL("../migrations/0030_finance_evidence_completion_lock.sql", import.meta.url);
 const financeCompletionSnapshotUrl = new URL("../migrations/meta/0030_snapshot.json", import.meta.url);
+const financeHealthMigrationUrl = new URL("../migrations/0031_finance_health_reconciliation.sql", import.meta.url);
+const financeHealthSnapshotUrl = new URL("../migrations/meta/0031_snapshot.json", import.meta.url);
 const financePreviousSnapshotUrl = new URL("../migrations/meta/0028_snapshot.json", import.meta.url);
 const previousSnapshotUrl = new URL("../migrations/meta/0025_snapshot.json", import.meta.url);
 const journalUrl = new URL("../migrations/meta/_journal.json", import.meta.url);
@@ -101,6 +103,36 @@ describe("W5-T01 Finance repair migration", () => {
     expect(journal.entries[30]).toEqual(expect.objectContaining({
       idx: 30,
       tag: "0030_finance_evidence_completion_lock",
+    }));
+  });
+});
+
+describe("W5-T02 Finance health migration", () => {
+  it("persists reconciliation without fabricating legacy facts", async () => {
+    const [sql, snapshotText, previousSnapshotText, journalText] = await Promise.all([
+      readFile(financeHealthMigrationUrl, "utf8"),
+      readFile(financeHealthSnapshotUrl, "utf8"),
+      readFile(financeCompletionSnapshotUrl, "utf8"),
+      readFile(journalUrl, "utf8"),
+    ]);
+    const snapshot = JSON.parse(snapshotText) as {
+      prevId: string;
+      tables: Record<string, { columns: Record<string, unknown> }>;
+    };
+    const previousSnapshot = JSON.parse(previousSnapshotText) as { id: string };
+    const journal = JSON.parse(journalText) as { entries: Array<{ idx: number; tag: string }> };
+
+    expect(sql).toContain('ADD COLUMN "source_reconciled" boolean');
+    expect(sql).toContain('DROP TRIGGER "sync_runs_finance_evidence_authorized"');
+    expect(sql).toContain('WHERE EXISTS (\n\tSELECT 1 FROM "finance_captures"');
+    expect(sql).not.toContain('UPDATE "sync_runs" AS "sr"\nSET "source_reconciled" = false');
+    expect(sql).toContain('NEW.source_reconciled IS DISTINCT FROM true');
+    expect(sql).toContain('CREATE TRIGGER "sync_runs_finance_evidence_authorized"');
+    expect(snapshot.prevId).toBe(previousSnapshot.id);
+    expect(snapshot.tables["public.sync_runs"]?.columns).toHaveProperty("source_reconciled");
+    expect(journal.entries[31]).toEqual(expect.objectContaining({
+      idx: 31,
+      tag: "0031_finance_health_reconciliation",
     }));
   });
 });

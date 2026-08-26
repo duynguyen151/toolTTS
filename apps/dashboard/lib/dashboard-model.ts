@@ -50,6 +50,7 @@ function unavailableDecisionCenter(): DashboardDecisionCenter {
     message: "No persisted LIVE decision case is available for this shop.",
     caseId: null,
     profileNo: null,
+    financeHealth: null,
     coverage: {
       status: "UNAVAILABLE",
       source: "Unavailable",

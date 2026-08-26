@@ -1,7 +1,9 @@
 import {
   createDecisionCase,
+  findEnabledShopProviderBinding,
   findLatestSuccessfulSyncRun,
   findShopByProfileNo,
+  listSyncRuns,
   getDecisionAiInput,
   getLatestDecisionContext,
   getDecisionReview,
@@ -27,6 +29,7 @@ import {
 } from "@shop-health/decision-ai";
 import {
   createDecisionWorkflow,
+  resolveDecisionFinanceHealth,
   type DecisionWorkflow,
   type DecisionWorkflowStore,
   type PersistedDecisionReview,
@@ -163,14 +166,19 @@ export function createDbDecisionWorkflowStore(
     async loadReviewStartSource(profileNo, effectiveAt) {
       const shop = await findShopByProfileNo(db, profileNo);
       if (shop === null) throw notFound("shop", profileNo);
-      const [facts, finance, latestSuccessfulSync, riskState, previousDecisionContext, resolvedPolicySnapshot] = await Promise.all([
+      const [facts, latestSuccessfulSync, latestFinanceRun, latestProvenFinanceRun, latestFinanceRefreshRun, sellerCenterBinding, riskState, previousDecisionContext, resolvedPolicySnapshot] = await Promise.all([
         getFullPersistedRiskOrderFacts(db, shop.id),
-        getFinanceSummary(db, shop.id),
         findLatestSuccessfulSyncRun(db, shop.id),
+        findLatestSuccessfulSyncRun(db, shop.id, "FINANCE"),
+        findLatestSuccessfulSyncRun(db, shop.id, "FINANCE", true, true),
+        listSyncRuns(db, shop.id, 1, "FINANCE").then(([run]) => run ?? null),
+        findEnabledShopProviderBinding(db, shop.id, "SELLER_CENTER"),
         getRiskControlState(db, shop.id),
         getLatestDecisionContext(db, shop.id),
         getEffectiveRiskPolicy(db, { shopId: shop.id, effectiveAt }),
       ]);
+      const selectedFinanceRun = latestProvenFinanceRun ?? latestFinanceRun;
+      const finance = await getFinanceSummary(db, shop.id, selectedFinanceRun?.sourceCapturedAt ?? null);
       const normalizedFacts = normalizeRiskFacts(facts);
       const period = resolveFullHistoryPeriod(normalizedFacts, effectiveAt);
       const snapshot = finance.proofStatus === "PROVEN" ? finance.latestSnapshot : null;
@@ -189,6 +197,27 @@ export function createDbDecisionWorkflowStore(
         periodStart: period.periodStart,
         periodEnd: period.periodEnd,
         facts: normalizedFacts,
+        coverageSnapshot: {
+          coverageState: "UNKNOWN",
+          persistedMetricsWindow: "FULL_PERSISTED_HISTORY",
+          source: null,
+          provenSourceWindow: null,
+          completeWithinSourceWindow: null,
+          lifetimeHistoryComplete: null,
+          financeHealth: resolveDecisionFinanceHealth({
+            evaluatedAt: effectiveAt,
+            freshnessWindowMs: 86_400_000,
+            latestRefreshRun: latestFinanceRefreshRun,
+            selectedFinanceRun,
+            providerBinding: sellerCenterBinding,
+            financeSummary: finance,
+            reconciled: finance.proofStatus === "PROVEN" &&
+              finance.unknownOnHoldReasonCount === 0 &&
+              finance.missingOnHoldExpectedAmountCount === 0
+              ? true
+              : finance.proofStatus === "PROVEN" ? false : null,
+          }),
+        },
         financeSnapshot: {
           capturedAt: snapshot?.capturedAt.toISOString() ?? null,
           currency: snapshot?.currency ?? shop.currency,

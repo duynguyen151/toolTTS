@@ -1,8 +1,10 @@
 import {
   buildDecisionFinanceSnapshot,
   createDecisionCase,
+  findEnabledShopProviderBinding,
   findLatestSuccessfulSyncRun,
   findShopByProfileNo,
+  listSyncRuns,
   getDecisionAiInput,
   getLatestDecisionContext,
   getDecisionReview,
@@ -19,8 +21,11 @@ import {
 } from "@shop-health/db";
 import type { BaselineAiClient, BaselineAiInputRecord, BaselineAiResult } from "@shop-health/decision-ai";
 import {
+  resolveFinanceHealth,
+  SELLER_CENTER_OFFICIAL_ON_HOLD_PROOF,
   type DecisionCoverageSnapshot,
   type DecisionFinanceSnapshot,
+  type FinanceHealthSnapshot,
   type RiskOrderFact,
   type SourceCoverageProof,
 } from "@shop-health/domain";
@@ -51,6 +56,42 @@ export interface DecisionCompletenessEvidence {
   readonly financeSourceComplete: boolean | null | undefined;
   readonly financeSnapshotCapturedAt: Date | null;
   readonly sourceReconciled: boolean | null | undefined;
+}
+
+export interface DecisionFinanceHealthEvidence {
+  readonly evaluatedAt: Date;
+  readonly freshnessWindowMs: number;
+  readonly latestRefreshRun: { readonly status: "RUNNING" | "SUCCEEDED" | "FAILED" | "ABORTED" | "PAUSED" } | null;
+  readonly selectedFinanceRun: {
+    readonly status: "RUNNING" | "SUCCEEDED" | "FAILED" | "ABORTED" | "PAUSED";
+    readonly sourceComplete: boolean | null | undefined;
+    readonly sourceCapturedAt: Date | null | undefined;
+    readonly sourceReconciled?: boolean | null | undefined;
+  } | null;
+  readonly providerBinding?: {
+    readonly provenance: { readonly source: "SELLER_CENTER" | "COTIK"; readonly capabilities: readonly ("ORDERS" | "SUPPLEMENTARY_FINANCE" | "OFFICIAL_ON_HOLD")[] };
+    readonly providerUpdatedAt: Date | null;
+  } | null;
+  readonly financeSummary: { readonly proofStatus: "PROVEN" | "PROOF_UNAVAILABLE" };
+  readonly reconciled: boolean | null | undefined;
+}
+
+export function resolveDecisionFinanceHealth(
+  evidence: DecisionFinanceHealthEvidence,
+): FinanceHealthSnapshot {
+  return resolveFinanceHealth({
+    capabilityProof: SELLER_CENTER_OFFICIAL_ON_HOLD_PROOF,
+    providerUpdatedAt: evidence.providerBinding?.provenance.capabilities.includes("OFFICIAL_ON_HOLD")
+      ? evidence.providerBinding.providerUpdatedAt
+      : null,
+    collectedAt: evidence.selectedFinanceRun?.sourceCapturedAt ?? null,
+    evaluatedAt: evidence.evaluatedAt,
+    freshnessWindowMs: evidence.freshnessWindowMs,
+    proofStatus: evidence.financeSummary.proofStatus,
+    sourceComplete: evidence.selectedFinanceRun?.sourceComplete ?? null,
+    reconciled: evidence.selectedFinanceRun?.sourceReconciled ?? evidence.reconciled ?? null,
+    refreshState: evidence.latestRefreshRun?.status ?? "NOT_REQUESTED",
+  });
 }
 
 export function resolveFinanceCaptureAt(
@@ -193,11 +234,13 @@ export function createPersistedDecisionWorkflow(
     async loadReviewStartSource(profileNo, effectiveAt): Promise<ReviewStartSource> {
       const shop = await findShopByProfileNo(db, profileNo);
       if (shop === null) throw new Error(`Shop not found: ${profileNo}`);
-      const [facts, latestOrdersRun, latestFinanceRun, latestProvenFinanceRun, riskState, previousDecisionContext, resolvedPolicySnapshot] = await Promise.all([
+      const [facts, latestOrdersRun, latestFinanceRun, latestProvenFinanceRun, latestFinanceRefreshRun, sellerCenterBinding, riskState, previousDecisionContext, resolvedPolicySnapshot] = await Promise.all([
         getFullPersistedRiskOrderFacts(db, shop.id),
         findLatestSuccessfulSyncRun(db, shop.id, "ORDERS"),
         findLatestSuccessfulSyncRun(db, shop.id, "FINANCE"),
-        findLatestSuccessfulSyncRun(db, shop.id, "FINANCE", true),
+        findLatestSuccessfulSyncRun(db, shop.id, "FINANCE", true, true),
+        listSyncRuns(db, shop.id, 1, "FINANCE").then(([run]) => run ?? null),
+        findEnabledShopProviderBinding(db, shop.id, "SELLER_CENTER"),
         getRiskControlState(db, shop.id),
         getLatestDecisionContext(db, shop.id),
         getEffectiveRiskPolicy(db, { shopId: shop.id, effectiveAt }),
@@ -270,6 +313,15 @@ export function createPersistedDecisionWorkflow(
         latestSuccessfulSyncAt: latestSuccessfulSyncAt?.toISOString() ?? null,
         financeCapturedAt: provenFinanceCaptureAt?.toISOString() ?? null,
         freshness,
+        financeHealth: resolveDecisionFinanceHealth({
+          evaluatedAt: effectiveAt,
+          freshnessWindowMs,
+          latestRefreshRun: latestFinanceRefreshRun,
+          selectedFinanceRun: latestProvenFinanceRun ?? latestFinanceRun,
+          providerBinding: sellerCenterBinding,
+          financeSummary,
+          reconciled: typedFinanceSnapshot.reasonTotalsReconcileToOfficialOnHold,
+        }),
       };
       const period = resolveDecisionPeriod(facts, effectiveAt);
       return {

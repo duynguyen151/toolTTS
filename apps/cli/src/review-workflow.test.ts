@@ -5,7 +5,9 @@ const db = vi.hoisted(() => ({
   getEffectiveRiskPolicy: vi.fn(),
   getFinanceSummary: vi.fn(),
   getFullPersistedRiskOrderFacts: vi.fn(),
+  findEnabledShopProviderBinding: vi.fn(),
   findLatestSuccessfulSyncRun: vi.fn(),
+  listSyncRuns: vi.fn(),
   getLatestDecisionContext: vi.fn(),
   getRiskControlState: vi.fn(),
 }));
@@ -67,7 +69,9 @@ describe("review workflow DB mapping", () => {
       statementCount: 8,
       onHoldCount: 4,
     });
+    db.findEnabledShopProviderBinding.mockResolvedValue(null);
     db.findLatestSuccessfulSyncRun.mockResolvedValue(null);
+    db.listSyncRuns.mockResolvedValue([]);
     db.getRiskControlState.mockResolvedValue(null);
     db.getLatestDecisionContext.mockResolvedValue(null);
     db.getEffectiveRiskPolicy.mockResolvedValue({ version: "policy.v1" });
@@ -77,6 +81,16 @@ describe("review workflow DB mapping", () => {
       new Date("2026-08-15T00:00:00.000Z"),
     );
 
+    expect(db.getFinanceSummary).toHaveBeenCalledWith(expect.anything(), "shop-1", null);
+    expect(source.coverageSnapshot?.financeHealth).toMatchObject({
+      provider: "SELLER_CENTER",
+      capability: "OFFICIAL_ON_HOLD",
+      providerUpdatedAt: null,
+      collectedAt: null,
+      health: "UNKNOWN",
+      officialOnHoldAvailability: "UNAVAILABLE",
+      refreshState: "NOT_REQUESTED",
+    });
     expect(source.financeSnapshot).toEqual({
       capturedAt: null,
       currency: "USD",

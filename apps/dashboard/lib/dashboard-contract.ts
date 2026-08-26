@@ -1,3 +1,5 @@
+import type { FinanceHealthSnapshot } from "@shop-health/domain";
+
 export type DashboardDataOrigin = "LIVE" | "DEMO_SANITIZED" | "UNAVAILABLE";
 export type DashboardSyncState = "IDLE" | "RUNNING" | "SUCCEEDED" | "FAILED" | "PAUSED_LAYOUT" | "DISABLED";
 export type DashboardProfileState = "OPEN" | "CLOSED" | "ERROR" | "NOT_VERIFIED";
@@ -62,6 +64,7 @@ export interface DashboardDecisionCenter {
   message: string;
   caseId: string | null;
   profileNo: string | null;
+  financeHealth: FinanceHealthSnapshot | null;
   coverage: {
     status: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
     source: string;

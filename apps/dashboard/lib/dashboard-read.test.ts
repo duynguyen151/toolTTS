@@ -345,7 +345,7 @@ describe("loadDashboardPresentation", () => {
     expect(presentation.decisionCenter?.reviewQueue).toEqual([]);
   });
 
-  it("preserves frozen rule, AI, and comparison facts and agrees on source coverage", async () => {
+  it("preserves frozen rule, AI, Finance health, and comparison facts", async () => {
     process.env.DATABASE_URL = "postgres://dashboard-test";
     configureDatabaseRead();
     databaseMocks.listShops.mockResolvedValue([{
@@ -373,6 +373,21 @@ describe("loadDashboardPresentation", () => {
           financeRequiredSourceComplete: true,
           sourceReconciled: true,
           freshness: "FRESH",
+          financeHealth: {
+            schemaVersion: "finance-health.v1",
+            provider: "SELLER_CENTER",
+            capability: "OFFICIAL_ON_HOLD",
+            capabilityProofRevision: "seller-center-official-on-hold.v1",
+            providerUpdatedAt: null,
+            collectedAt: "2026-08-16T00:00:00.000Z",
+            evaluatedAt: "2026-08-16T01:00:00.000Z",
+            ageMs: 3_600_000,
+            health: "FRESH",
+            completeness: "COMPLETE",
+            reconciliation: "RECONCILED",
+            officialOnHoldAvailability: "AVAILABLE",
+            refreshState: "SUCCEEDED",
+          },
         },
         rule: { decision: "CONTINUE", triggers: [], policyVersion: "risk-policy.v1" },
         metrics: { totalOrders: 10, onHoldValue: "100", deliveredCount: 9, deliveryRate: 0.9, cancellationRate: 0, refundRate: 0, currency: "USD" },
@@ -411,6 +426,11 @@ describe("loadDashboardPresentation", () => {
 
     expect(presentation.coverage.status).toBe("READY");
     expect(center.coverage.status).toBe("COMPLETE");
+    expect(center.financeHealth).toMatchObject({
+      provider: "SELLER_CENTER",
+      health: "FRESH",
+      officialOnHoldAvailability: "AVAILABLE",
+    });
     expect(center.comparisons[0]).toMatchObject({ relativeDelta: "0.125", previous: "0.8", current: "0.9" });
     expect(center.rule.checks[0]).toMatchObject({ operator: "LT", result: "PASS" });
     expect(center.ai.reason).toBe("Healthy evidence supports continuation.");

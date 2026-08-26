@@ -76,6 +76,7 @@ function decisionCenterFromReviews(
       message: "No persisted LIVE decision case is available for this shop.",
       caseId: null,
       profileNo: null,
+      financeHealth: null,
       coverage: {
         status: "UNAVAILABLE",
         source: "Unavailable",
@@ -143,6 +144,7 @@ function decisionCenterFromReviews(
     message: "Live read model from persisted decision history.",
     caseId: review.case?.id ?? null,
     profileNo: review.shop?.profileNo ?? null,
+    financeHealth: coverage.financeHealth ?? null,
     coverage: {
       status: hasCompleteProvenSourceWindow(review) ? "COMPLETE" : "PARTIAL",
       source: coverage.source ?? "Unavailable",

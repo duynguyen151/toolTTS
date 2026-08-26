@@ -6,6 +6,7 @@ export * from "./contracts/v1-freeze.js";
 export * from "./contracts/frozen-context.js";
 export * from "./decisions.js";
 export * from "./delivery-rate.js";
+export * from "./finance-health.js";
 export * from "./metrics/calculate.js";
 export * from "./metrics/types.js";
 export * from "./recommendation/evaluate.js";

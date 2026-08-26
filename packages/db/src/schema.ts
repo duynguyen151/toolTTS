@@ -423,6 +423,7 @@ export const syncRuns = pgTable(
     retryCount: integer("retry_count").notNull().default(0),
     sourceCoverage: jsonb("source_coverage").$type<SourceCoverageProof>(),
     sourceComplete: boolean("source_complete"),
+    sourceReconciled: boolean("source_reconciled"),
     sourceCapturedAt: timestamp("source_captured_at", { withTimezone: true }),
     failureType: text("failure_type"),
     failureMessage: text("failure_message"),

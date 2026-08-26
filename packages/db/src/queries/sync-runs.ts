@@ -36,6 +36,7 @@ export interface CompleteSyncRunInput {
   rowsWritten: number;
   sourceCoverage?: SourceCoverageProof;
   sourceComplete?: boolean | null;
+  sourceReconciled?: boolean | null;
   sourceCapturedAt?: Date | null;
 }
 
@@ -50,6 +51,7 @@ export async function completeSyncRun(db: Database | DatabaseTransaction, input:
       rowsWritten: input.rowsWritten,
       sourceCoverage: input.sourceCoverage ?? null,
       sourceComplete: input.sourceComplete ?? null,
+      sourceReconciled: input.sourceReconciled ?? null,
       sourceCapturedAt: input.sourceCapturedAt ?? null,
       finishedAt: now,
       updatedAt: now
@@ -128,12 +130,15 @@ export async function abortStaleSyncRuns(
 export async function listSyncRuns(
   db: Database,
   shopId: string,
-  limit = 20
+  limit = 20,
+  mode?: SyncMode,
 ): Promise<SyncRunRow[]> {
+  const conditions = [eq(syncRuns.shopId, shopId)];
+  if (mode !== undefined) conditions.push(eq(syncRuns.mode, mode));
   return db
     .select()
     .from(syncRuns)
-    .where(eq(syncRuns.shopId, shopId))
+    .where(and(...conditions))
     .orderBy(desc(syncRuns.startedAt))
     .limit(Math.min(Math.max(limit, 1), 100));
 }
@@ -143,10 +148,12 @@ export async function findLatestSuccessfulSyncRun(
   shopId: string,
   mode?: SyncMode,
   sourceComplete?: boolean,
+  sourceReconciled?: boolean,
 ): Promise<SyncRunRow | null> {
   const conditions = [eq(syncRuns.shopId, shopId), eq(syncRuns.status, "SUCCEEDED")];
   if (mode !== undefined) conditions.push(eq(syncRuns.mode, mode));
   if (sourceComplete !== undefined) conditions.push(eq(syncRuns.sourceComplete, sourceComplete));
+  if (sourceReconciled !== undefined) conditions.push(eq(syncRuns.sourceReconciled, sourceReconciled));
   const [run] = await db
     .select()
     .from(syncRuns)

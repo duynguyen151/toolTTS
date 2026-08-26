@@ -308,7 +308,8 @@ export async function finalizeFinanceSyncRun(
       checkpoint: input.checkpoint,
       rowsRead: input.rowsRead,
       rowsWritten: input.rowsWritten + (snapshotWrite.inserted ? 1 : 0),
-      sourceComplete: false,
+      sourceComplete: input.sourceComplete,
+      sourceReconciled: input.sourceReconciled,
       sourceCapturedAt: input.snapshot?.capturedAt ?? null,
     });
     return {
@@ -397,6 +398,7 @@ export async function finalizeFinanceSyncRun(
     rowsRead: input.rowsRead,
     rowsWritten,
     sourceComplete: true,
+    sourceReconciled: true,
     sourceCapturedAt: input.snapshot.capturedAt,
   });
   return {
@@ -737,6 +739,7 @@ export async function getFinanceSummary(
         runMode: syncRuns.mode,
         runStatus: syncRuns.status,
         runSourceComplete: syncRuns.sourceComplete,
+        runSourceReconciled: syncRuns.sourceReconciled,
         runSourceCapturedAt: syncRuns.sourceCapturedAt,
       })
       .from(financeCaptures)
@@ -780,6 +783,7 @@ export async function getFinanceSummary(
     capture.runMode === "FINANCE" &&
     capture.runStatus === "SUCCEEDED" &&
     capture.runSourceComplete === true &&
+    capture.runSourceReconciled === true &&
     capture.runSourceCapturedAt?.getTime() === capture.capturedAt.getTime() &&
     latestSnapshot.capturedAt.getTime() === capture.capturedAt.getTime() &&
     latestSnapshot.snapshotHash === capture.snapshotHash &&

@@ -345,4 +345,3 @@ export async function testAiTaskConnection(
     if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
   }
 }
-

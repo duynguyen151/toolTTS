@@ -165,4 +165,3 @@ describe("task-driven AI provider factory", () => {
 it("does not accept unsafe identity in the task contract", () => {
   expect(() => resolved({ baseUrl: "https://provider.example.test/v1?secret=key#fragment" })).toThrow();
 });
-

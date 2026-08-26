@@ -227,8 +227,8 @@ describe("AdsPowerClient", () => {
       reasonCode: "PROXY_UNCONFIGURED",
     });
     await expect(capability({ user_proxy_config: { proxy_soft: "socks5" } })).resolves.toEqual({
-      status: "UNCONFIGURED",
-      reasonCode: "PROXY_UNCONFIGURED",
+      status: "UNAVAILABLE",
+      reasonCode: "PROXY_UNKNOWN",
     });
     await expect(capability({ user_proxy_config: { proxy_soft: "other" } })).resolves.toEqual({
       status: "CONFIGURED",

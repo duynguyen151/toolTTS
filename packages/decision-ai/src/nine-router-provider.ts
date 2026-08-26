@@ -198,7 +198,10 @@ export function createNineRouterDecisionProvider(
         const envelope = parseChatCompletionEnvelope(body);
         const decoded = JSON.parse(envelope.content) as unknown;
         const output = BaselineAiOutputSchema.parse(decoded);
-        if (baselineAiOutputContainsSecret(output, config.apiKey)) {
+        if (
+          baselineAiOutputContainsSecret(output, config.apiKey)
+          || (config.apiKey !== undefined && config.apiKey !== "" && envelope.model.includes(config.apiKey))
+        ) {
           return { status: "FAILURE", errorCode: "INVALID_RESPONSE" };
         }
         return {

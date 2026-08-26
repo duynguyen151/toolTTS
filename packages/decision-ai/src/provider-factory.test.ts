@@ -238,6 +238,30 @@ describe("task-driven AI provider factory", () => {
     });
   });
 
+  it("rejects a 9Router secret that is an approved reported model", async () => {
+    const secret = "big-pickle";
+    const client = createBaselineAiClientForTask(environmentNineRouter({
+      TOOL_AI_API_KEY: secret,
+      TOOL_AI_DEFAULT_MODEL: "oc/big-pickle",
+      TOOL_AI_ALLOWED_MODELS: "oc/big-pickle",
+      TOOL_AI_FALLBACK_MODELS: "",
+    }), {
+      environment: { TOOL_AI_API_KEY: secret },
+      fetch: async () => nineRouterResponse(secret),
+    });
+
+    const result = await client.recommend(validBaselineAiInput);
+
+    expect(result).toMatchObject({
+      status: "UNAVAILABLE",
+      errorCode: "INVALID_RESPONSE",
+      reportedModel: null,
+      actualModelUsed: null,
+    });
+    expect(JSON.stringify(result)).not.toContain(`"reportedModel":"${secret}"`);
+    expect(JSON.stringify(result)).not.toContain(`"actualModelUsed":"${secret}"`);
+  });
+
   it.each([
     ["reason", { reason: "The provider secret sk-test-secret was echoed." }],
     ["supportingFactors", { supportingFactors: ["Observed sk-test-secret in the provider output."] }],

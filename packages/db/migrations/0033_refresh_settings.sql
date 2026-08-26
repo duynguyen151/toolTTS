@@ -9,7 +9,7 @@ AS $$
       FROM jsonb_array_elements(offsets) WITH ORDINALITY AS entry(value, position)
       WHERE jsonb_typeof(value) <> 'number'
         OR value #>> '{}' !~ '^(0|[1-9][0-9]*)$'
-        OR (value #>> '{}')::integer > 1440
+        OR (value #>> '{}')::numeric > 86400
     )
     AND NOT EXISTS (
       SELECT value
@@ -31,13 +31,13 @@ CREATE TABLE "refresh_checkpoints" (
 CREATE TABLE "refresh_settings" (
   "singleton_id" integer PRIMARY KEY NOT NULL,
   "auto_refresh_enabled" boolean DEFAULT true NOT NULL,
-  "retry_offsets_minutes" jsonb DEFAULT '[0, 30, 120, 300, 600]'::jsonb NOT NULL,
+  "retry_offsets_seconds" jsonb DEFAULT '[0, 30, 120, 300, 600]'::jsonb NOT NULL,
   "revision" integer DEFAULT 1 NOT NULL,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL,
   "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
   CONSTRAINT "refresh_settings_singleton" CHECK ("refresh_settings"."singleton_id" = 1),
   CONSTRAINT "refresh_settings_revision_positive" CHECK ("refresh_settings"."revision" > 0),
-  CONSTRAINT "refresh_settings_retry_offsets_valid" CHECK (refresh_retry_offsets_valid("refresh_settings"."retry_offsets_minutes")),
+  CONSTRAINT "refresh_settings_retry_offsets_valid" CHECK (refresh_retry_offsets_valid("refresh_settings"."retry_offsets_seconds")),
   CONSTRAINT "refresh_settings_created_at_finite" CHECK ("refresh_settings"."created_at" not in ('infinity'::timestamptz, '-infinity'::timestamptz)),
   CONSTRAINT "refresh_settings_updated_at_finite" CHECK ("refresh_settings"."updated_at" not in ('infinity'::timestamptz, '-infinity'::timestamptz))
 );--> statement-breakpoint

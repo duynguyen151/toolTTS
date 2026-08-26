@@ -797,7 +797,7 @@ export const refreshSettings = pgTable(
   {
     singletonId: integer("singleton_id").primaryKey(),
     autoRefreshEnabled: boolean("auto_refresh_enabled").notNull().default(true),
-    retryOffsetsMinutes: jsonb("retry_offsets_minutes").$type<number[]>().notNull().default(sql`'[0, 30, 120, 300, 600]'::jsonb`),
+    retryOffsetsSeconds: jsonb("retry_offsets_seconds").$type<number[]>().notNull().default(sql`'[0, 30, 120, 300, 600]'::jsonb`),
     revision: integer("revision").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -807,7 +807,7 @@ export const refreshSettings = pgTable(
     check("refresh_settings_revision_positive", sql`${table.revision} > 0`),
     check(
       "refresh_settings_retry_offsets_valid",
-      sql`refresh_retry_offsets_valid(${table.retryOffsetsMinutes})`,
+      sql`refresh_retry_offsets_valid(${table.retryOffsetsSeconds})`,
     ),
     check("refresh_settings_created_at_finite", sql`${table.createdAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz)`),
     check("refresh_settings_updated_at_finite", sql`${table.updatedAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz)`),

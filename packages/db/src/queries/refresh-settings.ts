@@ -11,25 +11,25 @@ import {
 
 export const REFRESH_TIME_ZONE = "Asia/Bangkok" as const;
 export const MAX_REFRESH_RETRY_OFFSETS = 10;
-export const MAX_REFRESH_RETRY_OFFSET_MINUTES = 1_440;
+export const MAX_REFRESH_RETRY_OFFSET_SECONDS = 86_400;
 
 const LocalTimeSchema = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, {
   message: "localTime must be an exact HH:mm Bangkok wall-clock value",
 });
 const CheckpointIdSchema = z.string().uuid();
 const RetryOffsetsSchema = z.array(
-  z.number().int().min(0).max(MAX_REFRESH_RETRY_OFFSET_MINUTES),
+  z.number().int().min(0).max(MAX_REFRESH_RETRY_OFFSET_SECONDS),
 ).min(1).max(MAX_REFRESH_RETRY_OFFSETS).superRefine((offsets, context) => {
   if (new Set(offsets).size !== offsets.length) {
     context.addIssue({
       code: "custom",
-      message: "retryOffsets must be unique while preserving caller order",
+      message: "retryOffsetsSeconds must be unique while preserving caller order",
     });
   }
 });
 const NoInputSchema = z.strictObject({});
 const SetAutoRefreshEnabledInputSchema = z.strictObject({ enabled: z.boolean() });
-const SetRefreshRetryOffsetsInputSchema = z.strictObject({ retryOffsets: RetryOffsetsSchema });
+const SetRefreshRetryOffsetsInputSchema = z.strictObject({ retryOffsetsSeconds: RetryOffsetsSchema });
 const AddRefreshCheckpointInputSchema = z.strictObject({
   localTime: LocalTimeSchema,
   enabled: z.boolean().optional().default(true),
@@ -53,7 +53,7 @@ export const RefreshCheckpointSchema = z.strictObject({
 });
 export const RefreshSettingsSnapshotSchema = z.strictObject({
   autoRefreshEnabled: z.boolean(),
-  retryOffsetsMinutes: RetryOffsetsSchema,
+  retryOffsetsSeconds: RetryOffsetsSchema,
   revision: z.number().int().positive(),
   timeZone: z.literal(REFRESH_TIME_ZONE),
   createdAt: z.date(),
@@ -102,7 +102,7 @@ async function getCurrentRefreshSettingsInTransaction(
   ]);
   return RefreshSettingsSnapshotSchema.parse({
     autoRefreshEnabled: settings.autoRefreshEnabled,
-    retryOffsetsMinutes: settings.retryOffsetsMinutes,
+    retryOffsetsSeconds: settings.retryOffsetsSeconds,
     revision: settings.revision,
     timeZone: REFRESH_TIME_ZONE,
     createdAt: settings.createdAt,
@@ -146,7 +146,7 @@ export async function setRefreshRetryOffsets(
     await lockSettings(transaction);
     await getSettingsRow(transaction);
     await transaction.update(refreshSettings).set({
-      retryOffsetsMinutes: parsed.retryOffsets,
+      retryOffsetsSeconds: parsed.retryOffsetsSeconds,
       revision: sql`${refreshSettings.revision} + 1`,
       updatedAt: sql`now()`,
     }).where(eq(refreshSettings.singletonId, 1));

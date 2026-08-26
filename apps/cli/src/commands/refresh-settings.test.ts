@@ -36,7 +36,9 @@ async function run(args: string[]): Promise<string> {
   });
   try {
     registerRefreshSettingsCommands(program, runtime);
-    await program.parseAsync(["node", "shop-health", ...args]);
+    await program.parseAsync(["node", "shop-health", ...args]).catch((error: { code?: string }) => {
+      if (error.code !== "commander.helpDisplayed") throw error;
+    });
     return output;
   } finally {
     write.mockRestore();
@@ -47,7 +49,7 @@ beforeEach(() => {
   for (const mock of Object.values(mocks)) mock.mockReset();
   mocks.getCurrentRefreshSettings.mockResolvedValue({
     autoRefreshEnabled: true,
-    retryOffsetsMinutes: [0, 30, 120, 300, 600],
+    retryOffsetsSeconds: [0, 30, 120, 300, 600],
     revision: 1,
     timeZone: "Asia/Bangkok",
     checkpoints: [checkpoint],
@@ -56,7 +58,7 @@ beforeEach(() => {
   });
   mocks.setAutoRefreshEnabled.mockResolvedValue({
     autoRefreshEnabled: false,
-    retryOffsetsMinutes: [0, 30, 120, 300, 600],
+    retryOffsetsSeconds: [0, 30, 120, 300, 600],
     revision: 2,
     timeZone: "Asia/Bangkok",
     checkpoints: [checkpoint],
@@ -65,7 +67,7 @@ beforeEach(() => {
   });
   mocks.setRefreshRetryOffsets.mockResolvedValue({
     autoRefreshEnabled: true,
-    retryOffsetsMinutes: [0, 5, 60],
+    retryOffsetsSeconds: [0, 5, 60],
     revision: 2,
     timeZone: "Asia/Bangkok",
     checkpoints: [checkpoint],
@@ -86,7 +88,7 @@ describe("refresh-settings commands", () => {
       schemaVersion: "refresh-settings-current.v1",
       settings: {
         autoRefreshEnabled: true,
-        retryOffsetsMinutes: [0, 30, 120, 300, 600],
+        retryOffsetsSeconds: [0, 30, 120, 300, 600],
         revision: 1,
         timeZone: "Asia/Bangkok",
         checkpoints: [{ ...checkpoint, createdAt: checkpoint.createdAt.toISOString(), updatedAt: checkpoint.updatedAt.toISOString() }],
@@ -96,12 +98,25 @@ describe("refresh-settings commands", () => {
     });
   });
 
-  it("parses exact boolean and retry JSON commands", async () => {
+  it("parses seconds offsets and forwards an explicit seconds DTO", async () => {
     await run(["refresh-settings", "set-auto", "false", "--json"]);
     await run(["refresh-settings", "set-retries", "--offsets", "[0,5,60]", "--json"]);
 
     expect(mocks.setAutoRefreshEnabled).toHaveBeenCalledWith({}, { enabled: false });
-    expect(mocks.setRefreshRetryOffsets).toHaveBeenCalledWith({}, { retryOffsets: [0, 5, 60] });
+    expect(mocks.setRefreshRetryOffsets).toHaveBeenCalledWith({}, { retryOffsetsSeconds: [0, 5, 60] });
+  });
+
+  it("labels retry offsets as seconds in table output and validation errors", async () => {
+    await expect(run(["refresh-settings", "set-retries", "--offsets", "[86401]", "--json"]))
+      .rejects.toThrow("integer seconds");
+
+    const output = await run(["refresh-settings", "show"]);
+    expect(output).toContain("Retry Offsets (seconds)");
+    expect(output).not.toContain("minutes");
+
+    const help = await run(["refresh-settings", "set-retries", "--help"]);
+    expect(help).toContain("seconds");
+    expect(help).not.toContain("minutes");
   });
 
   it("maps checkpoint CRUD operations without exposing database details", async () => {

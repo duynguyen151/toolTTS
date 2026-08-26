@@ -35,16 +35,16 @@ function parseOffsets(value: string): number[] {
   try {
     parsed = JSON.parse(value);
   } catch {
-    throw new Error("--offsets must be a JSON array of integer minutes");
+    throw new Error("--offsets must be a JSON array of integer seconds");
   }
   if (
     !Array.isArray(parsed)
     || parsed.length === 0
     || parsed.length > 10
-    || parsed.some((offset) => typeof offset !== "number" || !Number.isInteger(offset) || offset < 0 || offset > 1_440)
+    || parsed.some((offset) => typeof offset !== "number" || !Number.isInteger(offset) || offset < 0 || offset > 86_400)
     || new Set(parsed).size !== parsed.length
   ) {
-    throw new Error("--offsets must be a unique JSON array of bounded integer minutes");
+    throw new Error("--offsets must be a unique JSON array of bounded integer seconds");
   }
   return parsed;
 }
@@ -79,7 +79,7 @@ function outputSettings(settings: Awaited<ReturnType<typeof getCurrentRefreshSet
   }
   printKeyValues([
     ["Auto Refresh", String(settings.autoRefreshEnabled)],
-    ["Retry Offsets (minutes)", JSON.stringify(settings.retryOffsetsMinutes)],
+    ["Retry Offsets (seconds)", JSON.stringify(settings.retryOffsetsSeconds)],
     ["Time Zone", settings.timeZone],
     ["Revision", String(settings.revision)],
   ]);
@@ -110,10 +110,10 @@ export function registerRefreshSettingsCommands(program: Command, runtime: CliRu
       outputResult(options.json ? settingsJson(result) : result, options.json, "refresh-settings-updated.v1");
     });
   settings.command("set-retries")
-    .requiredOption("--offsets <json>")
+    .requiredOption("--offsets <json>", "unique integer seconds JSON array (0-86400)")
     .option("--json")
     .action(async (options: RetryOptions) => {
-      const result = await withDatabase(runtime, ({ db }) => setRefreshRetryOffsets(db, { retryOffsets: parseOffsets(options.offsets) }));
+      const result = await withDatabase(runtime, ({ db }) => setRefreshRetryOffsets(db, { retryOffsetsSeconds: parseOffsets(options.offsets) }));
       outputResult(options.json ? settingsJson(result) : result, options.json, "refresh-settings-updated.v1");
     });
 

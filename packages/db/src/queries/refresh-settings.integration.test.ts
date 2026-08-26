@@ -42,7 +42,7 @@ describeWithDatabase("refresh settings PostgreSQL persistence", () => {
 
     expect(current).toMatchObject({
       autoRefreshEnabled: true,
-      retryOffsetsMinutes: [0, 30, 120, 300, 600],
+      retryOffsetsSeconds: [0, 30, 120, 300, 600],
       timeZone: "Asia/Bangkok",
     });
     expect(current.checkpoints.map((checkpoint) => checkpoint.localTime)).toEqual(["08:00", "11:00", "17:00"]);
@@ -50,11 +50,11 @@ describeWithDatabase("refresh settings PostgreSQL persistence", () => {
 
   it("reads current changes without retaining an in-process settings cache", async () => {
     await setAutoRefreshEnabled(context.db, { enabled: false });
-    await setRefreshRetryOffsets(context.db, { retryOffsets: [0, 5, 60] });
+    await setRefreshRetryOffsets(context.db, { retryOffsetsSeconds: [0, 5, 60] });
 
     await expect(getCurrentRefreshSettings(context.db)).resolves.toMatchObject({
       autoRefreshEnabled: false,
-      retryOffsetsMinutes: [0, 5, 60],
+      retryOffsetsSeconds: [0, 5, 60],
     });
   });
 
@@ -80,9 +80,9 @@ describeWithDatabase("refresh settings PostgreSQL persistence", () => {
   });
 
   it("preserves a valid retry offset order exactly as configured", async () => {
-    await setRefreshRetryOffsets(context.db, { retryOffsets: [120, 0, 600] });
+    await setRefreshRetryOffsets(context.db, { retryOffsetsSeconds: [120, 0, 600] });
     await expect(getCurrentRefreshSettings(context.db)).resolves.toMatchObject({
-      retryOffsetsMinutes: [120, 0, 600],
+      retryOffsetsSeconds: [120, 0, 600],
     });
   });
 
@@ -93,10 +93,15 @@ describeWithDatabase("refresh settings PostgreSQL persistence", () => {
         values (${localTime}, true)
       `).rejects.toMatchObject({ constraint_name: "refresh_checkpoints_local_time_valid" });
     }
-    for (const retryOffsets of ["[-1]", "[0,30,30]", "[0,30.5]", "[]", "[0,60001]"]) {
+    await expect(context.sql`
+      update refresh_settings
+      set retry_offsets_seconds = '[0,30,120,300,600]'::jsonb
+      where singleton_id = 1
+    `).resolves.toBeDefined();
+    for (const retryOffsetsSeconds of ["[-1]", "[0,30,30]", "[0,30.5]", "[]", "[86401]"]) {
       await expect(context.sql`
         update refresh_settings
-        set retry_offsets_minutes = ${retryOffsets}::jsonb
+        set retry_offsets_seconds = ${retryOffsetsSeconds}::jsonb
         where singleton_id = 1
       `).rejects.toMatchObject({ constraint_name: "refresh_settings_retry_offsets_valid" });
     }

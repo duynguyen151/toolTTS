@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Database } from "../client.js";
 import {
+  MAX_REFRESH_RETRY_OFFSET_SECONDS,
   addRefreshCheckpoint,
   deleteRefreshCheckpoint,
   getCurrentRefreshSettings,
@@ -24,17 +25,26 @@ describe("refresh settings repository input validation", () => {
     }
   });
 
+  it("accepts order-preserving unique retry offsets up to one day", async () => {
+    const db = {
+      transaction: async () => { throw new Error("transaction reached"); },
+    } as unknown as Database;
+
+    await expect(setRefreshRetryOffsets(db, { retryOffsetsSeconds: [86_400, 0, 30] }))
+      .rejects.toThrow("transaction reached");
+  });
+
   it("rejects invalid retry offsets before touching the database", async () => {
-    for (const retryOffsets of [
+    for (const retryOffsetsSeconds of [
       [-1],
       [0, 30, 30],
       [0, 30.5],
       [],
       Array.from({ length: 13 }, (_, index) => index),
-      [0, 60_001],
+      [0, MAX_REFRESH_RETRY_OFFSET_SECONDS + 1],
       "[0,30]",
     ]) {
-      await expect(setRefreshRetryOffsets(unusedDb, { retryOffsets } as never)).rejects.toThrow();
+      await expect(setRefreshRetryOffsets(unusedDb, { retryOffsetsSeconds } as never)).rejects.toThrow();
     }
   });
 

@@ -2515,8 +2515,8 @@
           "notNull": true,
           "default": true
         },
-        "retry_offsets_minutes": {
-          "name": "retry_offsets_minutes",
+        "retry_offsets_seconds": {
+          "name": "retry_offsets_seconds",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
@@ -2560,7 +2560,7 @@
         },
         "refresh_settings_retry_offsets_valid": {
           "name": "refresh_settings_retry_offsets_valid",
-          "value": "refresh_retry_offsets_valid(\"refresh_settings\".\"retry_offsets_minutes\")"
+          "value": "refresh_retry_offsets_valid(\"refresh_settings\".\"retry_offsets_seconds\")"
         },
         "refresh_settings_created_at_finite": {
           "name": "refresh_settings_created_at_finite",

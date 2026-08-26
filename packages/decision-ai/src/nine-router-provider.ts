@@ -18,6 +18,17 @@ const ChatCompletionEnvelopeSchema = z.object({
   })).min(1),
 });
 
+const NINE_ROUTER_DONE_TRAILER = /\s*data: \[DONE\]\s*$/;
+
+export function parseChatCompletionEnvelope(value: string): { model: string; content: string } {
+  const responseText = value.replace(NINE_ROUTER_DONE_TRAILER, "");
+  const envelope = ChatCompletionEnvelopeSchema.parse(JSON.parse(responseText));
+  return {
+    model: envelope.model,
+    content: envelope.choices[0]!.message.content,
+  };
+}
+
 export type DecisionProviderResult =
   | { readonly status: "SUCCESS"; readonly reportedModel: string; readonly output: BaselineAiOutput }
   | { readonly status: "FAILURE"; readonly errorCode: AiUnavailableErrorCode };
@@ -29,8 +40,6 @@ export interface DecisionAiProvider {
 export interface NineRouterDecisionProvider extends DecisionAiProvider {}
 
 class RequestTimeoutError extends Error {}
-const NINE_ROUTER_DONE_TRAILER = /\s*data: \[DONE\]\s*$/;
-
 function httpFailure(status: number): AiUnavailableErrorCode {
   if (status === 429) return "RATE_LIMITED";
   if (status === 404) return "MODEL_UNAVAILABLE";
@@ -102,11 +111,8 @@ export function createNineRouterDecisionProvider(
       if (!response.ok) return { status: "FAILURE", errorCode: httpFailure(response.status) };
 
       try {
-        const responseText = await response.text();
-        const envelope = ChatCompletionEnvelopeSchema.parse(JSON.parse(
-          responseText.replace(NINE_ROUTER_DONE_TRAILER, ""),
-        ));
-        const decoded = JSON.parse(envelope.choices[0]!.message.content) as unknown;
+        const envelope = parseChatCompletionEnvelope(await response.text());
+        const decoded = JSON.parse(envelope.content) as unknown;
         return {
           status: "SUCCESS",
           reportedModel: envelope.model,

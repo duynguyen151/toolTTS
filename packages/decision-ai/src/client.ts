@@ -34,6 +34,7 @@ interface ProviderClientConfig {
   readonly requestedModels: readonly string[];
   readonly allowedModels?: readonly string[];
   readonly verifiedReportedModels: boolean;
+  readonly preflightErrorCode?: AiUnavailableErrorCode;
 }
 
 export function createBaselineAiClientFromProvider(
@@ -81,6 +82,7 @@ export function createBaselineAiClientFromProvider(
       });
       if (!frozenContextValidation.valid) return unavailable("INVALID_RESPONSE");
 
+      if (config.preflightErrorCode !== undefined) return unavailable(config.preflightErrorCode);
       if (!config.enabled) return unavailable("FEATURE_DISABLED");
       if (config.authMode === "CONFIG_MISSING") return unavailable("CONFIG_MISSING");
       const quality = parsedInput.coverageSnapshot;

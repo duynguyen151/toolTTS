@@ -792,6 +792,45 @@ export const aiTaskConfigs = pgTable(
   ],
 );
 
+export const refreshSettings = pgTable(
+  "refresh_settings",
+  {
+    singletonId: integer("singleton_id").primaryKey(),
+    autoRefreshEnabled: boolean("auto_refresh_enabled").notNull().default(true),
+    retryOffsetsMinutes: jsonb("retry_offsets_minutes").$type<number[]>().notNull().default(sql`'[0, 30, 120, 300, 600]'::jsonb`),
+    revision: integer("revision").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("refresh_settings_singleton", sql`${table.singletonId} = 1`),
+    check("refresh_settings_revision_positive", sql`${table.revision} > 0`),
+    check(
+      "refresh_settings_retry_offsets_valid",
+      sql`refresh_retry_offsets_valid(${table.retryOffsetsMinutes})`,
+    ),
+    check("refresh_settings_created_at_finite", sql`${table.createdAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz)`),
+    check("refresh_settings_updated_at_finite", sql`${table.updatedAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz)`),
+  ],
+);
+
+export const refreshCheckpoints = pgTable(
+  "refresh_checkpoints",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    localTime: text("local_time").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("refresh_checkpoints_local_time_unique").on(table.localTime),
+    check("refresh_checkpoints_local_time_valid", sql`${table.localTime} ~ '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'`),
+    check("refresh_checkpoints_created_at_finite", sql`${table.createdAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz)`),
+    check("refresh_checkpoints_updated_at_finite", sql`${table.updatedAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz)`),
+  ],
+);
+
 export const decisionCases = pgTable(
   "decision_cases",
   {
@@ -1180,6 +1219,8 @@ export type RiskControlStateRow = typeof riskControlStates.$inferSelect;
 export type DecisionCaseRow = typeof decisionCases.$inferSelect;
 export type RiskPolicyRevisionRow = typeof riskPolicyRevisions.$inferSelect;
 export type AiTaskConfigRow = typeof aiTaskConfigs.$inferSelect;
+export type RefreshSettingsRow = typeof refreshSettings.$inferSelect;
+export type RefreshCheckpointRow = typeof refreshCheckpoints.$inferSelect;
 export type BaDecisionRow = typeof baDecisions.$inferSelect;
 export type AiDecisionRow = typeof aiDecisions.$inferSelect;
 export type DecisionExecutionRow = typeof decisionExecutions.$inferSelect;

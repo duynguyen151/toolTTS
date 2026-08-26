@@ -17,6 +17,8 @@ export { seedSanitizedDemoData, type DemoSeedResult } from "./seed-demo.js";
 export {
   aiDecisionStatusEnum,
   aiTaskConfigs,
+  refreshCheckpoints,
+  refreshSettings,
   aiDecisions,
   adspowerProfileVerificationStateEnum,
   adspowerProfiles,
@@ -54,6 +56,8 @@ export {
   syncRunStatusEnum,
   type AiDecisionRow,
   type AiTaskConfigRow,
+  type RefreshCheckpointRow,
+  type RefreshSettingsRow,
   type AdsPowerProfileRow,
   type BaDecisionRow,
   type DecisionCaseRow,
@@ -163,6 +167,23 @@ export {
   type AppendAiTaskConfigRevisionInput,
   type GetCurrentAiTaskConfigInput,
 } from "./queries/ai-task-configs.js";
+export {
+  addRefreshCheckpoint,
+  deleteRefreshCheckpoint,
+  getCurrentRefreshSettings,
+  setAutoRefreshEnabled,
+  setRefreshCheckpointEnabled,
+  setRefreshRetryOffsets,
+  updateRefreshCheckpoint,
+  type AddRefreshCheckpointInput,
+  type DeleteRefreshCheckpointInput,
+  type RefreshCheckpoint,
+  type RefreshSettingsSnapshot,
+  type SetAutoRefreshEnabledInput,
+  type SetRefreshCheckpointEnabledInput,
+  type SetRefreshRetryOffsetsInput,
+  type UpdateRefreshCheckpointInput,
+} from "./queries/refresh-settings.js";
 export {
   getRiskControlState,
   recordHolidayModeObservation,

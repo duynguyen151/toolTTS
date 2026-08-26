@@ -18,13 +18,15 @@ const ChatCompletionEnvelopeSchema = z.object({
   })).min(1),
 });
 
-type ProviderResult =
+export type DecisionProviderResult =
   | { readonly status: "SUCCESS"; readonly reportedModel: string; readonly output: BaselineAiOutput }
   | { readonly status: "FAILURE"; readonly errorCode: AiUnavailableErrorCode };
 
-export interface NineRouterDecisionProvider {
-  recommend(input: BaselineAiInput, requestedModel: string): Promise<ProviderResult>;
+export interface DecisionAiProvider {
+  recommend(input: BaselineAiInput, requestedModel: string): Promise<DecisionProviderResult>;
 }
+
+export interface NineRouterDecisionProvider extends DecisionAiProvider {}
 
 class RequestTimeoutError extends Error {}
 const NINE_ROUTER_DONE_TRAILER = /\s*data: \[DONE\]\s*$/;

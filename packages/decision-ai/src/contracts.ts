@@ -77,7 +77,7 @@ export type AiUnavailableErrorCode = z.infer<typeof AiUnavailableErrorCodeSchema
 export type AiRiskLevel = BaselineAiOutput["riskLevel"];
 
 export interface AiProvenance {
-  readonly provider: "9router";
+  readonly provider: "9router" | "openai-compatible" | "huggingface-hosted";
   readonly requestedModel: string;
   readonly reportedModel: string | null;
   readonly actualModelUsed: string | null;

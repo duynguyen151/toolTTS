@@ -83,14 +83,17 @@ describeWithDatabase("AdsPower profile PostgreSQL persistence", () => {
     await expect(listReadyAdsPowerProfileShops(context.db)).resolves.toContainEqual(
       expect.objectContaining({ id: shop!.id }),
     );
-    await expect(listAutomaticRefreshEligibleAdsPowerProfileShops(context.db)).resolves.not.toContainEqual(
+    await expect(listAutomaticRefreshEligibleAdsPowerProfileShops(context.db, new Date("2026-01-15T00:02:00.000Z"))).resolves.not.toContainEqual(
       expect.objectContaining({ id: shop!.id }),
     );
     await setAdsPowerProfileObservedStatus(context.db, profile.id, {
       observedStatus: "active",
       observedAt: new Date("2026-01-15T00:01:00.000Z"),
     });
-    await expect(listAutomaticRefreshEligibleAdsPowerProfileShops(context.db)).resolves.toContainEqual(
+    await expect(listAutomaticRefreshEligibleAdsPowerProfileShops(context.db, new Date("2026-01-15T00:02:00.000Z"))).resolves.not.toContainEqual(
+      expect.objectContaining({ id: shop!.id }),
+    );
+    await expect(listAutomaticRefreshEligibleAdsPowerProfileShops(context.db, new Date("2026-01-15T00:12:00.001Z"))).resolves.toContainEqual(
       expect.objectContaining({ id: shop!.id }),
     );
   });

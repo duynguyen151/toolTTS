@@ -20,6 +20,7 @@ import pino from "pino";
 
 import { loadWorkerConfig } from "./config.js";
 import { executeClaimedRefreshAttempts } from "./refresh-controller-loop.js";
+import { selectAutomaticOrdersShops } from "./automatic-shop-selector.js";
 
 const config = loadWorkerConfig();
 const logger = pino({
@@ -91,14 +92,16 @@ async function workerLoop(): Promise<void> {
 
   while (!stopping) {
     try {
+      const now = new Date();
       const shops = await listReadyAdsPowerProfileShops(context.db);
-      const automaticRefreshShops = await listAutomaticRefreshEligibleAdsPowerProfileShops(context.db);
-      const now = Date.now();
-      for (const shop of shops) {
+      const automaticRefreshShops = await listAutomaticRefreshEligibleAdsPowerProfileShops(context.db, now);
+      const automaticOrdersShops = selectAutomaticOrdersShops(shops, automaticRefreshShops);
+      const nowMs = now.getTime();
+      for (const shop of automaticOrdersShops) {
         if (stopping) break;
-        if (isDue(shop, "orders", now)) await syncShop(shop, "orders");
+        if (isDue(shop, "orders", nowMs)) await syncShop(shop, "orders");
       }
-      if (!stopping) await runClaimedRefreshAttempts(automaticRefreshShops, new Date(now));
+      if (!stopping) await runClaimedRefreshAttempts(automaticRefreshShops, now);
     } catch (error) {
       logger.error({ operation: "worker.scheduler", entity: "shop", failureType: "DATABASE_UNAVAILABLE", error: error instanceof Error ? error.message : "Unknown error" }, "Scheduler cycle failed");
     }

@@ -44,6 +44,8 @@ describe("refresh eligibility contract", () => {
   it("requires explicit proxy capability reason codes", () => {
     expect(ProxyCapabilityResultSchema.parse({ status: "UNAVAILABLE", reasonCode: "CAPABILITY_TIMEOUT" }))
       .toEqual({ status: "UNAVAILABLE", reasonCode: "CAPABILITY_TIMEOUT" });
+    expect(ProxyCapabilityResultSchema.parse({ status: "UNAVAILABLE", reasonCode: "PROXY_UNKNOWN" }))
+      .toEqual({ status: "UNAVAILABLE", reasonCode: "PROXY_UNKNOWN" });
     expect(() => ProxyCapabilityResultSchema.parse({ status: "UNAVAILABLE", reasonCode: "PROXY_EXPIRED" }))
       .toThrow();
   });

@@ -220,6 +220,7 @@ export {
   listAdsPowerProfiles,
   listAutomaticRefreshEligibleAdsPowerProfileShops,
   listReadyAdsPowerProfileShops,
+  ADSPOWER_OBSERVED_STATUS_MAX_AGE_MS,
   linkAdsPowerProfileToShop,
   setAdsPowerProfileObservedStatus,
   setAdsPowerProfileVerification,

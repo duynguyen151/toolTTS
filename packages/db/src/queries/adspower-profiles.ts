@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNotNull, lt } from "drizzle-orm";
 import { RefreshObservedStatusSchema } from "@shop-health/domain";
 import { z } from "zod";
 
@@ -75,14 +75,22 @@ export async function listReadyAdsPowerProfileShops(db: Database): Promise<ShopR
   return rows.map((row) => row.shop);
 }
 
+export const ADSPOWER_OBSERVED_STATUS_MAX_AGE_MS = 10 * 60 * 1000;
+
 /** Automatic claims require a fresh explicit active tag observation. */
-export async function listAutomaticRefreshEligibleAdsPowerProfileShops(db: Database): Promise<ShopRow[]> {
+export async function listAutomaticRefreshEligibleAdsPowerProfileShops(
+  db: Database,
+  now: Date = new Date(),
+): Promise<ShopRow[]> {
+  const observedStatusCutoff = new Date(now.getTime() - ADSPOWER_OBSERVED_STATUS_MAX_AGE_MS);
   const rows = await db.select({ shop: shops }).from(adspowerProfiles)
     .innerJoin(shops, eq(adspowerProfiles.activeShopId, shops.id))
     .where(and(
       eq(adspowerProfiles.verificationState, "READY"),
       eq(adspowerProfiles.eligibilityStatus, "ELIGIBLE"),
       eq(adspowerProfiles.observedStatus, "active"),
+      isNotNull(adspowerProfiles.observedStatusAt),
+      lt(adspowerProfiles.observedStatusAt, observedStatusCutoff),
       eq(shops.enabled, true),
       eq(shops.syncState, "ACTIVE"),
       eq(shops.verificationStatus, "VERIFIED"),

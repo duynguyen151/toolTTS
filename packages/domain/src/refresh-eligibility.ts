@@ -72,6 +72,7 @@ export const ProxyCapabilityReasonCodeSchema = z.enum([
   "PROXY_UNCONFIGURED",
   "ADSPOWER_UNAVAILABLE",
   "CAPABILITY_TIMEOUT",
+  "PROXY_UNKNOWN",
 ]);
 export const ProxyCapabilityResultSchema = z.strictObject({
   status: ProxyCapabilityStatusSchema,

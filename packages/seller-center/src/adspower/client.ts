@@ -49,6 +49,7 @@ const configuredProxySoftware = new Set([
   "ipfoxyauto",
   "kookauto",
   "lumiproxyauto",
+  "luminati",
   "other",
 ]);
 
@@ -153,11 +154,18 @@ export class AdsPowerClient {
         return ProxyCapabilityResultSchema.parse({ status: "UNAVAILABLE", reasonCode: "ADSPOWER_UNAVAILABLE" });
       }
       const proxySoft = profile.user_proxy_config?.proxy_soft?.trim().toLowerCase();
-      const configured = profile.proxyid !== undefined && String(profile.proxyid).trim() !== ""
-        || (proxySoft !== undefined && configuredProxySoftware.has(proxySoft));
-      return ProxyCapabilityResultSchema.parse(configured
-        ? { status: "CONFIGURED", reasonCode: "PROXY_CONFIGURED" }
-        : { status: "UNCONFIGURED", reasonCode: "PROXY_UNCONFIGURED" });
+      if (profile.proxyid !== undefined && String(profile.proxyid).trim() !== "") {
+        return ProxyCapabilityResultSchema.parse({ status: "CONFIGURED", reasonCode: "PROXY_CONFIGURED" });
+      }
+      if (proxySoft !== undefined && proxySoft !== "") {
+        if (proxySoft === "no_proxy") {
+          return ProxyCapabilityResultSchema.parse({ status: "UNCONFIGURED", reasonCode: "PROXY_UNCONFIGURED" });
+        }
+        return ProxyCapabilityResultSchema.parse(configuredProxySoftware.has(proxySoft)
+          ? { status: "CONFIGURED", reasonCode: "PROXY_CONFIGURED" }
+          : { status: "UNAVAILABLE", reasonCode: "PROXY_UNKNOWN" });
+      }
+      return ProxyCapabilityResultSchema.parse({ status: "UNCONFIGURED", reasonCode: "PROXY_UNCONFIGURED" });
     } catch (error) {
       const reasonCode = error instanceof SellerCenterError
         && error.cause instanceof Error

@@ -268,6 +268,12 @@ export async function renewRefreshAttemptLease(
 ): Promise<boolean> {
   const parsed = RenewLeaseInputSchema.parse(input);
   return db.transaction(async (transaction) => {
+    const [run] = await transaction.select({ id: refreshCheckpointRuns.id }).from(refreshCheckpointRuns).where(and(
+      eq(refreshCheckpointRuns.id, parsed.runId),
+      eq(refreshCheckpointRuns.status, "RUNNING"),
+      eq(refreshCheckpointRuns.claimToken, parsed.claimToken),
+    )).for("update").limit(1);
+    if (!run) return false;
     const [attempt] = await transaction.select({ id: refreshCheckpointAttempts.id }).from(refreshCheckpointAttempts).where(and(
       eq(refreshCheckpointAttempts.id, parsed.attemptId),
       eq(refreshCheckpointAttempts.runId, parsed.runId),
@@ -278,11 +284,7 @@ export async function renewRefreshAttemptLease(
     const [updated] = await transaction.update(refreshCheckpointRuns).set({
       claimedAt: parsed.now,
       updatedAt: parsed.now,
-    }).where(and(
-      eq(refreshCheckpointRuns.id, parsed.runId),
-      eq(refreshCheckpointRuns.status, "RUNNING"),
-      eq(refreshCheckpointRuns.claimToken, parsed.claimToken),
-    )).returning({ id: refreshCheckpointRuns.id });
+    }).where(eq(refreshCheckpointRuns.id, parsed.runId)).returning({ id: refreshCheckpointRuns.id });
     return updated !== undefined;
   });
 }

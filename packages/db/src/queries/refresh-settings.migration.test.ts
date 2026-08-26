@@ -33,7 +33,20 @@ describe("W6-T01 refresh settings migration contract", () => {
     expect(migrationSql).toContain("'[0, 30, 120, 300, 600]'::jsonb");
     expect(migrationSql).toContain("86400");
     expect(migrationSql).toContain("HAVING count(*) > 1");
-    expect(migrationSql).toContain("CASE WHEN jsonb_typeof(offsets)");
+    const normalizedMigrationSql = migrationSql.replace(/\s+/g, " ");
+    expect(normalizedMigrationSql).toContain(
+      "SELECT CASE WHEN jsonb_typeof(offsets) IS DISTINCT FROM 'array' THEN false ELSE CASE WHEN jsonb_array_length(offsets) NOT BETWEEN 1 AND 10 THEN false",
+    );
+    expect(normalizedMigrationSql).toContain(
+      "WHERE CASE WHEN jsonb_typeof(value) IS DISTINCT FROM 'number' THEN true WHEN value #>> '{}' !~ '^(0|[1-9][0-9]*)$' THEN true WHEN length(value #>> '{}') > 5 THEN true ELSE CASE WHEN",
+    );
+    expect(normalizedMigrationSql).toContain("(value #>> '{}')::numeric BETWEEN 0 AND 86400");
+    expect(migrationSql).toContain(
+      'CHECK (public.refresh_retry_offsets_valid("refresh_settings"."retry_offsets_seconds"))',
+    );
+    expect(schemaText).toContain("sql`public.refresh_retry_offsets_valid(${table.retryOffsetsSeconds})`");
+    expect(snapshot.tables["public.refresh_settings"]?.checkConstraints.refresh_settings_retry_offsets_valid?.value)
+      .toBe('public.refresh_retry_offsets_valid("refresh_settings"."retry_offsets_seconds")');
     expect(migrationSql).not.toContain("retry_offsets_minutes");
     expect(schemaText).toContain('retryOffsetsSeconds: jsonb("retry_offsets_seconds")');
     expect(schemaText).toContain('"refresh_settings"');

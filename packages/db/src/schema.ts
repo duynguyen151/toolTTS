@@ -807,7 +807,7 @@ export const refreshSettings = pgTable(
     check("refresh_settings_revision_positive", sql`${table.revision} > 0`),
     check(
       "refresh_settings_retry_offsets_valid",
-      sql`refresh_retry_offsets_valid(${table.retryOffsetsSeconds})`,
+      sql`public.refresh_retry_offsets_valid(${table.retryOffsetsSeconds})`,
     ),
     check("refresh_settings_created_at_finite", sql`${table.createdAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz)`),
     check("refresh_settings_updated_at_finite", sql`${table.updatedAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz)`),

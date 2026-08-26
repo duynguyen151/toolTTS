@@ -98,7 +98,25 @@ describeWithDatabase("refresh settings PostgreSQL persistence", () => {
       set retry_offsets_seconds = '[0,30,120,300,600]'::jsonb
       where singleton_id = 1
     `).resolves.toBeDefined();
-    for (const retryOffsetsSeconds of ["[-1]", "[0,30,30]", "[0,30.5]", "[]", "[86401]"]) {
+    for (const retryOffsetsSeconds of [
+      "[-1]",
+      "[0,30,30]",
+      "[0,30.5]",
+      "[]",
+      "[86401]",
+      "null",
+      "{}",
+      "0",
+      '"0"',
+      "true",
+      '["0"]',
+      "[true]",
+      "[null]",
+      "[{}]",
+      "[1e-3]",
+      "[1.5]",
+      "[9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999]",
+    ]) {
       await expect(context.sql`
         update refresh_settings
         set retry_offsets_seconds = ${retryOffsetsSeconds}::jsonb

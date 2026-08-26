@@ -1,22 +1,32 @@
 CREATE FUNCTION "public"."refresh_retry_offsets_valid"("offsets" jsonb) RETURNS boolean
 LANGUAGE sql
 IMMUTABLE
-STRICT
 AS $$
-  SELECT CASE WHEN jsonb_typeof(offsets) <> 'array' OR jsonb_array_length(offsets) NOT BETWEEN 1 AND 10 THEN false
-    ELSE NOT EXISTS (
-      SELECT 1
-      FROM jsonb_array_elements(offsets) WITH ORDINALITY AS entry(value, position)
-      WHERE jsonb_typeof(value) <> 'number'
-        OR value #>> '{}' !~ '^(0|[1-9][0-9]*)$'
-        OR (value #>> '{}')::numeric > 86400
-    )
-    AND NOT EXISTS (
-      SELECT value
-      FROM jsonb_array_elements(offsets) AS entry(value)
-      GROUP BY value
-      HAVING count(*) > 1
-    ) END;
+  SELECT CASE
+    WHEN jsonb_typeof(offsets) IS DISTINCT FROM 'array' THEN false
+    ELSE CASE
+      WHEN jsonb_array_length(offsets) NOT BETWEEN 1 AND 10 THEN false
+      ELSE NOT EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(offsets) AS entry(value)
+        WHERE CASE
+          WHEN jsonb_typeof(value) IS DISTINCT FROM 'number' THEN true
+          WHEN value #>> '{}' !~ '^(0|[1-9][0-9]*)$' THEN true
+          WHEN length(value #>> '{}') > 5 THEN true
+          ELSE CASE
+            WHEN (value #>> '{}')::numeric BETWEEN 0 AND 86400 THEN false
+            ELSE true
+          END
+        END
+      )
+      AND NOT EXISTS (
+        SELECT value
+        FROM jsonb_array_elements(offsets) AS entry(value)
+        GROUP BY value
+        HAVING count(*) > 1
+      )
+    END
+  END;
 $$;--> statement-breakpoint
 CREATE TABLE "refresh_checkpoints" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
@@ -37,7 +47,7 @@ CREATE TABLE "refresh_settings" (
   "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
   CONSTRAINT "refresh_settings_singleton" CHECK ("refresh_settings"."singleton_id" = 1),
   CONSTRAINT "refresh_settings_revision_positive" CHECK ("refresh_settings"."revision" > 0),
-  CONSTRAINT "refresh_settings_retry_offsets_valid" CHECK (refresh_retry_offsets_valid("refresh_settings"."retry_offsets_seconds")),
+  CONSTRAINT "refresh_settings_retry_offsets_valid" CHECK (public.refresh_retry_offsets_valid("refresh_settings"."retry_offsets_seconds")),
   CONSTRAINT "refresh_settings_created_at_finite" CHECK ("refresh_settings"."created_at" not in ('infinity'::timestamptz, '-infinity'::timestamptz)),
   CONSTRAINT "refresh_settings_updated_at_finite" CHECK ("refresh_settings"."updated_at" not in ('infinity'::timestamptz, '-infinity'::timestamptz))
 );--> statement-breakpoint

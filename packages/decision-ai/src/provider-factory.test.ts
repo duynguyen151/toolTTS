@@ -4,10 +4,11 @@ import {
   createBaselineAiClientForTask,
   AiConnectionResultSchema,
   testAiTaskConnection,
+  MAX_RESPONSE_BODY_BYTES,
   type AiConnectionResult,
 } from "./index.js";
 import { resolveAiTaskConfig, type PersistedAiTaskConfig } from "./task-config.js";
-import { validBaselineAiInput } from "./test-fixtures.test.js";
+import { validBaselineAiInput } from "./test-fixtures.js";
 
 const persisted = {
   taskId: "SHOP_HEALTH_REVIEWER",
@@ -73,6 +74,42 @@ function nineRouterResponse(model = "oc/deepseek-v4-flash-free", trailer = "") {
     reason: "Review required.",
     humanReviewRequired: true,
   }) } }] })}${trailer}`, { status: 200 });
+}
+
+function delayedBodyResponse(delayMs: number): Response {
+  return {
+    ok: true,
+    status: 200,
+    headers: new Headers(),
+    text: () => new Promise<string>((resolve) => setTimeout(() => resolve(JSON.stringify({ model: "safe-model", choices: [{ message: { content: JSON.stringify({
+      recommendation: "WATCH",
+      riskLevel: "MEDIUM",
+      confidence: 0.62,
+      reasonCodes: ["DATA_INCOMPLETE"],
+      supportingFactors: ["Coverage is explicit."],
+      riskFactors: ["Lifetime history is incomplete."],
+      whatWouldChangeDecision: ["Complete source history."],
+      reason: "Review required.",
+      humanReviewRequired: true,
+    }) } }] })), delayMs)),
+  } as Response;
+}
+
+function oversizedBodyResponse(): { response: Response; wasCanceled: () => boolean } {
+  let canceled = false;
+  const response = {
+    ok: true,
+    status: 200,
+    headers: new Headers(),
+    body: {
+      getReader: () => ({
+        read: async () => ({ done: false, value: new Uint8Array(MAX_RESPONSE_BODY_BYTES + 1) }),
+        cancel: async () => { canceled = true; },
+      }),
+    },
+    text: async () => { throw new Error("unbounded text fallback must not be used"); },
+  } as unknown as Response;
+  return { response, wasCanceled: () => canceled };
 }
 
 function serialized(result: AiConnectionResult): string {
@@ -148,6 +185,37 @@ describe("task-driven AI provider factory", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("preserves a safe reported model in an OpenAI-compatible business result", async () => {
+    const client = createBaselineAiClientForTask(resolved(), {
+      environment: { TEST_AI_KEY: "sk-test-secret" },
+      fetch: async () => nineRouterResponse("reported-model"),
+    });
+
+    await expect(client.recommend(validBaselineAiInput)).resolves.toMatchObject({
+      status: "AVAILABLE",
+      requestedModel: "safe-model",
+      reportedModel: "reported-model",
+      actualModelUsed: "reported-model",
+    });
+  });
+
+  it("does not return a provider secret in a valid OpenAI-compatible business result", async () => {
+    const client = createBaselineAiClientForTask(resolved(), {
+      environment: { TEST_AI_KEY: "sk-test-secret" },
+      fetch: async () => nineRouterResponse("sk-test-secret"),
+    });
+
+    const result = await client.recommend(validBaselineAiInput);
+
+    expect(result).toMatchObject({
+      status: "UNAVAILABLE",
+      errorCode: "INVALID_RESPONSE",
+      reportedModel: null,
+      actualModelUsed: null,
+    });
+    expect(JSON.stringify(result)).not.toContain("sk-test-secret");
+  });
+
   it("does not return a provider secret as reported model identity", async () => {
     const result = await testAiTaskConnection(resolved(), {
       environment: { TEST_AI_KEY: "sk-test-secret" },
@@ -156,6 +224,31 @@ describe("task-driven AI provider factory", () => {
 
     expect(result).toMatchObject({ status: "FAILURE", code: "MALFORMED_RESPONSE" });
     expect(serialized(result)).not.toContain("sk-test-secret");
+  });
+
+  it("treats an explicit environment dependency as authoritative over ambient credentials", async () => {
+    vi.stubEnv("TEST_AI_KEY", "ambient-secret");
+    try {
+      const fetchMock = vi.fn<typeof fetch>();
+      const openAiClient = createBaselineAiClientForTask(resolved({ baseUrl: "https://provider.example.test/v1" }), {
+        environment: {},
+        fetch: fetchMock,
+      });
+      const nineRouterClient = createBaselineAiClientForTask(resolvedNineRouter({ baseUrl: "https://router.example.test/v1" }), {
+        environment: {},
+        fetch: fetchMock,
+      });
+
+      await expect(openAiClient.recommend(validBaselineAiInput)).resolves.toMatchObject({ errorCode: "CONFIG_MISSING" });
+      await expect(nineRouterClient.recommend(validBaselineAiInput)).resolves.toMatchObject({ errorCode: "CONFIG_MISSING" });
+      await expect(testAiTaskConnection(resolved({ baseUrl: "https://provider.example.test/v1" }), {
+        environment: {},
+        fetch: fetchMock,
+      })).resolves.toMatchObject({ status: "FAILURE", code: "AUTH_FAILURE" });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("fails closed before fetch when the referenced secret is absent", async () => {
@@ -297,6 +390,63 @@ describe("task-driven AI provider factory", () => {
     }
   });
 
+  it("times out while reading an OpenAI-compatible response body", async () => {
+    const client = createBaselineAiClientForTask(resolved({ parameters: { timeoutMs: 5 } }), {
+      environment: { TEST_AI_KEY: "sk-test-secret" },
+      fetch: async () => delayedBodyResponse(30),
+    });
+
+    await expect(client.recommend(validBaselineAiInput)).resolves.toMatchObject({
+      status: "UNAVAILABLE",
+      errorCode: "TIMEOUT",
+      reportedModel: null,
+      actualModelUsed: null,
+    });
+  });
+
+  it("times out while reading a 9Router or connection response body", async () => {
+    const nineRouterClient = createBaselineAiClientForTask(resolvedNineRouter({ parameters: { timeoutMs: 5 } }), {
+      environment: { TEST_AI_KEY: "router-secret" },
+      fetch: async () => delayedBodyResponse(30),
+    });
+    const connection = testAiTaskConnection(resolved({ parameters: { timeoutMs: 5 } }), {
+      environment: { TEST_AI_KEY: "sk-test-secret" },
+      fetch: async () => delayedBodyResponse(30),
+    });
+
+    await expect(nineRouterClient.recommend(validBaselineAiInput)).resolves.toMatchObject({ errorCode: "TIMEOUT" });
+    await expect(connection).resolves.toMatchObject({ status: "FAILURE", code: "TIMEOUT" });
+  });
+
+  it("rejects oversized successful bodies without retaining their contents", async () => {
+    const oversized = oversizedBodyResponse();
+    const client = createBaselineAiClientForTask(resolved(), {
+      environment: { TEST_AI_KEY: "sk-test-secret" },
+      fetch: async () => oversized.response,
+    });
+    const result = await client.recommend(validBaselineAiInput);
+
+    expect(result).toMatchObject({ status: "UNAVAILABLE", errorCode: "INVALID_RESPONSE" });
+    expect(JSON.stringify(result)).not.toContain("x".repeat(100));
+    expect(oversized.wasCanceled()).toBe(true);
+    const nineRouterOversized = oversizedBodyResponse();
+    const nineRouterClient = createBaselineAiClientForTask(resolvedNineRouter(), {
+      environment: { TEST_AI_KEY: "router-secret" },
+      fetch: async () => nineRouterOversized.response,
+    });
+    await expect(nineRouterClient.recommend(validBaselineAiInput)).resolves.toMatchObject({
+      status: "UNAVAILABLE",
+      errorCode: "INVALID_RESPONSE",
+    });
+    expect(nineRouterOversized.wasCanceled()).toBe(true);
+    const connectionOversized = oversizedBodyResponse();
+    await expect(testAiTaskConnection(resolved(), {
+      environment: { TEST_AI_KEY: "sk-test-secret" },
+      fetch: async () => connectionOversized.response,
+    })).resolves.toMatchObject({ status: "FAILURE", code: "MALFORMED_RESPONSE" });
+    expect(connectionOversized.wasCanceled()).toBe(true);
+  });
+
   it("reports unsupported Hugging Face hosting without inventing an endpoint contract", async () => {
     const fetchMock = vi.fn<typeof fetch>();
     const result = await testAiTaskConnection(resolved({ provider: "huggingface-hosted" }), {
@@ -308,6 +458,18 @@ describe("task-driven AI provider factory", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(serialized(result)).not.toContain("hf-secret");
   });
+});
+
+it("returns a schema-valid typed failure for an accepted long task URL", async () => {
+  const baseUrl = `https://provider.example.test/${"a".repeat(2050)}`;
+
+  const result = await testAiTaskConnection(resolved({ baseUrl }), {
+    environment: { TEST_AI_KEY: "sk-test-secret" },
+    fetch: async () => response("malformed"),
+  });
+
+  expect(() => AiConnectionResultSchema.parse(result)).not.toThrow();
+  expect(result).toMatchObject({ status: "FAILURE", code: "MALFORMED_RESPONSE" });
 });
 
 it("does not accept unsafe identity in the task contract", () => {

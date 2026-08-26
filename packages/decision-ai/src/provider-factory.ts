@@ -7,7 +7,13 @@ import {
   type BaselineAiClient,
   type BaselineAiInput,
 } from "./contracts.js";
-import { createNineRouterDecisionProvider, parseChatCompletionEnvelope } from "./nine-router-provider.js";
+import {
+  createNineRouterDecisionProvider,
+  fetchResponseBody,
+  parseChatCompletionEnvelope,
+  RequestTimeoutError,
+  ResponseBodyTooLargeError,
+} from "./nine-router-provider.js";
 import type { AiTaskProvider, ResolvedAiTaskConfig } from "./task-config.js";
 
 export type AiConnectionCode =
@@ -45,7 +51,7 @@ export interface AiConnectionIdentity {
 
 export const AiConnectionIdentitySchema = z.strictObject({
   provider: z.enum(["9router", "openai-compatible", "huggingface-hosted"]),
-  baseUrl: z.string().trim().min(1).max(2048),
+  baseUrl: z.string().trim().min(1).max(4096),
   model: z.string().trim().min(1).max(256),
 });
 
@@ -126,7 +132,8 @@ function safeReportedModel(value: string, secret: string | undefined): string | 
 }
 
 function resolvedSecret(config: Exclude<ResolvedAiTaskConfig, { source: "UNSET" }>, dependencies: TaskAiClientDependencies): string | undefined {
-  return dependencies.environment?.[config.secretRef]?.trim() || process.env[config.secretRef]?.trim() || undefined;
+  const environment = dependencies.environment === undefined ? process.env : dependencies.environment;
+  return environment[config.secretRef]?.trim() || undefined;
 }
 
 function providerConfig(
@@ -157,48 +164,44 @@ function createOpenAiCompatibleProvider(
   const fetchImpl = dependencies.fetch ?? globalThis.fetch;
   return {
     async recommend(input: BaselineAiInput, requestedModel: string) {
-      const controller = new AbortController();
-      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-      const timeout = new Promise<never>((_, reject) => {
-        timeoutHandle = setTimeout(() => {
-          controller.abort();
-          reject(new Error("timeout"));
-        }, config.parameters!.timeoutMs);
-      });
       const headers: Record<string, string> = { "content-type": "application/json" };
       if (secret) headers.authorization = `Bearer ${secret}`;
+      let response: Response;
+      let body: string | null;
       try {
-        const response = await Promise.race([
-          fetchImpl(`${config.baseUrl}/chat/completions`, {
-            method: "POST",
-            headers,
-            body: JSON.stringify({
-              model: requestedModel,
-              temperature: 0,
-              response_format: { type: "json_object" },
-              messages: buildDecisionAiMessages(input),
-            }),
-            redirect: "error",
-            signal: controller.signal,
+        ({ response, body } = await fetchResponseBody(fetchImpl, `${config.baseUrl}/chat/completions`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            model: requestedModel,
+            temperature: 0,
+            response_format: { type: "json_object" },
+            messages: buildDecisionAiMessages(input),
           }),
-          timeout,
-        ]);
-        if (!response.ok) {
-          const errorCode: "RATE_LIMITED" | "PROVIDER_UNAVAILABLE" | "HTTP_ERROR" = response.status === 429
-            ? "RATE_LIMITED"
-            : response.status >= 500 ? "PROVIDER_UNAVAILABLE" : "HTTP_ERROR";
-          return { status: "FAILURE" as const, errorCode };
-        }
-        try {
-          const parsed = readProbeResponse(await response.text());
-          return { status: "SUCCESS" as const, reportedModel: parsed.model, output: BaselineAiOutputSchema.parse(JSON.parse(parsed.content)) };
-        } catch {
-          return { status: "FAILURE" as const, errorCode: "INVALID_RESPONSE" as const };
-        }
+          redirect: "error",
+        }, config.parameters!.timeoutMs));
       } catch (error) {
-        return { status: "FAILURE" as const, errorCode: error instanceof Error && error.message === "timeout" ? "TIMEOUT" as const : "NETWORK_ERROR" as const };
-      } finally {
-        if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+        return {
+          status: "FAILURE" as const,
+          errorCode: error instanceof RequestTimeoutError
+            ? "TIMEOUT" as const
+            : error instanceof ResponseBodyTooLargeError ? "INVALID_RESPONSE" as const : "NETWORK_ERROR" as const,
+        };
+      }
+      if (!response.ok) {
+        const errorCode: "RATE_LIMITED" | "PROVIDER_UNAVAILABLE" | "HTTP_ERROR" = response.status === 429
+          ? "RATE_LIMITED"
+          : response.status >= 500 ? "PROVIDER_UNAVAILABLE" : "HTTP_ERROR";
+        return { status: "FAILURE" as const, errorCode };
+      }
+      if (body === null) return { status: "FAILURE" as const, errorCode: "INVALID_RESPONSE" as const };
+      try {
+        const parsed = readProbeResponse(body);
+        const reportedModel = safeReportedModel(parsed.model, secret);
+        if (reportedModel === null) return { status: "FAILURE" as const, errorCode: "INVALID_RESPONSE" as const };
+        return { status: "SUCCESS" as const, reportedModel, output: BaselineAiOutputSchema.parse(JSON.parse(parsed.content)) };
+      } catch {
+        return { status: "FAILURE" as const, errorCode: "INVALID_RESPONSE" as const };
       }
     },
   };
@@ -267,47 +270,37 @@ export async function testAiTaskConnection(
     return resultFailure(requested, config.provider === "9router" ? "CONFIG_ERROR" : "AUTH_FAILURE");
   }
   const fetchImpl = dependencies.fetch ?? globalThis.fetch;
-  const controller = new AbortController();
-  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutHandle = setTimeout(() => {
-      controller.abort();
-      reject(new Error("timeout"));
-    }, config.parameters.timeoutMs);
-  });
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (secret !== undefined) headers.authorization = `Bearer ${secret}`;
+  let response: Response;
+  let body: string | null;
   try {
-    const response = await Promise.race([
-      fetchImpl(`${config.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ model: config.model, messages: [{ role: "user", content: "Reply with OK." }], temperature: 0, max_tokens: 1 }),
-        redirect: "error",
-        signal: controller.signal,
-      }),
-      timeout,
-    ]);
-    if (response.status === 401 || response.status === 403) return resultFailure(requested, "AUTH_FAILURE");
-    if (response.status === 429) return resultFailure(requested, "RATE_LIMITED", retryAfterSeconds(response.headers.get("retry-after")));
-    if (response.status >= 500) return resultFailure(requested, "UNAVAILABLE");
-    if (!response.ok) return resultFailure(requested, "HTTP_ERROR");
-    try {
-      const parsed = readProbeResponse(await response.text());
-      const reportedModel = safeReportedModel(parsed.model, secret);
-      if (reportedModel === null) return resultFailure(requested, "MALFORMED_RESPONSE");
-      return AiConnectionResultSchema.parse({
-        status: "SUCCESS",
-        code: "CONNECTED",
-        requested,
-        reported: { provider: null, model: reportedModel },
-      }) as AiConnectionResult;
-    } catch {
-      return resultFailure(requested, "MALFORMED_RESPONSE");
-    }
+    ({ response, body } = await fetchResponseBody(fetchImpl, `${config.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ model: config.model, messages: [{ role: "user", content: "Reply with OK." }], temperature: 0, max_tokens: 1 }),
+      redirect: "error",
+    }, config.parameters.timeoutMs));
   } catch (error) {
-    return resultFailure(requested, error instanceof Error && error.message === "timeout" ? "TIMEOUT" : "NETWORK_ERROR");
-  } finally {
-    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+    return resultFailure(requested,
+      error instanceof RequestTimeoutError ? "TIMEOUT" : error instanceof ResponseBodyTooLargeError ? "MALFORMED_RESPONSE" : "NETWORK_ERROR");
+  }
+  if (response.status === 401 || response.status === 403) return resultFailure(requested, "AUTH_FAILURE");
+  if (response.status === 429) return resultFailure(requested, "RATE_LIMITED", retryAfterSeconds(response.headers.get("retry-after")));
+  if (response.status >= 500) return resultFailure(requested, "UNAVAILABLE");
+  if (!response.ok) return resultFailure(requested, "HTTP_ERROR");
+  if (body === null) return resultFailure(requested, "MALFORMED_RESPONSE");
+  try {
+    const parsed = readProbeResponse(body);
+    const reportedModel = safeReportedModel(parsed.model, secret);
+    if (reportedModel === null) return resultFailure(requested, "MALFORMED_RESPONSE");
+    return AiConnectionResultSchema.parse({
+      status: "SUCCESS",
+      code: "CONNECTED",
+      requested,
+      reported: { provider: null, model: reportedModel },
+    }) as AiConnectionResult;
+  } catch {
+    return resultFailure(requested, "MALFORMED_RESPONSE");
   }
 }

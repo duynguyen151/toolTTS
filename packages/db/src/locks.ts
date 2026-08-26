@@ -4,6 +4,7 @@ import type { DatabaseContext, DatabaseTransaction } from "./client.js";
 
 const SHOP_SYNC_WRITE_LOCK_NAMESPACE = 1;
 const SHOP_RISK_CONTROL_LOCK_NAMESPACE = 2;
+const REFRESH_PROFILE_EXECUTION_LOCK_NAMESPACE = 3;
 
 export async function withShopAdvisoryLock<T>(
   context: DatabaseContext,
@@ -46,6 +47,28 @@ export async function withTransactionalShopLock<T>(
     );
     return operation(transaction);
   });
+}
+
+/** Rejects a second worker for the same AdsPower profile while one claimed refresh attempt owns it. */
+export async function withRefreshProfileExecutionLock<T>(
+  context: DatabaseContext,
+  profileId: string,
+  operation: () => Promise<T>,
+): Promise<T | null> {
+  const connection = await context.sql.reserve();
+  try {
+    const [{ acquired }] = await connection<[{ acquired: boolean }]>`
+      select pg_try_advisory_lock(hashtextextended(${profileId}, ${REFRESH_PROFILE_EXECUTION_LOCK_NAMESPACE})) as acquired
+    `;
+    if (!acquired) return null;
+    try {
+      return await operation();
+    } finally {
+      await connection`select pg_advisory_unlock(hashtextextended(${profileId}, ${REFRESH_PROFILE_EXECUTION_LOCK_NAMESPACE}))`;
+    }
+  } finally {
+    connection.release();
+  }
 }
 
 export async function withShopRiskControlLock<T>(

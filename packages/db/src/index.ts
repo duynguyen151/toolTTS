@@ -8,6 +8,7 @@ export {
 } from "./client.js";
 export { readDatabaseConfig, type DatabaseConfig } from "./config.js";
 export {
+  withRefreshProfileExecutionLock,
   withShopAdvisoryLock,
   withShopRiskControlLock,
   withTransactionalShopLock
@@ -17,6 +18,10 @@ export { seedSanitizedDemoData, type DemoSeedResult } from "./seed-demo.js";
 export {
   aiDecisionStatusEnum,
   aiTaskConfigs,
+  refreshCheckpointAttemptStatusEnum,
+  refreshCheckpointAttempts,
+  refreshCheckpointRunStatusEnum,
+  refreshCheckpointRuns,
   refreshCheckpoints,
   refreshSettings,
   aiDecisions,
@@ -56,6 +61,8 @@ export {
   syncRunStatusEnum,
   type AiDecisionRow,
   type AiTaskConfigRow,
+  type RefreshCheckpointAttemptRow,
+  type RefreshCheckpointRunRow,
   type RefreshCheckpointRow,
   type RefreshSettingsRow,
   type AdsPowerProfileRow,
@@ -184,6 +191,16 @@ export {
   type SetRefreshRetryOffsetsInput,
   type UpdateRefreshCheckpointInput,
 } from "./queries/refresh-settings.js";
+export {
+  claimDueRefreshAttempts,
+  completeRefreshAttempt,
+  getRefreshCheckpointRun,
+  recordRefreshAttemptStarted,
+  type ClaimDueRefreshAttemptsInput,
+  type CompleteRefreshAttemptInput,
+  type GetRefreshCheckpointRunInput,
+  type RecordRefreshAttemptStartedInput,
+} from "./queries/refresh-controller.js";
 export {
   getRiskControlState,
   recordHolidayModeObservation,

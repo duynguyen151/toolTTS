@@ -792,6 +792,19 @@ export const aiTaskConfigs = pgTable(
   ],
 );
 
+export const refreshCheckpointRunStatusEnum = pgEnum("refresh_checkpoint_run_status", [
+  "RETRY_WAIT",
+  "RUNNING",
+  "SUCCEEDED",
+  "FAILED_EXHAUSTED",
+]);
+
+export const refreshCheckpointAttemptStatusEnum = pgEnum("refresh_checkpoint_attempt_status", [
+  "RUNNING",
+  "SUCCEEDED",
+  "FAILED",
+]);
+
 export const refreshSettings = pgTable(
   "refresh_settings",
   {
@@ -828,6 +841,69 @@ export const refreshCheckpoints = pgTable(
     check("refresh_checkpoints_local_time_valid", sql`${table.localTime} ~ '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$'`),
     check("refresh_checkpoints_created_at_finite", sql`${table.createdAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz)`),
     check("refresh_checkpoints_updated_at_finite", sql`${table.updatedAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz)`),
+  ],
+);
+
+export const refreshCheckpointRuns = pgTable(
+  "refresh_checkpoint_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    shopId: uuid("shop_id").notNull().references(() => shops.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    checkpointId: uuid("checkpoint_id").notNull().references(() => refreshCheckpoints.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    businessDate: text("business_date").notNull(),
+    status: refreshCheckpointRunStatusEnum("status").notNull().default("RETRY_WAIT"),
+    retryOffsetsSeconds: jsonb("retry_offsets_seconds").$type<number[]>().notNull(),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    claimToken: uuid("claim_token"),
+    cycleStartedAt: timestamp("cycle_started_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    lastFailureMessage: text("last_failure_message"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("refresh_checkpoint_runs_shop_date_checkpoint_unique").on(table.shopId, table.businessDate, table.checkpointId),
+    index("refresh_checkpoint_runs_due_idx").on(table.status, table.nextAttemptAt, table.claimedAt),
+    index("refresh_checkpoint_runs_shop_date_idx").on(table.shopId, table.businessDate),
+    check("refresh_checkpoint_runs_business_date_valid", sql`${table.businessDate} ~ '^\\d{4}-\\d{2}-\\d{2}$'`),
+    check("refresh_checkpoint_runs_retry_offsets_valid", sql`public.refresh_retry_offsets_valid(${table.retryOffsetsSeconds})`),
+    check("refresh_checkpoint_runs_attempt_count_bounded", sql`${table.attemptCount} between 0 and jsonb_array_length(${table.retryOffsetsSeconds})`),
+    check("refresh_checkpoint_runs_status_consistent", sql`(
+      (${table.status} = 'RETRY_WAIT' and ${table.nextAttemptAt} is not null and ${table.claimedAt} is null and ${table.claimToken} is null and ${table.completedAt} is null)
+      or (${table.status} = 'RUNNING' and ${table.nextAttemptAt} is null and ${table.claimedAt} is not null and ${table.claimToken} is not null and ${table.completedAt} is null)
+      or (${table.status} in ('SUCCEEDED', 'FAILED_EXHAUSTED') and ${table.completedAt} is not null and ${table.nextAttemptAt} is null and ${table.claimedAt} is null and ${table.claimToken} is null)
+    )`),
+    check("refresh_checkpoint_runs_timestamps_finite", sql`${table.cycleStartedAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz) and ${table.createdAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz) and ${table.updatedAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz) and (${table.nextAttemptAt} is null or ${table.nextAttemptAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz)) and (${table.claimedAt} is null or ${table.claimedAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz)) and (${table.completedAt} is null or ${table.completedAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz))`),
+  ],
+);
+
+export const refreshCheckpointAttempts = pgTable(
+  "refresh_checkpoint_attempts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    runId: uuid("run_id").notNull().references(() => refreshCheckpointRuns.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    attemptNumber: integer("attempt_number").notNull(),
+    status: refreshCheckpointAttemptStatusEnum("status").notNull().default("RUNNING"),
+    claimToken: uuid("claim_token").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    failureMessage: text("failure_message"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("refresh_checkpoint_attempts_run_number_unique").on(table.runId, table.attemptNumber),
+    unique("refresh_checkpoint_attempts_run_claim_unique").on(table.runId, table.claimToken),
+    index("refresh_checkpoint_attempts_run_started_idx").on(table.runId, table.startedAt),
+    check("refresh_checkpoint_attempts_number_positive", sql`${table.attemptNumber} > 0`),
+    check("refresh_checkpoint_attempts_status_consistent", sql`(
+      (${table.status} = 'RUNNING' and ${table.finishedAt} is null and ${table.nextAttemptAt} is null and ${table.failureMessage} is null)
+      or (${table.status} = 'SUCCEEDED' and ${table.finishedAt} is not null and ${table.nextAttemptAt} is null and ${table.failureMessage} is null)
+      or (${table.status} = 'FAILED' and ${table.finishedAt} is not null and ${table.failureMessage} is not null)
+    )`),
+    check("refresh_checkpoint_attempts_timestamps_finite", sql`${table.startedAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz) and ${table.createdAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz) and (${table.finishedAt} is null or ${table.finishedAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz)) and (${table.nextAttemptAt} is null or ${table.nextAttemptAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz))`),
   ],
 );
 
@@ -1220,6 +1296,8 @@ export type DecisionCaseRow = typeof decisionCases.$inferSelect;
 export type RiskPolicyRevisionRow = typeof riskPolicyRevisions.$inferSelect;
 export type AiTaskConfigRow = typeof aiTaskConfigs.$inferSelect;
 export type RefreshSettingsRow = typeof refreshSettings.$inferSelect;
+export type RefreshCheckpointRunRow = typeof refreshCheckpointRuns.$inferSelect;
+export type RefreshCheckpointAttemptRow = typeof refreshCheckpointAttempts.$inferSelect;
 export type RefreshCheckpointRow = typeof refreshCheckpoints.$inferSelect;
 export type BaDecisionRow = typeof baDecisions.$inferSelect;
 export type AiDecisionRow = typeof aiDecisions.$inferSelect;

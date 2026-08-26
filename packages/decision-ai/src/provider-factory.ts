@@ -8,6 +8,7 @@ import {
   type BaselineAiInput,
 } from "./contracts.js";
 import {
+  baselineAiOutputContainsSecret,
   createNineRouterDecisionProvider,
   fetchResponseBody,
   parseChatCompletionEnvelope,
@@ -101,8 +102,13 @@ function readProbeResponse(value: string): { model: string; content: string } {
   return parseChatCompletionEnvelope(value);
 }
 
-function identity(config: Exclude<ResolvedAiTaskConfig, { source: "UNSET" }>): AiConnectionIdentity {
-  return { provider: config.provider, baseUrl: config.baseUrl, model: config.model };
+function safeIdentity(config: Exclude<ResolvedAiTaskConfig, { source: "UNSET" }>): AiConnectionIdentity | null {
+  const parsed = AiConnectionIdentitySchema.safeParse({
+    provider: config.provider,
+    baseUrl: config.baseUrl,
+    model: config.model,
+  });
+  return parsed.success ? parsed.data : null;
 }
 
 function retryAfterSeconds(value: string | null): number | undefined {
@@ -199,7 +205,9 @@ function createOpenAiCompatibleProvider(
         const parsed = readProbeResponse(body);
         const reportedModel = safeReportedModel(parsed.model, secret);
         if (reportedModel === null) return { status: "FAILURE" as const, errorCode: "INVALID_RESPONSE" as const };
-        return { status: "SUCCESS" as const, reportedModel, output: BaselineAiOutputSchema.parse(JSON.parse(parsed.content)) };
+        const output = BaselineAiOutputSchema.parse(JSON.parse(parsed.content));
+        if (baselineAiOutputContainsSecret(output, secret)) return { status: "FAILURE" as const, errorCode: "INVALID_RESPONSE" as const };
+        return { status: "SUCCESS" as const, reportedModel, output };
       } catch {
         return { status: "FAILURE" as const, errorCode: "INVALID_RESPONSE" as const };
       }
@@ -261,7 +269,8 @@ export async function testAiTaskConnection(
   if (config.provider === null || config.baseUrl === null || config.model === null || config.parameters === null || config.secretRef === null) {
     return resultFailure(null, "CONFIG_ERROR");
   }
-  const requested = identity(config);
+  const requested = safeIdentity(config);
+  if (requested === null) return resultFailure(null, "CONFIG_ERROR");
   if (!config.enabled) return resultFailure(requested, "CONFIG_ERROR");
   if (config.provider === "huggingface-hosted") return resultFailure(requested, "UNSUPPORTED");
   const secret = resolvedSecret(config, dependencies);

@@ -4,7 +4,9 @@ import {
   createBaselineAiClientForTask,
   AiConnectionResultSchema,
   testAiTaskConnection,
+  fetchResponseBody,
   MAX_RESPONSE_BODY_BYTES,
+  ResponseBodyTooLargeError,
   type AiConnectionResult,
 } from "./index.js";
 import { resolveAiTaskConfig, type PersistedAiTaskConfig } from "./task-config.js";
@@ -62,7 +64,7 @@ function successfulProbeResponse(model = "reported-model") {
   return response({ model, choices: [{ message: { content: "OK" } }] });
 }
 
-function nineRouterResponse(model = "oc/deepseek-v4-flash-free", trailer = "") {
+function nineRouterResponse(model = "oc/deepseek-v4-flash-free", trailer = "", outputOverrides: Record<string, unknown> = {}) {
   return new Response(`${JSON.stringify({ model, choices: [{ message: { content: JSON.stringify({
     recommendation: "WATCH",
     riskLevel: "MEDIUM",
@@ -73,6 +75,7 @@ function nineRouterResponse(model = "oc/deepseek-v4-flash-free", trailer = "") {
     whatWouldChangeDecision: ["Complete source history."],
     reason: "Review required.",
     humanReviewRequired: true,
+    ...outputOverrides,
   }) } }] })}${trailer}`, { status: 200 });
 }
 
@@ -81,18 +84,14 @@ function delayedBodyResponse(delayMs: number): Response {
     ok: true,
     status: 200,
     headers: new Headers(),
-    text: () => new Promise<string>((resolve) => setTimeout(() => resolve(JSON.stringify({ model: "safe-model", choices: [{ message: { content: JSON.stringify({
-      recommendation: "WATCH",
-      riskLevel: "MEDIUM",
-      confidence: 0.62,
-      reasonCodes: ["DATA_INCOMPLETE"],
-      supportingFactors: ["Coverage is explicit."],
-      riskFactors: ["Lifetime history is incomplete."],
-      whatWouldChangeDecision: ["Complete source history."],
-      reason: "Review required.",
-      humanReviewRequired: true,
-    }) } }] })), delayMs)),
-  } as Response;
+    body: {
+      getReader: () => ({
+        read: () => new Promise<{ done: boolean; value?: Uint8Array }>((resolve) => setTimeout(() => resolve({ done: true }), delayMs)),
+        cancel: async () => undefined,
+      }),
+    },
+    text: () => { throw new Error("stream body must be read through getReader"); },
+  } as unknown as Response;
 }
 
 function oversizedBodyResponse(): { response: Response; wasCanceled: () => boolean } {
@@ -110,6 +109,46 @@ function oversizedBodyResponse(): { response: Response; wasCanceled: () => boole
     text: async () => { throw new Error("unbounded text fallback must not be used"); },
   } as unknown as Response;
   return { response, wasCanceled: () => canceled };
+}
+
+function nonSuccessBodyResponse(status: number): { response: Response; cancelCount: () => number; textCalls: () => number } {
+  let cancelCalls = 0;
+  let textCallCount = 0;
+  const response = {
+    ok: false,
+    status,
+    headers: new Headers(),
+    body: {
+      getReader: () => { throw new Error("non-success body must not be read"); },
+      cancel: async () => { cancelCalls += 1; },
+    },
+    text: async () => { textCallCount += 1; return "retained error body"; },
+  } as unknown as Response;
+  return { response, cancelCount: () => cancelCalls, textCalls: () => textCallCount };
+}
+
+function bodylessFallbackResponse(): { response: Response; textCalls: () => number } {
+  let textCallCount = 0;
+  const response = {
+    ok: true,
+    status: 200,
+    headers: new Headers(),
+    body: null,
+    text: async () => { textCallCount += 1; return "unbounded fallback"; },
+  } as unknown as Response;
+  return { response, textCalls: () => textCallCount };
+}
+
+function customBodyWithoutReaderResponse(): { response: Response; textCalls: () => number } {
+  let textCallCount = 0;
+  const response = {
+    ok: true,
+    status: 200,
+    headers: new Headers(),
+    body: {},
+    text: async () => { textCallCount += 1; return "unbounded fallback"; },
+  } as unknown as Response;
+  return { response, textCalls: () => textCallCount };
 }
 
 function serialized(result: AiConnectionResult): string {
@@ -199,10 +238,15 @@ describe("task-driven AI provider factory", () => {
     });
   });
 
-  it("does not return a provider secret in a valid OpenAI-compatible business result", async () => {
+  it.each([
+    ["reason", { reason: "The provider secret sk-test-secret was echoed." }],
+    ["supportingFactors", { supportingFactors: ["Observed sk-test-secret in the provider output."] }],
+    ["riskFactors", { riskFactors: ["Observed sk-test-secret in the provider output."] }],
+    ["whatWouldChangeDecision", { whatWouldChangeDecision: ["Remove sk-test-secret from the provider configuration."] }],
+  ] as const)("rejects a provider secret embedded in the %s output leaf", async (_leaf, outputOverrides) => {
     const client = createBaselineAiClientForTask(resolved(), {
       environment: { TEST_AI_KEY: "sk-test-secret" },
-      fetch: async () => nineRouterResponse("sk-test-secret"),
+      fetch: async () => nineRouterResponse("reported-model", "", outputOverrides),
     });
 
     const result = await client.recommend(validBaselineAiInput);
@@ -213,6 +257,18 @@ describe("task-driven AI provider factory", () => {
       reportedModel: null,
       actualModelUsed: null,
     });
+    expect(JSON.stringify(result)).not.toContain("sk-test-secret");
+  });
+
+  it("rejects a provider secret embedded in a 9Router output leaf", async () => {
+    const client = createBaselineAiClientForTask(resolvedNineRouter(), {
+      environment: { TEST_AI_KEY: "sk-test-secret" },
+      fetch: async () => nineRouterResponse("oc/deepseek-v4-flash-free", "", { reason: "sk-test-secret" }),
+    });
+
+    const result = await client.recommend(validBaselineAiInput);
+
+    expect(result).toMatchObject({ status: "UNAVAILABLE", errorCode: "INVALID_RESPONSE" });
     expect(JSON.stringify(result)).not.toContain("sk-test-secret");
   });
 
@@ -418,6 +474,33 @@ describe("task-driven AI provider factory", () => {
     await expect(connection).resolves.toMatchObject({ status: "FAILURE", code: "TIMEOUT" });
   });
 
+  it("cancels a non-success response body once without reading its error text", async () => {
+    const failed = nonSuccessBodyResponse(503);
+
+    const result = await fetchResponseBody(async () => failed.response, "https://provider.example.test/v1", {}, 1000);
+
+    expect(result).toEqual({ response: failed.response, body: null });
+    expect(failed.cancelCount()).toBe(1);
+    expect(failed.textCalls()).toBe(0);
+  });
+
+  it("does not invoke text for a standards-compliant bodyless response", async () => {
+    const bodyless = bodylessFallbackResponse();
+
+    const result = await fetchResponseBody(async () => bodyless.response, "https://provider.example.test/v1", {}, 1000);
+
+    expect(result).toEqual({ response: bodyless.response, body: "" });
+    expect(bodyless.textCalls()).toBe(0);
+  });
+
+  it("rejects a custom response body without a reader without invoking text", async () => {
+    const custom = customBodyWithoutReaderResponse();
+
+    await expect(fetchResponseBody(async () => custom.response, "https://provider.example.test/v1", {}, 1000))
+      .rejects.toBeInstanceOf(ResponseBodyTooLargeError);
+    expect(custom.textCalls()).toBe(0);
+  });
+
   it("rejects oversized successful bodies without retaining their contents", async () => {
     const oversized = oversizedBodyResponse();
     const client = createBaselineAiClientForTask(resolved(), {
@@ -460,16 +543,18 @@ describe("task-driven AI provider factory", () => {
   });
 });
 
-it("returns a schema-valid typed failure for an accepted long task URL", async () => {
-  const baseUrl = `https://provider.example.test/${"a".repeat(2050)}`;
+it("returns a schema-valid config failure without fetching for a W14-valid URL over 4096 characters", async () => {
+  const baseUrl = `https://provider.example.test/${"a".repeat(4100)}`;
+  const fetchMock = vi.fn<typeof fetch>();
 
   const result = await testAiTaskConnection(resolved({ baseUrl }), {
     environment: { TEST_AI_KEY: "sk-test-secret" },
-    fetch: async () => response("malformed"),
+    fetch: fetchMock,
   });
 
   expect(() => AiConnectionResultSchema.parse(result)).not.toThrow();
-  expect(result).toMatchObject({ status: "FAILURE", code: "MALFORMED_RESPONSE" });
+  expect(result).toMatchObject({ status: "FAILURE", code: "CONFIG_ERROR", requested: null });
+  expect(fetchMock).not.toHaveBeenCalled();
 });
 
 it("does not accept unsafe identity in the task contract", () => {

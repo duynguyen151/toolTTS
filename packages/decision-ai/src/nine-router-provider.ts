@@ -55,7 +55,18 @@ export class ResponseBodyTooLargeError extends Error {
   }
 }
 
+export function baselineAiOutputContainsSecret(output: BaselineAiOutput, secret: string | undefined): boolean {
+  if (secret === undefined || secret === "") return false;
+  return [
+    output.reason,
+    ...output.supportingFactors,
+    ...output.riskFactors,
+    ...output.whatWouldChangeDecision,
+  ].some((value) => value.includes(secret));
+}
+
 async function readBoundedResponseBody(response: Response): Promise<string> {
+  if (response.body === null) return "";
   const reader = response.body?.getReader?.();
   if (reader !== undefined) {
     const chunks: Uint8Array[] = [];
@@ -84,11 +95,7 @@ async function readBoundedResponseBody(response: Response): Promise<string> {
     return new TextDecoder().decode(body);
   }
 
-  const text = await response.text();
-  if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BODY_BYTES) {
-    throw new ResponseBodyTooLargeError();
-  }
-  return text;
+  throw new ResponseBodyTooLargeError();
 }
 
 export async function fetchResponseBody(
@@ -111,7 +118,16 @@ export async function fetchResponseBody(
       fetchImpl(url, { ...init, signal: controller.signal }),
       timeout,
     ]);
-    if (!response.ok) return { response, body: null };
+    if (!response.ok) {
+      if (response.body !== null) {
+        try {
+          await Promise.race([response.body.cancel(), timeout]);
+        } catch (error) {
+          if (error instanceof RequestTimeoutError) throw error;
+        }
+      }
+      return { response, body: null };
+    }
     return { response, body: await Promise.race([readBoundedResponseBody(response), timeout]) };
   } finally {
     if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
@@ -181,10 +197,14 @@ export function createNineRouterDecisionProvider(
       try {
         const envelope = parseChatCompletionEnvelope(body);
         const decoded = JSON.parse(envelope.content) as unknown;
+        const output = BaselineAiOutputSchema.parse(decoded);
+        if (baselineAiOutputContainsSecret(output, config.apiKey)) {
+          return { status: "FAILURE", errorCode: "INVALID_RESPONSE" };
+        }
         return {
           status: "SUCCESS",
           reportedModel: envelope.model,
-          output: BaselineAiOutputSchema.parse(decoded),
+          output,
         };
       } catch {
         return { status: "FAILURE", errorCode: "INVALID_RESPONSE" };

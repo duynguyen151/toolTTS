@@ -156,6 +156,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@shop-health/decision-ai':
+        specifier: workspace:*
+        version: link:../decision-ai
       '@shop-health/domain':
         specifier: workspace:*
         version: link:../domain

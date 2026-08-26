@@ -11,6 +11,7 @@
     "seed:demo": "tsx src/seed-demo.ts"
   },
   "dependencies": {
+    "@shop-health/decision-ai": "workspace:*",
     "@shop-health/domain": "workspace:*",
     "drizzle-orm": "^0.44.4",
     "postgres": "^3.4.7",

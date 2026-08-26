@@ -16,6 +16,7 @@ export { migrateDatabase } from "./migrations.js";
 export { seedSanitizedDemoData, type DemoSeedResult } from "./seed-demo.js";
 export {
   aiDecisionStatusEnum,
+  aiTaskConfigs,
   aiDecisions,
   adspowerProfileVerificationStateEnum,
   adspowerProfiles,
@@ -52,6 +53,7 @@ export {
   syncRuns,
   syncRunStatusEnum,
   type AiDecisionRow,
+  type AiTaskConfigRow,
   type AdsPowerProfileRow,
   type BaDecisionRow,
   type DecisionCaseRow,
@@ -156,6 +158,12 @@ export {
   type GetEffectiveRiskPolicyInput,
 } from "./queries/risk-policy.js";
 export {
+  appendAiTaskConfigRevision,
+  getCurrentAiTaskConfig,
+  type AppendAiTaskConfigRevisionInput,
+  type GetCurrentAiTaskConfigInput,
+} from "./queries/ai-task-configs.js";
+export {
   getRiskControlState,
   recordHolidayModeObservation,
   recordRiskControlAction,
@@ -186,6 +194,8 @@ export {
   requestShopSync,
   setShopSyncState,
   setShopVerificationState,
+  unlinkShopByProfileNo,
+  updateShopDisplayName,
   type CreateShopInput,
   type SetShopVerificationStateInput,
   type ShopSyncState

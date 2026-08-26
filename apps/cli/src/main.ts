@@ -1,5 +1,6 @@
 import { Command } from "commander";
 
+import { registerAiTaskCommands } from "./commands/ai-task.js";
 import { registerDataCommands } from "./commands/data.js";
 import { registerDoctorCommand } from "./commands/doctor.js";
 import { registerReviewCommands } from "./commands/review.js";
@@ -29,6 +30,7 @@ registerDoctorCommand(program, runtime);
 registerShopCommands(program, runtime);
 registerProfileCommands(program, runtime);
 registerPolicyCommands(program, runtime);
+registerAiTaskCommands(program, runtime);
 registerDataCommands(program, runtime);
 registerSyncExecutionCommands(program, runtime);
 registerRiskCommands(program, runtime);

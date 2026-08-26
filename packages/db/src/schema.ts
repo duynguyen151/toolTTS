@@ -757,6 +757,41 @@ export const riskPolicyRevisions = pgTable(
   ],
 );
 
+export const aiTaskConfigs = pgTable(
+  "ai_task_configs",
+  {
+    revisionId: uuid("revision_id").defaultRandom().primaryKey(),
+    sequence: bigint("sequence", { mode: "bigint" }).generatedAlwaysAsIdentity(),
+    taskId: text("task_id").notNull(),
+    provider: text("provider").notNull(),
+    baseUrl: text("base_url").notNull(),
+    model: text("model").notNull(),
+    parameters: jsonb("parameters").$type<{ readonly timeoutMs?: number | undefined }>().notNull().default(sql`'{}'::jsonb`),
+    secretRef: text("secret_ref").notNull(),
+    enabled: boolean("enabled").notNull(),
+    status: text("status").notNull(),
+    effectiveFrom: timestamp("effective_from", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("ai_task_configs_sequence_unique").on(table.sequence),
+    index("ai_task_configs_current_effective_idx").on(table.taskId, table.effectiveFrom, table.sequence),
+    check("ai_task_configs_task_id_not_blank", sql`length(btrim(${table.taskId})) > 0`),
+    check("ai_task_configs_task_id_valid", sql`${table.taskId} in ('SHOP_HEALTH_REVIEWER', 'FINANCE_SPECIALIST', 'ORDER_ANOMALY_REVIEWER', 'BA_ASSISTANT')`),
+    check("ai_task_configs_provider_not_blank", sql`length(btrim(${table.provider})) > 0`),
+    check("ai_task_configs_provider_valid", sql`${table.provider} in ('9router', 'openai-compatible', 'huggingface-hosted')`),
+    check("ai_task_configs_model_not_blank", sql`length(btrim(${table.model})) > 0`),
+    check("ai_task_configs_model_valid", sql`(${table.provider} <> '9router' or ${table.model} in ('oc/deepseek-v4-flash-free', 'oc/big-pickle', 'oc/hy3-free', 'oc/laguna-s-2.1-free', 'oc/nemotron-3-ultra-free', 'oc/nemotron-3.5-lightning-free'))`),
+    check("ai_task_configs_base_url_valid", sql`${table.baseUrl} ~ '^https?://([A-Za-z0-9.-]+|\\[[0-9A-Fa-f:.]+\\])(:[0-9]{1,5})?(/[^?#[:space:]]*)?$'`),
+    check("ai_task_configs_secret_ref_not_blank", sql`length(btrim(${table.secretRef})) > 0`),
+    check("ai_task_configs_secret_ref_valid", sql`${table.secretRef} ~ '^[A-Z][A-Z0-9_]{0,127}$'`),
+    check("ai_task_configs_status_enabled_consistent", sql`(${table.enabled} and ${table.status} = 'ENABLED' and ${table.taskId} = 'SHOP_HEALTH_REVIEWER') or (not ${table.enabled} and ${table.status} = 'DISABLED')`),
+    check("ai_task_configs_parameters_valid", sql`jsonb_typeof(${table.parameters}) = 'object' and (${table.parameters} - array['timeoutMs']) = '{}'::jsonb and case when ${table.parameters} ? 'timeoutMs' then jsonb_typeof(${table.parameters}->'timeoutMs') = 'number' and (${table.parameters}->>'timeoutMs')::numeric between 1 and 300000 and mod((${table.parameters}->>'timeoutMs')::numeric, 1) = 0 else true end`),
+    check("ai_task_configs_effective_from_finite", sql`${table.effectiveFrom} not in ('infinity'::timestamptz, '-infinity'::timestamptz)`),
+    check("ai_task_configs_created_at_finite", sql`${table.createdAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz)`),
+  ],
+);
+
 export const decisionCases = pgTable(
   "decision_cases",
   {
@@ -1144,6 +1179,7 @@ export type KpiSnapshotRow = typeof kpiSnapshots.$inferSelect;
 export type RiskControlStateRow = typeof riskControlStates.$inferSelect;
 export type DecisionCaseRow = typeof decisionCases.$inferSelect;
 export type RiskPolicyRevisionRow = typeof riskPolicyRevisions.$inferSelect;
+export type AiTaskConfigRow = typeof aiTaskConfigs.$inferSelect;
 export type BaDecisionRow = typeof baDecisions.$inferSelect;
 export type AiDecisionRow = typeof aiDecisions.$inferSelect;
 export type DecisionExecutionRow = typeof decisionExecutions.$inferSelect;

@@ -79,14 +79,14 @@ function nineRouterResponse(model = "oc/deepseek-v4-flash-free", trailer = "", o
   }) } }] })}${trailer}`, { status: 200 });
 }
 
-function delayedBodyResponse(delayMs: number): Response {
+function hangingBodyResponse(): Response {
   return {
     ok: true,
     status: 200,
     headers: new Headers(),
     body: {
       getReader: () => ({
-        read: () => new Promise<{ done: boolean; value?: Uint8Array }>((resolve) => setTimeout(() => resolve({ done: true }), delayMs)),
+        read: () => new Promise<never>(() => undefined),
         cancel: async () => undefined,
       }),
     },
@@ -449,7 +449,7 @@ describe("task-driven AI provider factory", () => {
   it("times out while reading an OpenAI-compatible response body", async () => {
     const client = createBaselineAiClientForTask(resolved({ parameters: { timeoutMs: 5 } }), {
       environment: { TEST_AI_KEY: "sk-test-secret" },
-      fetch: async () => delayedBodyResponse(30),
+      fetch: async () => hangingBodyResponse(),
     });
 
     await expect(client.recommend(validBaselineAiInput)).resolves.toMatchObject({
@@ -463,11 +463,11 @@ describe("task-driven AI provider factory", () => {
   it("times out while reading a 9Router or connection response body", async () => {
     const nineRouterClient = createBaselineAiClientForTask(resolvedNineRouter({ parameters: { timeoutMs: 5 } }), {
       environment: { TEST_AI_KEY: "router-secret" },
-      fetch: async () => delayedBodyResponse(30),
+      fetch: async () => hangingBodyResponse(),
     });
     const connection = testAiTaskConnection(resolved({ parameters: { timeoutMs: 5 } }), {
       environment: { TEST_AI_KEY: "sk-test-secret" },
-      fetch: async () => delayedBodyResponse(30),
+      fetch: async () => hangingBodyResponse(),
     });
 
     await expect(nineRouterClient.recommend(validBaselineAiInput)).resolves.toMatchObject({ errorCode: "TIMEOUT" });

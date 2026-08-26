@@ -194,8 +194,6 @@ export {
   requestShopSync,
   setShopSyncState,
   setShopVerificationState,
-  unlinkShopByProfileNo,
-  updateShopDisplayName,
   type CreateShopInput,
   type SetShopVerificationStateInput,
   type ShopSyncState

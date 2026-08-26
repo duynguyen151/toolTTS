@@ -6,6 +6,7 @@ import {
   calculateRetryAt,
   getBangkokBusinessDate,
   getDueRefreshCheckpoints,
+  getRefreshCycleIneligibility,
   transitionRefreshAttempt,
 } from "./refresh-controller.js";
 
@@ -48,6 +49,19 @@ describe("refresh controller time and schedule contract", () => {
         enabled: true,
       }],
     })).toEqual([]);
+  });
+
+  it("terminalizes a prior-date or disabled cycle instead of leaving retry wait stranded", () => {
+    expect(getRefreshCycleIneligibility({
+      now: new Date("2026-01-16T00:00:00.000Z"),
+      businessDate: "2026-01-15",
+      checkpoint: { id: "00000000-0000-4000-8000-000000000001", localTime: "08:00", enabled: true },
+    })).toBe("Refresh checkpoint cycle is from a prior Bangkok business date");
+    expect(getRefreshCycleIneligibility({
+      now: new Date("2026-01-15T01:00:00.000Z"),
+      businessDate: "2026-01-15",
+      checkpoint: { id: "00000000-0000-4000-8000-000000000001", localTime: "08:00", enabled: false },
+    })).toBe("Refresh checkpoint is disabled");
   });
 
   it("maps attempt one to offset zero and later attempts to exact seconds", () => {

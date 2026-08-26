@@ -196,10 +196,14 @@ export {
   completeRefreshAttempt,
   getRefreshCheckpointRun,
   recordRefreshAttemptStarted,
+  releaseRefreshClaim,
+  renewRefreshAttemptLease,
   type ClaimDueRefreshAttemptsInput,
   type CompleteRefreshAttemptInput,
   type GetRefreshCheckpointRunInput,
   type RecordRefreshAttemptStartedInput,
+  type ReleaseRefreshClaimInput,
+  type RenewRefreshAttemptLeaseInput,
 } from "./queries/refresh-controller.js";
 export {
   getRiskControlState,

@@ -5,6 +5,8 @@ import {
   claimDueRefreshAttempts,
   closeDatabase,
   completeRefreshAttempt,
+  releaseRefreshClaim,
+  renewRefreshAttemptLease,
   createDatabase,
   listReadyAdsPowerProfileShops,
   recordRefreshAttemptStarted,
@@ -69,12 +71,15 @@ async function runClaimedRefreshAttempts(shops: readonly ShopRow[], now: Date): 
     now,
     repository: {
       recordRefreshAttemptStarted: (input) => recordRefreshAttemptStarted(context.db, input),
+      renewRefreshAttemptLease: (input) => renewRefreshAttemptLease(context.db, input),
+      releaseRefreshClaim: (input) => releaseRefreshClaim(context.db, input),
       completeRefreshAttempt: (input) => completeRefreshAttempt(context.db, input),
     },
+    withExecutionLock: (shop, operation) => withRefreshProfileExecutionLock(context, shop.profileId, operation),
     execute: async (shop) => {
       // W6 owns durable scheduling only. W8 will replace this with its health-aware
       // authoritative Finance refresh controller; existing manual/direct sync paths stay untouched.
-      return (await withRefreshProfileExecutionLock(context, shop.profileId, () => syncShop(shop, "finance"))) ?? false;
+      return syncShop(shop, "finance");
     },
   });
 }

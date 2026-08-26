@@ -7,12 +7,13 @@ import { closeDatabase, createDatabase, type DatabaseContext } from "../client.j
 import { withRefreshProfileExecutionLock } from "../locks.js";
 import { migrateDatabase } from "../migrations.js";
 import { refreshCheckpointAttempts, refreshCheckpointRuns, refreshCheckpoints, refreshSettings, shops } from "../schema.js";
-import { setAutoRefreshEnabled, setRefreshRetryOffsets } from "./refresh-settings.js";
+import { setAutoRefreshEnabled, setRefreshCheckpointEnabled, setRefreshRetryOffsets } from "./refresh-settings.js";
 import {
   claimDueRefreshAttempts,
   completeRefreshAttempt,
   getRefreshCheckpointRun,
   recordRefreshAttemptStarted,
+  renewRefreshAttemptLease,
 } from "./refresh-controller.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -127,5 +128,73 @@ describeWithDatabase("refresh checkpoint controller PostgreSQL persistence", () 
 
     const later = await claimDueRefreshAttempts(context.db, { now: new Date("2026-01-18T00:01:00.000Z"), shops: [{ id: firstShopId }] });
     expect(later).toEqual(expect.arrayContaining([expect.objectContaining({ checkpointId: nextCheckpointId, status: "RUNNING" })]));
+  });
+
+  it("does not reclaim a legitimately long-running attempt whose active worker renews its lease", async () => {
+    await setRefreshRetryOffsets(context.db, { retryOffsetsSeconds: [0] });
+    const now = new Date("2026-01-19T00:00:00.000Z");
+    const [run] = await claimDueRefreshAttempts(context.db, { now, shops: [{ id: firstShopId }] });
+    const attempt = await recordRefreshAttemptStarted(context.db, { runId: run!.id, claimToken: run!.claimToken!, now });
+    const renewedAt = new Date(now.getTime() + 89_000);
+    await expect(renewRefreshAttemptLease(context.db, { runId: run!.id, attemptId: attempt.id, claimToken: run!.claimToken!, now: renewedAt })).resolves.toBe(true);
+
+    await expect(claimDueRefreshAttempts(context.db, {
+      now: new Date(now.getTime() + 90_001),
+      shops: [{ id: firstShopId }],
+    })).resolves.toEqual([]);
+    await expect(completeRefreshAttempt(context.db, {
+      runId: run!.id,
+      attemptId: attempt.id,
+      claimToken: run!.claimToken!,
+      outcome: "SUCCESS",
+      now: new Date(now.getTime() + 180_000),
+    })).resolves.toMatchObject({ status: "SUCCEEDED" });
+  });
+
+  it("terminalizes disabled and prior-date retry cycles without erasing their attempt audit", async () => {
+    await setRefreshRetryOffsets(context.db, { retryOffsetsSeconds: [0, 30] });
+    const disabledNow = new Date("2026-01-20T00:00:00.000Z");
+    const [disabledRun] = await claimDueRefreshAttempts(context.db, { now: disabledNow, shops: [{ id: firstShopId }] });
+    const disabledAttempt = await recordRefreshAttemptStarted(context.db, {
+      runId: disabledRun!.id,
+      claimToken: disabledRun!.claimToken!,
+      now: disabledNow,
+    });
+    await completeRefreshAttempt(context.db, {
+      runId: disabledRun!.id,
+      attemptId: disabledAttempt.id,
+      claimToken: disabledRun!.claimToken!,
+      outcome: "FAILURE",
+      failureMessage: "retry later",
+      now: new Date(disabledNow.getTime() + 1),
+    });
+    await setRefreshCheckpointEnabled(context.db, { checkpointId, enabled: false });
+    await claimDueRefreshAttempts(context.db, { now: new Date(disabledNow.getTime() + 2), shops: [{ id: firstShopId }] });
+    const disabledDurable = await getRefreshCheckpointRun(context.db, { shopId: firstShopId, checkpointId, businessDate: "2026-01-20" });
+    expect(disabledDurable.run).toMatchObject({ status: "FAILED_EXHAUSTED", lastFailureMessage: "Refresh checkpoint is disabled" });
+    expect(disabledDurable.attempts).toMatchObject([{ id: disabledAttempt.id, status: "FAILED", failureMessage: "retry later" }]);
+
+    await setRefreshCheckpointEnabled(context.db, { checkpointId, enabled: true });
+    const rolloverNow = new Date("2026-01-21T00:00:00.000Z");
+    const [rolloverRun] = await claimDueRefreshAttempts(context.db, { now: rolloverNow, shops: [{ id: firstShopId }] });
+    const rolloverAttempt = await recordRefreshAttemptStarted(context.db, {
+      runId: rolloverRun!.id,
+      claimToken: rolloverRun!.claimToken!,
+      now: rolloverNow,
+    });
+    await completeRefreshAttempt(context.db, {
+      runId: rolloverRun!.id,
+      attemptId: rolloverAttempt.id,
+      claimToken: rolloverRun!.claimToken!,
+      outcome: "FAILURE",
+      failureMessage: "retry tomorrow",
+      now: new Date(rolloverNow.getTime() + 1),
+    });
+    await claimDueRefreshAttempts(context.db, { now: new Date("2026-01-22T00:00:00.000Z"), shops: [{ id: firstShopId }] });
+    const rolloverDurable = await getRefreshCheckpointRun(context.db, { shopId: firstShopId, checkpointId, businessDate: "2026-01-21" });
+    expect(rolloverDurable.run).toMatchObject({ status: "FAILED_EXHAUSTED", lastFailureMessage: "Refresh checkpoint cycle is from a prior Bangkok business date" });
+    expect(rolloverDurable.attempts).toMatchObject([{ id: rolloverAttempt.id, status: "FAILED", failureMessage: "retry tomorrow" }]);
+    await expect(claimDueRefreshAttempts(context.db, { now: new Date("2026-01-22T00:00:00.000Z"), shops: [{ id: firstShopId }] }))
+      .resolves.toEqual(expect.arrayContaining([expect.objectContaining({ businessDate: "2026-01-22", checkpointId })]));
   });
 });

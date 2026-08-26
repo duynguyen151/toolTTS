@@ -1,11 +1,24 @@
 import type { RefreshCheckpointRunRecord } from "@shop-health/domain";
 
+export const REFRESH_ATTEMPT_HEARTBEAT_MS = 30_000;
+
 export interface RefreshAttemptRepository {
   readonly recordRefreshAttemptStarted: (input: {
     readonly runId: string;
     readonly claimToken: string;
     readonly now: Date;
   }) => Promise<{ readonly id: string }>;
+  readonly renewRefreshAttemptLease: (input: {
+    readonly runId: string;
+    readonly attemptId: string;
+    readonly claimToken: string;
+    readonly now: Date;
+  }) => Promise<boolean>;
+  readonly releaseRefreshClaim: (input: {
+    readonly runId: string;
+    readonly claimToken: string;
+    readonly now: Date;
+  }) => Promise<boolean>;
   readonly completeRefreshAttempt: (input: {
     readonly runId: string;
     readonly attemptId: string;
@@ -21,6 +34,7 @@ export interface ExecuteClaimedRefreshAttemptsInput<TShop extends { readonly id:
   readonly shops: readonly TShop[];
   readonly now: Date;
   readonly repository: RefreshAttemptRepository;
+  readonly withExecutionLock: (shop: TShop, operation: () => Promise<boolean>) => Promise<boolean | null>;
   readonly execute: (shop: TShop) => Promise<boolean>;
 }
 
@@ -35,32 +49,55 @@ export async function executeClaimedRefreshAttempts<TShop extends { readonly id:
   const shopsById = new Map(input.shops.map((shop) => [shop.id, shop]));
   for (const run of input.runs) {
     const shop = shopsById.get(run.shopId);
-    if (!shop || run.claimToken === null) continue;
-    const attempt = await input.repository.recordRefreshAttemptStarted({
-      runId: run.id,
-      claimToken: run.claimToken,
-      now: input.now,
-    });
-    let outcome: "SUCCESS" | "FAILURE";
-    let failureMessage: string | undefined;
-    try {
-      outcome = (await input.execute(shop)) ? "SUCCESS" : "FAILURE";
-      if (outcome === "FAILURE") failureMessage = "Refresh execution returned unsuccessful";
-    } catch (error) {
-      outcome = "FAILURE";
-      failureMessage = error instanceof Error ? error.message : "Unknown refresh execution failure";
-    }
-    try {
-      await input.repository.completeRefreshAttempt({
+    const claimToken = run.claimToken;
+    if (!shop || claimToken === null) continue;
+    const executed = await input.withExecutionLock(shop, async () => {
+      const attempt = await input.repository.recordRefreshAttemptStarted({
         runId: run.id,
-        attemptId: attempt.id,
-        claimToken: run.claimToken,
-        outcome,
-        ...(failureMessage === undefined ? {} : { failureMessage }),
-        now: new Date(),
+        claimToken,
+        now: input.now,
       });
-    } catch (error) {
-      if (outcome === "SUCCESS") throw error;
+      const heartbeat = setInterval(() => {
+        void input.repository.renewRefreshAttemptLease({
+          runId: run.id,
+          attemptId: attempt.id,
+          claimToken,
+          now: new Date(),
+        });
+      }, REFRESH_ATTEMPT_HEARTBEAT_MS);
+      let outcome: "SUCCESS" | "FAILURE";
+      let failureMessage: string | undefined;
+      try {
+        await input.repository.renewRefreshAttemptLease({
+          runId: run.id,
+          attemptId: attempt.id,
+          claimToken,
+          now: new Date(),
+        });
+        outcome = (await input.execute(shop)) ? "SUCCESS" : "FAILURE";
+        if (outcome === "FAILURE") failureMessage = "Refresh execution returned unsuccessful";
+      } catch (error) {
+        outcome = "FAILURE";
+        failureMessage = error instanceof Error ? error.message : "Unknown refresh execution failure";
+      } finally {
+        clearInterval(heartbeat);
+      }
+      try {
+        await input.repository.completeRefreshAttempt({
+          runId: run.id,
+          attemptId: attempt.id,
+          claimToken,
+          outcome,
+          ...(failureMessage === undefined ? {} : { failureMessage }),
+          now: new Date(),
+        });
+      } catch (error) {
+        if (outcome === "SUCCESS") throw error;
+      }
+      return outcome === "SUCCESS";
+    });
+    if (executed === null) {
+      await input.repository.releaseRefreshClaim({ runId: run.id, claimToken, now: new Date() });
     }
   }
 }

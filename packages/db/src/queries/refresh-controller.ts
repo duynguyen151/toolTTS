@@ -8,6 +8,7 @@ import {
   calculateRetryAt,
   getBangkokBusinessDate,
   getDueRefreshCheckpoints,
+  getRefreshCycleIneligibility,
   type RefreshCheckpointAttemptRecord,
   type RefreshCheckpointRunRecord,
   type RefreshCheckpointSchedule,
@@ -40,6 +41,17 @@ const CompleteInputSchema = z.strictObject({
   failureMessage: z.string().trim().min(1).max(2_000).optional(),
   now: FiniteDateSchema,
 });
+const RenewLeaseInputSchema = z.strictObject({
+  runId: UuidSchema,
+  attemptId: UuidSchema,
+  claimToken: UuidSchema,
+  now: FiniteDateSchema,
+});
+const ReleaseClaimInputSchema = z.strictObject({
+  runId: UuidSchema,
+  claimToken: UuidSchema,
+  now: FiniteDateSchema,
+});
 const GetRunInputSchema = z.strictObject({
   shopId: UuidSchema,
   checkpointId: UuidSchema,
@@ -49,6 +61,8 @@ const GetRunInputSchema = z.strictObject({
 export type ClaimDueRefreshAttemptsInput = z.input<typeof ClaimInputSchema>;
 export type RecordRefreshAttemptStartedInput = z.input<typeof StartInputSchema>;
 export type CompleteRefreshAttemptInput = z.input<typeof CompleteInputSchema>;
+export type RenewRefreshAttemptLeaseInput = z.input<typeof RenewLeaseInputSchema>;
+export type ReleaseRefreshClaimInput = z.input<typeof ReleaseClaimInputSchema>;
 export type GetRefreshCheckpointRunInput = z.input<typeof GetRunInputSchema>;
 
 function toRun(row: typeof refreshCheckpointRuns.$inferSelect): RefreshCheckpointRunRecord {
@@ -82,14 +96,11 @@ async function lockSettings(transaction: DatabaseTransaction): Promise<void> {
 async function recoverExpiredClaims(
   transaction: DatabaseTransaction,
   shopIds: readonly string[],
-  checkpointIds: readonly string[],
   now: Date,
 ): Promise<void> {
-  if (checkpointIds.length === 0) return;
   const staleBefore = new Date(now.getTime() - REFRESH_CLAIM_LEASE_MS);
   const expiredRuns = await transaction.select().from(refreshCheckpointRuns).where(and(
     inArray(refreshCheckpointRuns.shopId, [...shopIds]),
-    inArray(refreshCheckpointRuns.checkpointId, [...checkpointIds]),
     eq(refreshCheckpointRuns.status, "RUNNING"),
     lte(refreshCheckpointRuns.claimedAt, staleBefore),
   )).for("update", { skipLocked: true });
@@ -100,7 +111,7 @@ async function recoverExpiredClaims(
       eq(refreshCheckpointAttempts.claimToken, run.claimToken!),
       eq(refreshCheckpointAttempts.status, "RUNNING"),
     )).for("update").limit(1);
-    const scheduledAt = attempt === undefined ? nextAttemptAt(run) : nextAttemptAt(run);
+    const scheduledAt = nextAttemptAt(run);
     if (attempt !== undefined) {
       await transaction.update(refreshCheckpointAttempts).set({
         status: "FAILED",
@@ -121,10 +132,61 @@ async function recoverExpiredClaims(
   }
 }
 
+async function recoverIneligibleRefreshCyclesInTransaction(
+  transaction: DatabaseTransaction,
+  shopIds: readonly string[],
+  now: Date,
+): Promise<void> {
+  const activeRuns = await transaction.select({
+    run: refreshCheckpointRuns,
+    checkpoint: refreshCheckpoints,
+  }).from(refreshCheckpointRuns).innerJoin(
+    refreshCheckpoints,
+    eq(refreshCheckpointRuns.checkpointId, refreshCheckpoints.id),
+  ).where(and(
+    inArray(refreshCheckpointRuns.shopId, [...shopIds]),
+    eq(refreshCheckpointRuns.status, "RETRY_WAIT"),
+  )).for("update", { skipLocked: true });
+  for (const { run: row, checkpoint: checkpointRow } of activeRuns) {
+    const run = toRun(row);
+    const reason = getRefreshCycleIneligibility({
+      now,
+      businessDate: run.businessDate,
+      checkpoint: checkpointRow,
+    });
+    if (reason === null) continue;
+    if (run.status === "RUNNING") {
+      const [attempt] = await transaction.select().from(refreshCheckpointAttempts).where(and(
+        eq(refreshCheckpointAttempts.runId, run.id),
+        eq(refreshCheckpointAttempts.claimToken, run.claimToken!),
+        eq(refreshCheckpointAttempts.status, "RUNNING"),
+      )).for("update").limit(1);
+      if (attempt !== undefined) {
+        await transaction.update(refreshCheckpointAttempts).set({
+          status: "FAILED",
+          finishedAt: now,
+          nextAttemptAt: null,
+          failureMessage: reason,
+        }).where(eq(refreshCheckpointAttempts.id, attempt.id));
+      }
+    }
+    await transaction.update(refreshCheckpointRuns).set({
+      status: "FAILED_EXHAUSTED",
+      nextAttemptAt: null,
+      claimedAt: null,
+      claimToken: null,
+      completedAt: now,
+      lastFailureMessage: reason,
+      updatedAt: now,
+    }).where(eq(refreshCheckpointRuns.id, run.id));
+  }
+}
+
 /**
  * Atomically snapshots current retry settings into each new Bangkok checkpoint cycle,
  * then claims only due, unowned work. A global transaction advisory lock serializes
- * current-settings reads and ownership creation; row locks recover only expired claims.
+ * current-settings reads and ownership creation; each pass first recovers stale
+ * claims, then terminalizes ineligible retry waits.
  */
 export async function claimDueRefreshAttempts(
   db: Database,
@@ -135,6 +197,8 @@ export async function claimDueRefreshAttempts(
   const shopIds = parsed.shops.map((shop) => shop.id);
   return db.transaction(async (transaction) => {
     await lockSettings(transaction);
+    await recoverExpiredClaims(transaction, shopIds, parsed.now);
+    await recoverIneligibleRefreshCyclesInTransaction(transaction, shopIds, parsed.now);
     const [settings] = await transaction.select().from(refreshSettings)
       .where(eq(refreshSettings.singletonId, 1)).limit(1);
     if (settings?.autoRefreshEnabled !== true) return [];
@@ -170,7 +234,6 @@ export async function claimDueRefreshAttempts(
       }
     }
     const checkpointIds = due.map((checkpoint) => checkpoint.id);
-    await recoverExpiredClaims(transaction, shopIds, checkpointIds, parsed.now);
     const ready = await transaction.select().from(refreshCheckpointRuns).where(and(
       inArray(refreshCheckpointRuns.shopId, shopIds),
       inArray(refreshCheckpointRuns.checkpointId, checkpointIds),
@@ -196,6 +259,53 @@ export async function claimDueRefreshAttempts(
     }
     return claimed;
   });
+}
+
+/** Extends the durable claim while its owner is still executing browser work. */
+export async function renewRefreshAttemptLease(
+  db: Database,
+  input: RenewRefreshAttemptLeaseInput,
+): Promise<boolean> {
+  const parsed = RenewLeaseInputSchema.parse(input);
+  return db.transaction(async (transaction) => {
+    const [attempt] = await transaction.select({ id: refreshCheckpointAttempts.id }).from(refreshCheckpointAttempts).where(and(
+      eq(refreshCheckpointAttempts.id, parsed.attemptId),
+      eq(refreshCheckpointAttempts.runId, parsed.runId),
+      eq(refreshCheckpointAttempts.claimToken, parsed.claimToken),
+      eq(refreshCheckpointAttempts.status, "RUNNING"),
+    )).for("update").limit(1);
+    if (!attempt) return false;
+    const [updated] = await transaction.update(refreshCheckpointRuns).set({
+      claimedAt: parsed.now,
+      updatedAt: parsed.now,
+    }).where(and(
+      eq(refreshCheckpointRuns.id, parsed.runId),
+      eq(refreshCheckpointRuns.status, "RUNNING"),
+      eq(refreshCheckpointRuns.claimToken, parsed.claimToken),
+    )).returning({ id: refreshCheckpointRuns.id });
+    return updated !== undefined;
+  });
+}
+
+/** Releases an owned claim without recording an attempt when its profile lock is unavailable. */
+export async function releaseRefreshClaim(
+  db: Database,
+  input: ReleaseRefreshClaimInput,
+): Promise<boolean> {
+  const parsed = ReleaseClaimInputSchema.parse(input);
+  const [updated] = await db.update(refreshCheckpointRuns).set({
+    status: "RETRY_WAIT",
+    nextAttemptAt: parsed.now,
+    claimedAt: null,
+    claimToken: null,
+    updatedAt: parsed.now,
+  }).where(and(
+    eq(refreshCheckpointRuns.id, parsed.runId),
+    eq(refreshCheckpointRuns.status, "RUNNING"),
+    eq(refreshCheckpointRuns.claimToken, parsed.claimToken),
+    eq(refreshCheckpointRuns.attemptCount, 0),
+  )).returning({ id: refreshCheckpointRuns.id });
+  return updated !== undefined;
 }
 
 /** Records exactly one durable attempt for a claim before any browser work begins. */

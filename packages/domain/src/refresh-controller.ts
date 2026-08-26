@@ -108,6 +108,19 @@ export function getDueRefreshCheckpoints(input: {
     .sort((left, right) => left.localTime.localeCompare(right.localTime) || left.id.localeCompare(right.id));
 }
 
+export function getRefreshCycleIneligibility(input: {
+  readonly now: Date;
+  readonly businessDate: RefreshBusinessDate;
+  readonly checkpoint: RefreshCheckpointSchedule;
+}): string | null {
+  const businessDate = RefreshBusinessDateSchema.parse(input.businessDate);
+  const checkpoint = RefreshCheckpointScheduleSchema.parse(input.checkpoint);
+  if (businessDate < getBangkokBusinessDate(input.now)) {
+    return "Refresh checkpoint cycle is from a prior Bangkok business date";
+  }
+  return checkpoint.enabled ? null : "Refresh checkpoint is disabled";
+}
+
 export function calculateRetryAt(cycleStartedAt: Date, attemptNumber: number, retryOffsetsSeconds: readonly number[]): Date | null {
   const offsets = RefreshRetryOffsetsSchema.parse(retryOffsetsSeconds);
   if (!Number.isInteger(attemptNumber) || attemptNumber < 1) throw new Error("attemptNumber must be a positive integer");

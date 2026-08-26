@@ -318,6 +318,17 @@ describe("task-driven AI provider factory", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("requires an OpenAI-compatible secret even for loopback providers", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const result = await testAiTaskConnection(resolved({ baseUrl: "http://127.0.0.1:20128/v1" }), {
+      environment: {},
+      fetch: fetchMock,
+    });
+
+    expect(result).toMatchObject({ status: "FAILURE", code: "AUTH_FAILURE" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it.each([
     [401, "AUTH_FAILURE"],
     [403, "AUTH_FAILURE"],

@@ -275,7 +275,7 @@ export async function testAiTaskConnection(
   if (config.provider === "huggingface-hosted") return resultFailure(requested, "UNSUPPORTED");
   const secret = resolvedSecret(config, dependencies);
   const loopback = ["127.0.0.1", "localhost", "::1", "[::1]"].includes(new URL(config.baseUrl).hostname.toLowerCase());
-  if (!loopback && secret === undefined) {
+  if ((!loopback || config.provider !== "9router") && secret === undefined) {
     return resultFailure(requested, config.provider === "9router" ? "CONFIG_ERROR" : "AUTH_FAILURE");
   }
   const fetchImpl = dependencies.fetch ?? globalThis.fetch;

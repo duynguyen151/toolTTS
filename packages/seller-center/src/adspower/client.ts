@@ -42,6 +42,16 @@ const ProxyConfigSchema = z.object({
   proxy_soft: z.string().optional(),
 });
 
+const configuredProxySoftware = new Set([
+  "brightdata",
+  "brightauto",
+  "oxylabsauto",
+  "ipfoxyauto",
+  "kookauto",
+  "lumiproxyauto",
+  "other",
+]);
+
 const AdsPowerProxyProfileResponseSchema = z.object({
   code: z.number(),
   data: z.object({
@@ -142,10 +152,9 @@ export class AdsPowerClient {
       if (profile === undefined) {
         return ProxyCapabilityResultSchema.parse({ status: "UNAVAILABLE", reasonCode: "ADSPOWER_UNAVAILABLE" });
       }
-      const configured = (
-        (profile.proxyid !== undefined && String(profile.proxyid).trim() !== "")
-        || (profile.user_proxy_config !== undefined && profile.user_proxy_config.proxy_soft !== "no_proxy")
-      );
+      const proxySoft = profile.user_proxy_config?.proxy_soft?.trim().toLowerCase();
+      const configured = profile.proxyid !== undefined && String(profile.proxyid).trim() !== ""
+        || (proxySoft !== undefined && configuredProxySoftware.has(proxySoft));
       return ProxyCapabilityResultSchema.parse(configured
         ? { status: "CONFIGURED", reasonCode: "PROXY_CONFIGURED" }
         : { status: "UNCONFIGURED", reasonCode: "PROXY_UNCONFIGURED" });
@@ -230,13 +239,16 @@ export class AdsPowerClient {
     }
 
     const activeIds = await this.listActiveProfileIds();
-    return profiles.map((profile) => ({
-      profileId: profile.user_id,
-      profileNo: profile.serial_number,
-      groupName: profile.group_name?.trim() || null,
-      observedStatus: resolveObservedStatusFromTags((profile.fbcc_user_tag ?? []).map((tag) => tag.name)),
-      state: activeIds === null ? "ERROR" : activeIds.has(profile.user_id) ? "OPEN" : "CLOSED",
-    }));
+    return profiles.map((profile) => {
+      const observedStatus = resolveObservedStatusFromTags((profile.fbcc_user_tag ?? []).map((tag) => tag.name));
+      return {
+        profileId: profile.user_id,
+        profileNo: profile.serial_number,
+        groupName: profile.group_name?.trim() || null,
+        ...(observedStatus === null ? {} : { observedStatus }),
+        state: activeIds === null ? "ERROR" : activeIds.has(profile.user_id) ? "OPEN" : "CLOSED",
+      };
+    });
   }
 
   async openReady(

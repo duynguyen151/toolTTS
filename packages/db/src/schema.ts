@@ -272,6 +272,10 @@ export const adspowerProfiles = pgTable(
       "adspower_profiles_observed_status_consistent",
       sql`(${table.observedStatus} is null and ${table.observedStatusAt} is null) or (${table.observedStatus} in ('active', 'deactive', 'unknown') and ${table.observedStatusAt} is not null)`,
     ),
+    check(
+      "adspower_profiles_observed_status_at_finite",
+      sql`${table.observedStatusAt} is null or ${table.observedStatusAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz)`,
+    ),
   ],
 );
 

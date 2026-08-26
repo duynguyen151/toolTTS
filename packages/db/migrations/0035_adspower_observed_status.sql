@@ -1,3 +1,4 @@
 ALTER TABLE "adspower_profiles" ADD COLUMN "observed_status" text;--> statement-breakpoint
 ALTER TABLE "adspower_profiles" ADD COLUMN "observed_status_at" timestamp with time zone;--> statement-breakpoint
-ALTER TABLE "adspower_profiles" ADD CONSTRAINT "adspower_profiles_observed_status_consistent" CHECK (("adspower_profiles"."observed_status" is null and "adspower_profiles"."observed_status_at" is null) or ("adspower_profiles"."observed_status" in ('active', 'deactive', 'unknown') and "adspower_profiles"."observed_status_at" is not null));
+ALTER TABLE "adspower_profiles" ADD CONSTRAINT "adspower_profiles_observed_status_consistent" CHECK (("adspower_profiles"."observed_status" is null and "adspower_profiles"."observed_status_at" is null) or ("adspower_profiles"."observed_status" in ('active', 'deactive', 'unknown') and "adspower_profiles"."observed_status_at" is not null));--> statement-breakpoint
+ALTER TABLE "adspower_profiles" ADD CONSTRAINT "adspower_profiles_observed_status_at_finite" CHECK ("adspower_profiles"."observed_status_at" is null or "adspower_profiles"."observed_status_at" not in ('infinity'::timestamptz, '-infinity'::timestamptz));

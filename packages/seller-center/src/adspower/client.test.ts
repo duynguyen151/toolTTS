@@ -72,6 +72,13 @@ describe("AdsPowerClient", () => {
       groupName: null,
       state: "CLOSED",
     });
+    expect(profiles[200]).not.toHaveProperty("observedStatus");
+    expect(Object.keys(profiles[200] ?? {}).sort()).toEqual([
+      "groupName",
+      "profileId",
+      "profileNo",
+      "state",
+    ]);
     expect(Object.keys(profiles[0] ?? {}).sort()).toEqual([
       "groupName",
       "profileId",
@@ -198,18 +205,52 @@ describe("AdsPowerClient", () => {
     expect(urls[0]).toContain("api_key=secret");
   });
 
-  it("reports configured proxy capability without exposing proxy values", async () => {
+  it("requires an explicit AdsPower proxy configuration signal without exposing proxy values", async () => {
     const proxyPassword = "proxy-password-secret";
-    const profile = await new AdsPowerClient({
+    const capability = async (proxy: unknown) => new AdsPowerClient({
       fetch: async (input) => new Response(JSON.stringify(new URL(String(input)).pathname.endsWith("/user/list")
-        ? { code: 0, data: { list: [{ user_id: "profile-1", user_proxy_config: { proxy_host: "private-proxy.example", proxy_password: proxyPassword } }] } }
+        ? { code: 0, data: { list: [{ user_id: "profile-1", ...proxy as object }] } }
         : { code: 0, data: { list: [] } }),
       ),
     }).getProxyCapability("profile-1", { timeoutMs: 25 });
 
-    expect(profile).toEqual({ status: "CONFIGURED", reasonCode: "PROXY_CONFIGURED" });
-    expect(JSON.stringify(profile)).not.toContain("private-proxy.example");
-    expect(JSON.stringify(profile)).not.toContain(proxyPassword);
+    await expect(capability({ user_proxy_config: {} })).resolves.toEqual({
+      status: "UNCONFIGURED",
+      reasonCode: "PROXY_UNCONFIGURED",
+    });
+    await expect(capability({ user_proxy_config: { proxy_soft: "" } })).resolves.toEqual({
+      status: "UNCONFIGURED",
+      reasonCode: "PROXY_UNCONFIGURED",
+    });
+    await expect(capability({ user_proxy_config: { proxy_soft: "no_proxy" } })).resolves.toEqual({
+      status: "UNCONFIGURED",
+      reasonCode: "PROXY_UNCONFIGURED",
+    });
+    await expect(capability({ user_proxy_config: { proxy_soft: "socks5" } })).resolves.toEqual({
+      status: "UNCONFIGURED",
+      reasonCode: "PROXY_UNCONFIGURED",
+    });
+    await expect(capability({ user_proxy_config: { proxy_soft: "other" } })).resolves.toEqual({
+      status: "CONFIGURED",
+      reasonCode: "PROXY_CONFIGURED",
+    });
+    await expect(capability({ proxyid: 0 })).resolves.toEqual({
+      status: "CONFIGURED",
+      reasonCode: "PROXY_CONFIGURED",
+    });
+    const blankProxyId = await capability({ proxyid: "  " });
+    const proxyPasswordResult = await capability({
+      user_proxy_config: {
+        proxy_soft: "other",
+        proxy_host: "private-proxy.example",
+        proxy_password: proxyPassword,
+      },
+    });
+
+    expect(blankProxyId).toEqual({ status: "UNCONFIGURED", reasonCode: "PROXY_UNCONFIGURED" });
+    expect(proxyPasswordResult).toEqual({ status: "CONFIGURED", reasonCode: "PROXY_CONFIGURED" });
+    expect(JSON.stringify([blankProxyId, proxyPasswordResult])).not.toContain("private-proxy.example");
+    expect(JSON.stringify([blankProxyId, proxyPasswordResult])).not.toContain(proxyPassword);
   });
 
   it("reports a missing profile as unavailable", async () => {

@@ -20,6 +20,8 @@ const financePreviousSnapshotUrl = new URL("../migrations/meta/0028_snapshot.jso
 const aiTaskMigrationUrl = new URL("../migrations/0032_pretty_black_panther.sql", import.meta.url);
 const aiTaskSnapshotUrl = new URL("../migrations/meta/0032_snapshot.json", import.meta.url);
 const aiTaskPreviousSnapshotUrl = new URL("../migrations/meta/0031_snapshot.json", import.meta.url);
+const observedStatusMigrationUrl = new URL("../migrations/0035_adspower_observed_status.sql", import.meta.url);
+const observedStatusSnapshotUrl = new URL("../migrations/meta/0035_snapshot.json", import.meta.url);
 const schemaUrl = new URL("./schema.ts", import.meta.url);
 const previousSnapshotUrl = new URL("../migrations/meta/0025_snapshot.json", import.meta.url);
 const journalUrl = new URL("../migrations/meta/_journal.json", import.meta.url);
@@ -170,6 +172,29 @@ describe("W14-T01 AI task migration", () => {
       idx: 32,
       tag: "0032_pretty_black_panther",
     }));
+  });
+});
+
+describe("W7-T01 observed status migration", () => {
+  it("rejects infinite observed-status timestamps in migration, schema, and snapshot while retaining status consistency", async () => {
+    const [migrationSql, snapshotText, schemaText] = await Promise.all([
+      readFile(observedStatusMigrationUrl, "utf8"),
+      readFile(observedStatusSnapshotUrl, "utf8"),
+      readFile(schemaUrl, "utf8"),
+    ]);
+    const snapshot = JSON.parse(snapshotText) as {
+      tables: Record<string, { checkConstraints: Record<string, { value: string }> }>;
+    };
+    const checks = snapshot.tables["public.adspower_profiles"]?.checkConstraints;
+
+    const finiteTimestampCheck = "not in ('infinity'::timestamptz, '-infinity'::timestamptz)";
+
+    expect(migrationSql).toContain(finiteTimestampCheck);
+    expect(schemaText).toContain('"adspower_profiles_observed_status_at_finite"');
+    expect(schemaText).toContain(`\${table.observedStatusAt} is null or \${table.observedStatusAt} ${finiteTimestampCheck}`);
+    expect(checks?.adspower_profiles_observed_status_at_finite?.value).toContain(finiteTimestampCheck);
+    expect(migrationSql).toContain('"adspower_profiles_observed_status_consistent"');
+    expect(checks).toHaveProperty("adspower_profiles_observed_status_consistent");
   });
 });
 

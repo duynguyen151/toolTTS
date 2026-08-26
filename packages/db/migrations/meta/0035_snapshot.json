@@ -179,6 +179,10 @@
         "adspower_profiles_observed_status_consistent": {
           "name": "adspower_profiles_observed_status_consistent",
           "value": "(\"adspower_profiles\".\"observed_status\" is null and \"adspower_profiles\".\"observed_status_at\" is null) or (\"adspower_profiles\".\"observed_status\" in ('active', 'deactive', 'unknown') and \"adspower_profiles\".\"observed_status_at\" is not null)"
+        },
+        "adspower_profiles_observed_status_at_finite": {
+          "name": "adspower_profiles_observed_status_at_finite",
+          "value": "\"adspower_profiles\".\"observed_status_at\" is null or \"adspower_profiles\".\"observed_status_at\" not in ('infinity'::timestamptz, '-infinity'::timestamptz)"
         }
       },
       "isRLSEnabled": false

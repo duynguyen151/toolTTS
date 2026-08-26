@@ -1,4 +1,5 @@
 import { and, asc, eq } from "drizzle-orm";
+import { RefreshObservedStatusSchema } from "@shop-health/domain";
 import { z } from "zod";
 
 import type { Database } from "../client.js";
@@ -7,6 +8,11 @@ import { adspowerProfiles, shops, type AdsPowerProfileRow, type ShopRow } from "
 const profileIdentitySchema = z.object({
   profileId: z.string().trim().min(1),
   profileNo: z.string().trim().min(1),
+});
+
+const observedStatusInputSchema = z.object({
+  observedStatus: RefreshObservedStatusSchema.nullable(),
+  observedAt: z.coerce.date(),
 });
 
 const verificationInputSchema = z.object({
@@ -29,6 +35,7 @@ const verificationInputSchema = z.object({
 
 export type CreateAdsPowerProfileInput = z.infer<typeof profileIdentitySchema>;
 export type SetAdsPowerProfileVerificationInput = z.infer<typeof verificationInputSchema>;
+export type SetAdsPowerProfileObservedStatusInput = z.input<typeof observedStatusInputSchema>;
 
 export async function createAdsPowerProfile(
   db: Database,
@@ -66,6 +73,38 @@ export async function listReadyAdsPowerProfileShops(db: Database): Promise<ShopR
     ))
     .orderBy(asc(adspowerProfiles.profileNo));
   return rows.map((row) => row.shop);
+}
+
+/** Automatic claims require a fresh explicit active tag observation. */
+export async function listAutomaticRefreshEligibleAdsPowerProfileShops(db: Database): Promise<ShopRow[]> {
+  const rows = await db.select({ shop: shops }).from(adspowerProfiles)
+    .innerJoin(shops, eq(adspowerProfiles.activeShopId, shops.id))
+    .where(and(
+      eq(adspowerProfiles.verificationState, "READY"),
+      eq(adspowerProfiles.eligibilityStatus, "ELIGIBLE"),
+      eq(adspowerProfiles.observedStatus, "active"),
+      eq(shops.enabled, true),
+      eq(shops.syncState, "ACTIVE"),
+      eq(shops.verificationStatus, "VERIFIED"),
+      eq(shops.eligibilityStatus, "ELIGIBLE"),
+    ))
+    .orderBy(asc(adspowerProfiles.profileNo));
+  return rows.map((row) => row.shop);
+}
+
+export async function setAdsPowerProfileObservedStatus(
+  db: Database,
+  profileId: string,
+  input: SetAdsPowerProfileObservedStatusInput,
+): Promise<AdsPowerProfileRow> {
+  const parsed = observedStatusInputSchema.parse(input);
+  const [profile] = await db.update(adspowerProfiles).set({
+    observedStatus: parsed.observedStatus,
+    observedStatusAt: parsed.observedStatus === null ? null : parsed.observedAt,
+    updatedAt: parsed.observedAt,
+  }).where(eq(adspowerProfiles.id, profileId)).returning();
+  if (!profile) throw new Error(`AdsPower profile not found: ${profileId}`);
+  return profile;
 }
 
 export async function setAdsPowerProfileVerification(

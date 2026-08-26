@@ -13,5 +13,6 @@ export * from "./recommendation/evaluate.js";
 export * from "./recommendation/policy.js";
 export * from "./report.js";
 export * from "./refresh-controller.js";
+export * from "./refresh-eligibility.js";
 export * from "./risk-control.js";
 export * from "./risk-policy.js";

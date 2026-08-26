@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import {
+  ProxyCapabilityResultSchema,
+  resolveObservedStatusFromTags,
+  type ProxyCapabilityResult,
+} from "@shop-health/domain";
 import { SellerCenterError } from "../errors.js";
 
 const AdsPowerBrowserDataSchema = z.object({
@@ -20,6 +25,9 @@ const AdsPowerProfileListItemSchema = z.object({
   user_id: z.string().min(1),
   serial_number: z.union([z.string(), z.number()]).transform(String),
   group_name: z.string().nullable().optional(),
+  fbcc_user_tag: z.array(z.object({
+    name: z.string().trim(),
+  })).nullable().optional(),
 });
 
 const AdsPowerProfileListResponseSchema = z.object({
@@ -27,6 +35,21 @@ const AdsPowerProfileListResponseSchema = z.object({
   msg: z.string().optional(),
   data: z.object({
     list: z.array(AdsPowerProfileListItemSchema),
+  }).optional(),
+});
+
+const ProxyConfigSchema = z.object({
+  proxy_soft: z.string().optional(),
+});
+
+const AdsPowerProxyProfileResponseSchema = z.object({
+  code: z.number(),
+  data: z.object({
+    list: z.array(z.object({
+      user_id: z.string().min(1),
+      user_proxy_config: ProxyConfigSchema.optional(),
+      proxyid: z.union([z.string(), z.number()]).optional(),
+    })),
   }).optional(),
 });
 
@@ -56,6 +79,7 @@ export interface AdsPowerProfileSummary {
   profileId: string;
   profileNo: string;
   groupName: string | null;
+  observedStatus?: "active" | "deactive" | "unknown" | null;
   state: AdsPowerProfileState;
 }
 
@@ -97,6 +121,41 @@ export class AdsPowerClient {
       return response.code === 0;
     } catch {
       return false;
+    }
+  }
+
+  /** Read-only profile configuration seam; it does not test or start a proxy. */
+  async getProxyCapability(
+    profileId: string,
+    options: { readonly timeoutMs?: number } = {},
+  ): Promise<ProxyCapabilityResult> {
+    try {
+      const response = AdsPowerProxyProfileResponseSchema.parse(await this.requestJson(
+        "/api/v1/user/list",
+        { user_id: profileId, page: "1", page_size: "1" },
+        options.timeoutMs,
+      ));
+      if (response.code !== 0 || response.data === undefined) {
+        return ProxyCapabilityResultSchema.parse({ status: "UNAVAILABLE", reasonCode: "ADSPOWER_UNAVAILABLE" });
+      }
+      const profile = response.data.list.find((entry) => entry.user_id === profileId);
+      if (profile === undefined) {
+        return ProxyCapabilityResultSchema.parse({ status: "UNAVAILABLE", reasonCode: "ADSPOWER_UNAVAILABLE" });
+      }
+      const configured = (
+        (profile.proxyid !== undefined && String(profile.proxyid).trim() !== "")
+        || (profile.user_proxy_config !== undefined && profile.user_proxy_config.proxy_soft !== "no_proxy")
+      );
+      return ProxyCapabilityResultSchema.parse(configured
+        ? { status: "CONFIGURED", reasonCode: "PROXY_CONFIGURED" }
+        : { status: "UNCONFIGURED", reasonCode: "PROXY_UNCONFIGURED" });
+    } catch (error) {
+      const reasonCode = error instanceof SellerCenterError
+        && error.cause instanceof Error
+        && error.cause.message === "AdsPower request deadline exceeded"
+        ? "CAPABILITY_TIMEOUT"
+        : "ADSPOWER_UNAVAILABLE";
+      return ProxyCapabilityResultSchema.parse({ status: "UNAVAILABLE", reasonCode });
     }
   }
 
@@ -175,6 +234,7 @@ export class AdsPowerClient {
       profileId: profile.user_id,
       profileNo: profile.serial_number,
       groupName: profile.group_name?.trim() || null,
+      observedStatus: resolveObservedStatusFromTags((profile.fbcc_user_tag ?? []).map((tag) => tag.name)),
       state: activeIds === null ? "ERROR" : activeIds.has(profile.user_id) ? "OPEN" : "CLOSED",
     }));
   }

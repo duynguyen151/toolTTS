@@ -6,6 +6,7 @@ import {
   getAdsPowerProfile,
   linkAdsPowerProfileToShop,
   setShopVerificationState,
+  setAdsPowerProfileObservedStatus,
   setAdsPowerProfileVerification,
   type Database,
   type ShopRow,
@@ -26,6 +27,10 @@ export async function verifySelectedProfile(
 ): Promise<ProfileVerificationResult> {
   const persisted = await getAdsPowerProfile(db, profile.profileId)
     ?? await createAdsPowerProfile(db, { profileId: profile.profileId, profileNo: profile.profileNo });
+  await setAdsPowerProfileObservedStatus(db, persisted.id, {
+    observedStatus: profile.observedStatus ?? null,
+    observedAt: new Date(),
+  });
   let identity;
   try {
     identity = await source.verifyProfile({ profileId: profile.profileId });

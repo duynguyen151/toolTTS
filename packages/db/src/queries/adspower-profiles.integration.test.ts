@@ -9,6 +9,9 @@ import {
   createAdsPowerProfile,
   getAdsPowerProfile,
   linkAdsPowerProfileToShop,
+  listAutomaticRefreshEligibleAdsPowerProfileShops,
+  listReadyAdsPowerProfileShops,
+  setAdsPowerProfileObservedStatus,
   setAdsPowerProfileVerification,
 } from "./adspower-profiles.js";
 
@@ -70,5 +73,25 @@ describeWithDatabase("AdsPower profile PostgreSQL persistence", () => {
       activeShopId: shop!.id,
       verifiedTiktokShopId: shop!.tiktokShopId,
     });
+    await expect(listAutomaticRefreshEligibleAdsPowerProfileShops(context.db)).resolves.not.toContainEqual(
+      expect.objectContaining({ id: shop!.id }),
+    );
+    await setAdsPowerProfileObservedStatus(context.db, profile.id, {
+      observedStatus: "deactive",
+      observedAt: new Date("2026-01-15T00:00:00.000Z"),
+    });
+    await expect(listReadyAdsPowerProfileShops(context.db)).resolves.toContainEqual(
+      expect.objectContaining({ id: shop!.id }),
+    );
+    await expect(listAutomaticRefreshEligibleAdsPowerProfileShops(context.db)).resolves.not.toContainEqual(
+      expect.objectContaining({ id: shop!.id }),
+    );
+    await setAdsPowerProfileObservedStatus(context.db, profile.id, {
+      observedStatus: "active",
+      observedAt: new Date("2026-01-15T00:01:00.000Z"),
+    });
+    await expect(listAutomaticRefreshEligibleAdsPowerProfileShops(context.db)).resolves.toContainEqual(
+      expect.objectContaining({ id: shop!.id }),
+    );
   });
 });

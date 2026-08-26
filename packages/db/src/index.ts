@@ -218,10 +218,13 @@ export {
   createAdsPowerProfile,
   getAdsPowerProfile,
   listAdsPowerProfiles,
+  listAutomaticRefreshEligibleAdsPowerProfileShops,
   listReadyAdsPowerProfileShops,
   linkAdsPowerProfileToShop,
+  setAdsPowerProfileObservedStatus,
   setAdsPowerProfileVerification,
   type CreateAdsPowerProfileInput,
+  type SetAdsPowerProfileObservedStatusInput,
   type SetAdsPowerProfileVerificationInput,
 } from "./queries/adspower-profiles.js";
 export {

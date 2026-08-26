@@ -240,6 +240,8 @@ export const adspowerProfiles = pgTable(
     verifiedTiktokShopId: text("verified_tiktok_shop_id"),
     verifiedShopDisplayName: text("verified_shop_display_name"),
     activeShopId: uuid("active_shop_id"),
+    observedStatus: text("observed_status"),
+    observedStatusAt: timestamp("observed_status_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -265,6 +267,10 @@ export const adspowerProfiles = pgTable(
         and ${table.eligibilityStatus} = 'ELIGIBLE'
         and ${table.verifiedTiktokShopId} is not null
       )`,
+    ),
+    check(
+      "adspower_profiles_observed_status_consistent",
+      sql`(${table.observedStatus} is null and ${table.observedStatusAt} is null) or (${table.observedStatus} in ('active', 'deactive', 'unknown') and ${table.observedStatusAt} is not null)`,
     ),
   ],
 );

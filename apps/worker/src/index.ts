@@ -8,6 +8,7 @@ import {
   releaseRefreshClaim,
   renewRefreshAttemptLease,
   createDatabase,
+  listAutomaticRefreshEligibleAdsPowerProfileShops,
   listReadyAdsPowerProfileShops,
   recordRefreshAttemptStarted,
   withRefreshProfileExecutionLock,
@@ -91,12 +92,13 @@ async function workerLoop(): Promise<void> {
   while (!stopping) {
     try {
       const shops = await listReadyAdsPowerProfileShops(context.db);
+      const automaticRefreshShops = await listAutomaticRefreshEligibleAdsPowerProfileShops(context.db);
       const now = Date.now();
       for (const shop of shops) {
         if (stopping) break;
         if (isDue(shop, "orders", now)) await syncShop(shop, "orders");
       }
-      if (!stopping) await runClaimedRefreshAttempts(shops, new Date(now));
+      if (!stopping) await runClaimedRefreshAttempts(automaticRefreshShops, new Date(now));
     } catch (error) {
       logger.error({ operation: "worker.scheduler", entity: "shop", failureType: "DATABASE_UNAVAILABLE", error: error instanceof Error ? error.message : "Unknown error" }, "Scheduler cycle failed");
     }

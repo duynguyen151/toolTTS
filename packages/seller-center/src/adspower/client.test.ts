@@ -198,6 +198,70 @@ describe("AdsPowerClient", () => {
     expect(urls[0]).toContain("api_key=secret");
   });
 
+  it("reports configured proxy capability without exposing proxy values", async () => {
+    const proxyPassword = "proxy-password-secret";
+    const profile = await new AdsPowerClient({
+      fetch: async (input) => new Response(JSON.stringify(new URL(String(input)).pathname.endsWith("/user/list")
+        ? { code: 0, data: { list: [{ user_id: "profile-1", user_proxy_config: { proxy_host: "private-proxy.example", proxy_password: proxyPassword } }] } }
+        : { code: 0, data: { list: [] } }),
+      ),
+    }).getProxyCapability("profile-1", { timeoutMs: 25 });
+
+    expect(profile).toEqual({ status: "CONFIGURED", reasonCode: "PROXY_CONFIGURED" });
+    expect(JSON.stringify(profile)).not.toContain("private-proxy.example");
+    expect(JSON.stringify(profile)).not.toContain(proxyPassword);
+  });
+
+  it("reports a missing profile as unavailable", async () => {
+    await expect(new AdsPowerClient({
+      fetch: async () => new Response(JSON.stringify({ code: 0, data: { list: [] } })),
+    }).getProxyCapability("missing-profile")).resolves.toEqual({
+      status: "UNAVAILABLE",
+      reasonCode: "ADSPOWER_UNAVAILABLE",
+    });
+  });
+
+  it("reports unconfigured and unavailable proxy capability through sanitized typed results", async () => {
+    const unconfigured = await new AdsPowerClient({
+      fetch: async (input) => new Response(JSON.stringify(new URL(String(input)).pathname.endsWith("/user/list")
+        ? { code: 0, data: { list: [{ user_id: "profile-1" }] } }
+        : { code: 0, data: { list: [] } }),
+      ),
+    }).getProxyCapability("profile-1", { timeoutMs: 25 });
+    const unavailable = await new AdsPowerClient({
+      fetch: async () => { throw new Error("http://private-proxy.example/?token=secret-token"); },
+    }).getProxyCapability("profile-1", { timeoutMs: 25 });
+
+    expect(unconfigured).toEqual({ status: "UNCONFIGURED", reasonCode: "PROXY_UNCONFIGURED" });
+    expect(unavailable).toEqual({ status: "UNAVAILABLE", reasonCode: "ADSPOWER_UNAVAILABLE" });
+    expect(JSON.stringify([unconfigured, unavailable])).not.toContain("secret-token");
+    expect(JSON.stringify([unconfigured, unavailable])).not.toContain("private-proxy.example");
+  });
+
+  it("maps the bounded request timeout to a sanitized capability timeout", async () => {
+    const timedOut = await new AdsPowerClient({
+      fetch: async () => new Promise<Response>(() => undefined),
+    }).getProxyCapability("profile-1", { timeoutMs: 25 });
+
+    expect(timedOut).toEqual({ status: "UNAVAILABLE", reasonCode: "CAPABILITY_TIMEOUT" });
+  });
+
+  it("maps explicit AdsPower profile tags to an observed status", async () => {
+    const fetchMock: typeof fetch = async (input) => new Response(JSON.stringify(
+      new URL(String(input)).pathname.endsWith("/user/list")
+        ? { code: 0, data: { list: [{ user_id: "profile-1", serial_number: "957", fbcc_user_tag: [{ name: "DEACTIVE" }] }] } }
+        : { code: 0, data: { list: [] } },
+    ));
+
+    await expect(new AdsPowerClient({ fetch: fetchMock }).listProfiles()).resolves.toEqual([{
+      profileId: "profile-1",
+      profileNo: "957",
+      groupName: null,
+      observedStatus: "deactive",
+      state: "CLOSED",
+    }]);
+  });
+
   it("reports the local AdsPower API as unavailable when the readiness probe fails", async () => {
     const client = new AdsPowerClient({ fetch: async () => { throw new Error("private network detail"); } });
 

@@ -25,6 +25,8 @@ describe("W6-T02 refresh checkpoint controller migration contract", () => {
     expect(migrationSql).not.toMatch(/insert\s+into\s+"?refresh_checkpoint_(?:runs|attempts)/i);
     expect(snapshotText).toContain('"public.refresh_checkpoint_runs"');
     expect(snapshotText).toContain('"public.refresh_checkpoint_attempts"');
-    expect(JSON.parse(journalText).entries.at(-1)).toMatchObject({ tag: "0034_refresh_checkpoint_controller" });
+    expect(JSON.parse(journalText).entries).toContainEqual(expect.objectContaining({
+      tag: "0034_refresh_checkpoint_controller",
+    }));
   });
 });

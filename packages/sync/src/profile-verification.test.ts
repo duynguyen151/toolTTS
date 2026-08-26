@@ -9,6 +9,7 @@ const db = vi.hoisted(() => ({
   getAdsPowerProfile: vi.fn(),
   linkAdsPowerProfileToShop: vi.fn(),
   setShopVerificationState: vi.fn(),
+  setAdsPowerProfileObservedStatus: vi.fn(),
   setAdsPowerProfileVerification: vi.fn(),
 }));
 
@@ -44,6 +45,26 @@ describe("verifySelectedProfile", () => {
       activeShopId: null,
     }));
     expect(db.linkAdsPowerProfileToShop).not.toHaveBeenCalled();
+  });
+
+  it("persists a sanitized deactive tag observation without changing identity semantics", async () => {
+    db.getAdsPowerProfile.mockResolvedValue({ id: "persisted-profile", verifiedTiktokShopId: "shop-before" });
+    db.findShopByProfileId.mockResolvedValue(null);
+    db.findShopByTikTokShopId.mockResolvedValue(null);
+
+    await verifySelectedProfile({} as never, {
+      profileId: "profile-202",
+      profileNo: "202",
+      groupName: null,
+      observedStatus: "deactive",
+      state: "CLOSED",
+    }, {
+      verifyProfile: vi.fn().mockResolvedValue({ status: "IDENTIFIED", tiktokShopId: "shop-after" }),
+    } as never);
+
+    expect(db.setAdsPowerProfileObservedStatus).toHaveBeenCalledWith({}, "persisted-profile", expect.objectContaining({
+      observedStatus: "deactive",
+    }));
   });
 
   it("propagates a browser connection failure instead of requiring human Seller Center action", async () => {

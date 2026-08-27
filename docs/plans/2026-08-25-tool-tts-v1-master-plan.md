@@ -2,12 +2,14 @@
 
 > **For implementation workers:** This is the locked V1 implementation planning authority. Execute one bounded task at a time in a fresh execution session. Use `subagent-driven-development` or `executing-plans` as directed by the Technical Director. SOL completed discovery and planning only and must not implement this plan.
 
-**Status:** APPROVED AND LOCKED
+**Status:** APPROVED AND LOCKED (amended 2026-08-28)
 **Planning baseline:** Approved Project Reality Report from the SOL planning session
 **Goal:** Extend the existing Tool_TTS system into a provider-aware, Official-Finance-On-Hold-driven, policy-configurable, CLI-first V1 while preserving every proven Seller Center, persistence, deterministic-rule, AI-safety, BA-history, and DRY_RUN foundation.
 **Architecture:** Extend the existing `SellerDataSource` and canonical-domain seams rather than introducing microservices, an event bus, Redis, or a distributed queue. Use COTIK as the primary normal-path candidate for Orders and as supplementary Finance only. Seller Center remains the currently proven authoritative Official Finance On Hold source. Every review follows deterministic facts → effective policy → deterministic Rule → requested AI task resolution → frozen immutable Decision Case and `AiDecisionContext` → linked AI Decision → append-only BA revision.
 **Tech stack:** Node.js 22+, pnpm 11, strict TypeScript/ESM, Zod, PostgreSQL 16, Drizzle ORM, Vitest, Commander, Next.js 16, React 19, Playwright CDP, AdsPower Local API, and configurable server-side AI providers.
 **Authoritative inputs:** `Tool_TTS_V1_Master_Prompt_revised.md`, the approved Project Reality Report, `docs/integrations/cotik/public-api-guide.md`, `AGENTS.md`, `docs/V1_MASTER_CONTEXT.md`, and current source/tests.
+
+**Locked amendment (2026-08-28):** W9-T02 accepts manual bootstrap as its V1 completion mode: after an operator completes ordinary login outside Tool_TTS, Tool_TTS must rerun canonical Seller Center verification and prove the exact linked TikTok Shop identity before collection. Safe autofill auto-login remains conditional on a verified real capability and is not a V1 acceptance blocker. This amendment does not permit credential reading/injection, selector guessing, challenge bypass, trusting manual completion without re-proof, or identity guessing.
 
 ## Global Constraints
 
@@ -186,7 +188,7 @@ These are LIVE acceptance gates, not blockers for implementation planning or non
 - Settings persist global/shop policy, caution policy, fallback schedule/retries, and AI task configuration.
 - Fixed checkpoints are editable GMT+07 wall-clock times; default retry offsets are 0s, 30s, 2m, 5m, and 10m.
 - `deactive` excludes routine automatic work while preserving history and manual operations.
-- Normal auto-login is allowed only when safe credential capability exists. CAPTCHA/security challenges require manual action.
+- Existing authenticated sessions and manual bootstrap followed by canonical identity re-proof are valid V1 paths. Safe autofill auto-login is allowed only when a verified credential capability exists. CAPTCHA/security challenges require manual action.
 - Historical review cases remain immutable and privacy-minimized.
 
 ## 10. Requirement → Current State → Gap Matrix
@@ -310,7 +312,7 @@ All proven capabilities in Part A §6 are mandatory regression gates. No task ma
 
 - COTIK runtime follows the guide and provides no undocumented Official-OH or upstream-sync timestamp contract.
 - AdsPower can provide a safe server-side proxy test or enough proxy data without browser exposure.
-- Normal login can be attempted through a safe credential/autofill seam without extracting plaintext credentials.
+- A future normal auto-login attempt can use a verified safe credential/autofill seam without extracting plaintext credentials; its absence is not a V1 blocker because manual bootstrap plus canonical re-verification is a valid completion mode.
 - Profile 957 mismatch is caused by capture/read/snapshot/version semantics rather than a failure of source reconciliation.
 - The exact operational customer fields needed in V1 Order Detail can be minimized and served through an existing server-side guard.
 
@@ -1533,15 +1535,15 @@ W10 optional Cloak research runs independently after W0-T01 and is non-gating
 
 **Rollback / compatibility:** Map new states to existing LOGIN/HUMAN_ACTION UI while retaining stored detail.
 
-### W9-T02 — Implement Bounded Normal Auto-Login and Post-Login Identity Proof
+### W9-T02 — Implement Session Recovery Completion and Post-Login Identity Proof
 
-**Goal:** Recover an ordinary logged-out session when safe credentials/autofill are available.
+**Goal:** Safely resume collection from an existing authenticated session or operator-completed manual bootstrap, always with post-login identity proof; perform normal auto-login only when a verified safe autofill capability exists.
 
-**Current State:** Detection only.
+**Current State:** Detection, typed unavailable/manual states, canonical verification, and authenticated-session collection paths exist; no verified safe AdsPower autofill action contract exists.
 
-**Gap:** One bounded attempt, success/challenge/failure classification, and identity re-proof.
+**Gap:** Explicitly prove the manual-bootstrap rerun-verification completion path and preserve the optional bounded auto-login boundary for a future verified capability.
 
-**Why:** V1 requires normal session recovery but forbids challenge bypass.
+**Why:** V1 must recover safely without inventing credential automation or trusting a human login completion without canonical identity evidence.
 
 **Dependencies:** `W9-T01`.
 
@@ -1549,17 +1551,17 @@ W10 optional Cloak research runs independently after W0-T01 and is non-gating
 
 **Verified symbols/contracts:** `verifyProfile`, seller-access classification.
 
-**Behavior to Add/Change:** Canonical login adapter; one bounded normal attempt; wait for authenticated route; detect challenge; rerun exact Shop identity verification before collection.
+**Behavior to Add/Change:** Accept an existing authenticated session. On login-required, persist actionable `CREDENTIALS_REQUIRED` when no verified capability exists; on challenge, persist `HUMAN_ACTION_REQUIRED`. An operator may complete ordinary login outside Tool_TTS, then rerun canonical profile verification. Collection may begin only after that rerun proves the exact linked TikTok Shop identity. If a verified safe autofill capability is later available, a canonical adapter may make one bounded normal attempt, wait for an authenticated route, classify success/challenge/failure, and perform the same identity re-proof.
 
-**What MUST NOT Change:** No infinite loop, CAPTCHA handling, credential logging, or identity guessing.
+**What MUST NOT Change:** No infinite loop, CAPTCHA handling/bypass, credential reading/injection/logging, selector guessing, trust in manual completion without canonical re-proof, or identity guessing.
 
 **Data migration impact:** Attempt outcome stored in refresh audit only.
 
-**Tests Required:** Existing authenticated session, autofill success, missing credential, challenge, wrong credential, identity mismatch.
+**Tests Required:** Existing authenticated session, manual bootstrap followed by verified exact identity, missing credential, challenge, identity mismatch, and collection refusal before/re-proof failure. Add autofill success/wrong-credential tests only when a verified real autofill capability is introduced.
 
-**Acceptance Criteria:** Collection begins only after successful post-login identity proof.
+**Acceptance Criteria:** An existing authenticated session and operator-completed manual bootstrap both permit collection only after successful canonical exact-identity re-proof. Missing credential fails closed; challenge becomes `HUMAN_ACTION_REQUIRED`. Safe autofill auto-login is optional and cannot block V1 without a verified capability contract.
 
-**Evidence Required:** Mocked browser tests and LIVE evidence when environment allows.
+**Evidence Required:** Mocked verification/sync tests for authenticated and manual-bootstrap paths; LIVE evidence for the manual path when environment allows. Any future autofill path requires separate mocked and LIVE capability evidence.
 
 **Risk Level:** HIGH.
 
@@ -1569,7 +1571,7 @@ W10 optional Cloak research runs independently after W0-T01 and is non-gating
 
 **Independent Reviewer:** Luna/Playwright security reviewer.
 
-**Rollback / compatibility:** Disable auto-login; surface manual bootstrap state.
+**Rollback / compatibility:** Retain manual bootstrap state and canonical re-verification; disable any future auto-login adapter independently.
 
 ### W8-T01 — Compose Authoritative Official-Finance Refresh and Future Fallback Controller
 
@@ -1587,13 +1589,13 @@ W10 optional Cloak research runs independently after W0-T01 and is non-gating
 
 **Verified symbols/contracts:** `runShopSync`, `FinanceCompletionProof`, profile locks.
 
-**Behavior to Add/Change:** Health check → eligibility → proxy → AdsPower → session/auth → identity → existing collector → reconciliation → health update. Manual CLI/server operation invokes the same controller. Current mode records `authoritativeProvider=SELLER_CENTER`. Future provider order is selected only through proven capabilities/config.
+**Behavior to Add/Change:** Health check → eligibility → proxy → AdsPower → existing authenticated session or typed manual-bootstrap/auth state → canonical identity re-proof → existing collector → reconciliation → health update. Manual CLI/server operation invokes the same controller. Current mode records `authoritativeProvider=SELLER_CENTER`. Future provider order is selected only through proven capabilities/config.
 
 **What MUST NOT Change:** Existing collector internals, profile concurrency=1, `deactive` automatic exclusion, stale snapshot retention, or COTIK supplementary semantics.
 
 **Data migration impact:** Uses refresh/fallback audit tables.
 
-**Tests Required:** Fresh skip, stale trigger, Auto OFF, manual, five attempts, next checkpoint, deactive, proxy, auth/challenge, reconciliation fail closed, current/future provider capability selection.
+**Tests Required:** Fresh skip, stale trigger, Auto OFF, manual refresh, manual-bootstrap re-verification, five attempts, next checkpoint, deactive, proxy, auth/challenge, reconciliation fail closed, current/future provider capability selection.
 
 **Acceptance Criteria:** Success updates authoritative Official-OH health; failure preserves prior snapshot with warning/reason; no business action follows refresh.
 
@@ -2222,7 +2224,7 @@ Tasks within a subwave may run in parallel only when file ownership does not ove
 | 4A — Deactive eligibility/proxy capability | `W7-T01` | Requires controller/provider persistence |
 | 4B — Proxy preflight | `W7-T02` | Requires capability evidence |
 | 4C — Auth state/credential seam | `W9-T01` | Requires proxy contract |
-| 4D — Normal auto-login | `W9-T02` | Requires auth-state contract |
+| 4D — Session recovery completion | `W9-T02` | Requires auth-state contract; manual bootstrap plus canonical re-verification is the V1 completion mode |
 | 4E — Authoritative refresh controller | `W8-T01` | Composes health/checkpoint/deactive/proxy/auth |
 | 5A — Frozen Case/AI context | `W15-T01` | Resolve requested AI config before Case; persist Case before invocation |
 | 5B — AI reviewer output | `W15-T02` | Actual result/provenance only in linked AI Decision |
@@ -2281,7 +2283,7 @@ Tasks within a subwave may run in parallel only when file ownership does not ove
 - Evidence-selected Finance population/read fix.
 - Policy updates affect only subsequent reviews.
 - Checkpoint controller locks/attempt audit/restart.
-- Existing authenticated session and normal login with post-login identity proof.
+- Existing authenticated session and operator-completed manual bootstrap, each with post-login canonical identity proof; any future normal auto-login remains capability-gated.
 - AI task config/Test Connection with server-side secret resolution.
 - Case persists before AI; linked AI Decision stores actual result/provenance.
 - BA CLI and Dashboard append linked revisions without Case mutation.
@@ -2299,7 +2301,7 @@ Tasks within a subwave may run in parallel only when file ownership does not ove
 - Success then later checkpoint health reevaluation.
 - Deactive automatic skip and manual action.
 - Proxy unknown/degraded/unavailable.
-- Missing credentials, challenge, auth failure.
+- Missing credentials fail closed, challenge/manual action, auth failure, and manual-bootstrap re-verification.
 - Seller Center reconciliation fail closed.
 - Future provider capability ordering only after explicit promotion proof.
 

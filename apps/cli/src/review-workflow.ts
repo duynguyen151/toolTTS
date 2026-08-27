@@ -218,6 +218,8 @@ export function createDbDecisionWorkflowStore(
               : finance.proofStatus === "PROVEN" ? false : null,
           }),
         },
+        officialOnHoldAmount: snapshot?.officialOnHoldAmount ?? null,
+        officialOnHoldCapturedAt: snapshot?.capturedAt ?? null,
         financeSnapshot: {
           capturedAt: snapshot?.capturedAt.toISOString() ?? null,
           currency: snapshot?.currency ?? shop.currency,

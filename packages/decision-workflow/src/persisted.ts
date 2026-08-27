@@ -338,6 +338,10 @@ export function createPersistedDecisionWorkflow(
         periodEnd: period.periodEnd,
         facts: toRiskFacts(facts),
         financeSnapshot: typedFinanceSnapshot,
+        officialOnHoldAmount: typedFinanceSnapshot.officialOnHoldAmount,
+        officialOnHoldCapturedAt: typedFinanceSnapshot.capturedAt === null
+          ? null
+          : new Date(typedFinanceSnapshot.capturedAt),
         coverageSnapshot,
         sourceSyncRunId: latestOrdersRun?.id ?? null,
         holidayModeCurrentlyEnabled: riskState?.observedHolidayModeEnabled ?? null,

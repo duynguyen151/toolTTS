@@ -17,3 +17,4 @@ export * from "./refresh-eligibility.js";
 export * from "./proxy-preflight.js";
 export * from "./risk-control.js";
 export * from "./risk-policy.js";
+export * from "./target-rule.js";

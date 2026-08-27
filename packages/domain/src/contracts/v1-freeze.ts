@@ -18,6 +18,7 @@ import {
   MeaningfulBaNotesSchema,
 } from "../decisions.js";
 import { PeriodMetricsSchema } from "../metrics/types.js";
+import { OfficialOnHoldRuleEvidenceSchema } from "../target-rule.js";
 
 const TimestampSchema = z.string().datetime();
 const IdentifierSchema = z.string().trim().min(1);
@@ -163,6 +164,7 @@ export const RuleCheckSchema = z.object({
 
 export const RuleTriggerForV1Schema = z.enum([
   "OPERATIONAL_EXPOSURE",
+  "OFFICIAL_ON_HOLD",
   "DELIVERY_RATE",
 ]);
 
@@ -177,6 +179,7 @@ export const RuleEvaluationSchema = z.object({
 
 export const AiDecisionContextSchema = z.object({
   schemaVersion: z.literal("ai-decision-context.v1"),
+  targetRuleEvidence: OfficialOnHoldRuleEvidenceSchema.optional(),
   profile: z.object({
     profileId: IdentifierSchema,
     profileNo: IdentifierSchema,

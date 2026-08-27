@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   BaDecisionInputSchema,
   evaluateRiskControlFacts,
-  mapRiskResultToRuleDecision,
+  evaluateOfficialOnHoldRule,
   toRiskControlPolicy,
   type DecisionCaseInput,
   type DecisionFinanceSnapshot,
@@ -11,6 +11,8 @@ import {
   type DecisionMetricsSnapshot,
   type DecisionRiskSnapshot,
   type DecisionRuleTrigger,
+  type OfficialOnHoldRuleEvidence,
+  type TargetRuleConditionState,
   type RiskOrderFact,
   type AiDecisionContext,
   type ResolvedRiskPolicySnapshot,
@@ -38,6 +40,8 @@ export interface ReviewStartSource {
   readonly periodEnd: Date;
   readonly facts: readonly RiskOrderFact[];
   readonly financeSnapshot: DecisionFinanceSnapshot;
+  readonly officialOnHoldAmount?: string | null;
+  readonly officialOnHoldCapturedAt?: Date | null;
   readonly coverageSnapshot?: DecisionCoverageSnapshot;
   readonly sourceSyncRunId: string | null;
   readonly holidayModeCurrentlyEnabled: boolean | null;
@@ -123,17 +127,44 @@ export interface DecisionWorkflow {
   history(input: { readonly profileNo: string; readonly limit?: number; readonly cursor?: string }): Promise<DecisionHistoryPage>;
 }
 
-function ruleTriggers(trigger: "VALUE" | "RATE" | "BOTH" | "NONE"): DecisionRuleTrigger[] {
-  switch (trigger) {
-    case "VALUE":
-      return ["ONHOLD_VALUE"];
-    case "RATE":
-      return ["DELIVERY_RATE"];
-    case "BOTH":
-      return ["ONHOLD_VALUE", "DELIVERY_RATE"];
-    case "NONE":
-      return [];
-  }
+function legacyRuleContext(
+  risk: DecisionRiskSnapshot,
+  target: OfficialOnHoldRuleEvidence,
+): DecisionRiskSnapshot {
+  const state = (name: "OFFICIAL_ON_HOLD" | "DELIVERY_RATE"): TargetRuleConditionState =>
+    name === "OFFICIAL_ON_HOLD" ? target.officialOnHold.state : target.deliveryRate.state;
+  return {
+    ...risk,
+    onHoldValue: target.officialOnHold.observedValue,
+    deliveryRate: target.deliveryRate.observedValue,
+    stopByOnHoldValue: state("OFFICIAL_ON_HOLD") === "TRIGGERED",
+    stopByDeliveryRate: state("DELIVERY_RATE") === "TRIGGERED",
+    dataSufficient: state("OFFICIAL_ON_HOLD") !== "NOT_EVALUATED" && state("DELIVERY_RATE") !== "NOT_EVALUATED",
+    stopOnHoldValueAt: target.officialOnHold.threshold,
+    stopDeliveryRateBelow: target.deliveryRate.threshold,
+  };
+}
+
+function targetRuleTriggers(
+  evidence: OfficialOnHoldRuleEvidence,
+): DecisionRuleTrigger[] {
+  return evidence.triggers.map((trigger) =>
+    trigger === "OFFICIAL_ON_HOLD" ? "ONHOLD_VALUE" : "DELIVERY_RATE",
+  );
+}
+
+function targetRuleCoverage(
+  source: ReviewStartSource,
+  window: string,
+): DecisionCoverageSnapshot {
+  return source.coverageSnapshot ?? {
+    coverageState: source.shop.dataCoverage,
+    persistedMetricsWindow: window,
+    source: null,
+    provenSourceWindow: null,
+    completeWithinSourceWindow: null,
+    lifetimeHistoryComplete: null,
+  };
 }
 
 export function createDecisionWorkflow(dependencies: {
@@ -207,8 +238,47 @@ export function createDecisionWorkflow(dependencies: {
         stopDeliveryRateBelow: risk.thresholds.stopDeliveryRateBelow,
         minimumOrdersForRateRule: risk.thresholds.minimumOrdersForRateRule,
       };
-      const ruleDecision = mapRiskResultToRuleDecision(risk.ruleResult);
-      const triggers = ruleTriggers(risk.trigger);
+      const coverageSnapshot = targetRuleCoverage(source, metricsSnapshot.window);
+      const targetRuleEvidence = evaluateOfficialOnHoldRule({
+        evaluatedAt: observedAt,
+        policy: source.resolvedPolicySnapshot,
+        officialOnHold: {
+          amount: source.officialOnHoldAmount ?? source.financeSnapshot.officialOnHoldAmount,
+          currency: source.financeSnapshot.currency,
+          capturedAt: source.officialOnHoldCapturedAt ?? (
+            source.financeSnapshot.capturedAt === null
+              ? null
+              : new Date(source.financeSnapshot.capturedAt)
+          ),
+          health: coverageSnapshot.financeHealth ?? {
+            schemaVersion: "finance-health.v1",
+            provider: null,
+            capability: null,
+            capabilityProofRevision: null,
+            providerUpdatedAt: null,
+            collectedAt: null,
+            evaluatedAt: observedAt.toISOString(),
+            ageMs: null,
+            health: "UNKNOWN",
+            completeness: "UNKNOWN",
+            reconciliation: "UNKNOWN",
+            officialOnHoldAvailability: "UNAVAILABLE",
+            refreshState: "NOT_REQUESTED",
+          },
+        },
+        delivery: {
+          counts: source.facts.map(({ canonicalStatus, orderCount }) => ({
+            canonicalStatus,
+            count: orderCount,
+          })),
+          observedAt: risk.lastSuccessfulObservationAt,
+          source: "SELLER_CENTER",
+          quality: coverageSnapshot.freshness ?? "UNKNOWN",
+        },
+      });
+      const ruleDecision = targetRuleEvidence.decision;
+      const triggers = targetRuleTriggers(targetRuleEvidence);
+      const targetRiskSnapshot = legacyRuleContext(riskSnapshot, targetRuleEvidence);
       const decisionContextSnapshot = buildDecisionIntelligence({
         observedAt,
         profile: { profileId: source.decisionIdentity.profileId, profileNo: source.shop.profileNo },
@@ -222,17 +292,11 @@ export function createDecisionWorkflow(dependencies: {
         },
         metrics: metricsSnapshot,
         finance: source.financeSnapshot,
-        coverage: source.coverageSnapshot ?? {
-          coverageState: source.shop.dataCoverage,
-          persistedMetricsWindow: metricsSnapshot.window,
-          source: null,
-          provenSourceWindow: null,
-          completeWithinSourceWindow: null,
-          lifetimeHistoryComplete: null,
-        },
-        risk: riskSnapshot,
+        coverage: coverageSnapshot,
+        risk: targetRiskSnapshot,
         ruleDecision,
         ruleTriggers: triggers,
+        targetRuleEvidence,
         previous: source.previousDecisionContext,
       }).context;
       const created = await dependencies.store.createDecisionCase({
@@ -242,19 +306,12 @@ export function createDecisionWorkflow(dependencies: {
           shopId: source.shop.id,
           observedAt,
           metricsSnapshot,
-          riskSnapshot,
+          riskSnapshot: targetRiskSnapshot,
           financeSnapshot: source.financeSnapshot,
-          coverageSnapshot: source.coverageSnapshot ?? {
-            coverageState: source.shop.dataCoverage,
-            persistedMetricsWindow: metricsSnapshot.window,
-            source: null,
-            provenSourceWindow: null,
-            completeWithinSourceWindow: null,
-            lifetimeHistoryComplete: null,
-          },
+          coverageSnapshot,
           ruleDecision,
           ruleTriggers: triggers,
-          dataCoverage: source.shop.dataCoverage,
+          dataCoverage: coverageSnapshot.coverageState,
           sourceSyncRunId: source.sourceSyncRunId,
           resolvedPolicySnapshot: source.resolvedPolicySnapshot,
           decisionContextSnapshot,

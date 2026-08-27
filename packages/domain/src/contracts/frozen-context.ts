@@ -40,6 +40,7 @@ export interface FrozenContextValidationInput {
   readonly risk: DecisionRiskSnapshot;
   readonly ruleDecision: DecisionRuleResult;
   readonly ruleTriggers: readonly DecisionRuleTrigger[];
+  readonly targetRuleEvidence?: import("../target-rule.js").OfficialOnHoldRuleEvidence;
   readonly owner?: FrozenContextOwner;
   readonly trendPolicy?: TrendPolicy;
 }
@@ -70,6 +71,13 @@ function equalValue(left: MetricValue, right: MetricValue): boolean {
 
 function equalArray<T>(left: readonly T[], right: readonly T[], equal: (a: T, b: T) => boolean): boolean {
   return left.length === right.length && left.every((value, index) => equal(value, right[index]!));
+}
+
+function equalTargetRuleEvidence(
+  left: import("../target-rule.js").OfficialOnHoldRuleEvidence,
+  right: import("../target-rule.js").OfficialOnHoldRuleEvidence,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function equalComparison(left: MetricComparison, right: MetricComparison): boolean {
@@ -246,6 +254,33 @@ export function validateFrozenDecisionContext(input: FrozenContextValidationInpu
   if (!parsed.success) return { valid: false, issues: ["frozen context does not match the v1 schema"] };
   const context = parsed.data;
   const issues: string[] = [];
+  if (input.targetRuleEvidence !== undefined) {
+    const target = input.targetRuleEvidence;
+    const contextTriggers = target.triggers.map((trigger) =>
+      trigger === "OFFICIAL_ON_HOLD" ? "OFFICIAL_ON_HOLD" as const : "DELIVERY_RATE" as const,
+    );
+    if (context.targetRuleEvidence === undefined || !equalTargetRuleEvidence(context.targetRuleEvidence, target)) {
+      issues.push("target Rule evidence is missing or mutated in frozen context");
+    }
+    if (target.decision !== input.ruleDecision || target.policyVersion !== input.risk.policyVersion || target.evaluatedAt !== input.risk.evaluatedAt) {
+      issues.push("target Rule evidence contradicts canonical decision facts");
+    }
+    if (context.shop.currency !== input.metrics.currency || context.shop.currency !== input.finance.currency) {
+      issues.push("target context currency disagrees with canonical snapshots");
+    }
+    if (context.metrics.observedAt !== input.risk.evaluatedAt || context.rule.evaluatedAt !== input.risk.evaluatedAt) {
+      issues.push("target context observation timestamps disagree");
+    }
+    if (context.rule.result !== target.decision || context.rule.policyVersion !== target.policyVersion || context.rule.expression !== target.expression || !equalArray(context.rule.triggers, contextTriggers, (a, b) => a === b)) {
+      issues.push("context rule disagrees with target Rule evidence");
+    }
+    if (input.owner !== undefined) {
+      if (context.shop.shopId !== input.owner.shopId) issues.push("context shop is not owned by the decision case");
+      if (input.owner.profileId !== undefined && context.profile.profileId !== input.owner.profileId) issues.push("context profile id is not owned by the decision case");
+      if (input.owner.profileNo !== undefined && context.profile.profileNo !== input.owner.profileNo) issues.push("context profile number is not owned by the decision case");
+    }
+    return issues.length === 0 ? { valid: true, context } : { valid: false, issues };
+  }
   const contextMetrics = context.metrics.decision;
   const contextFinance = context.metrics.finance;
   const quality = expectedDataQuality(input.coverage);

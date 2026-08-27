@@ -8,6 +8,7 @@ import type {
   DecisionRiskSnapshot,
   DecisionRuleResult,
   DecisionRuleTrigger,
+  OfficialOnHoldRuleEvidence,
   MetricComparison,
   TrendName,
   TrendPolicy,
@@ -31,6 +32,7 @@ export interface DecisionIntelligenceInput {
   readonly risk: DecisionRiskSnapshot;
   readonly ruleDecision: DecisionRuleResult;
   readonly ruleTriggers: readonly DecisionRuleTrigger[];
+  readonly targetRuleEvidence?: OfficialOnHoldRuleEvidence;
   readonly previous: AiDecisionContext | null;
   readonly trendPolicy?: TrendPolicy;
 }
@@ -134,6 +136,7 @@ function trendSignals(comparisons: readonly MetricComparison[], policy?: TrendPo
 export function buildDecisionIntelligence(input: DecisionIntelligenceInput): { readonly context: AiDecisionContext } {
   const prior = compatible(input.previous, input) ? input.previous : null;
   const exposure = input.metrics.onHoldValue;
+  const targetRule = input.targetRuleEvidence;
   const priorMetrics = prior?.metrics.decision;
   const comparisons = [
     comparable("operationalExposure", exposure, priorMetrics?.operationalExposure ?? null, "USD"),
@@ -144,7 +147,10 @@ export function buildDecisionIntelligence(input: DecisionIntelligenceInput): { r
   const exposureFailed = input.risk.stopByOnHoldValue;
   const rateFailed = input.risk.stopByDeliveryRate;
   const context: AiDecisionContext = {
-    schemaVersion: "ai-decision-context.v1", profile: input.profile, shop: input.shop,
+    schemaVersion: "ai-decision-context.v1",
+    ...(input.targetRuleEvidence === undefined ? {} : { targetRuleEvidence: input.targetRuleEvidence }),
+    profile: input.profile,
+    shop: input.shop,
     metrics: {
       observedAt: input.observedAt.toISOString(),
       decision: {
@@ -194,8 +200,10 @@ export function buildDecisionIntelligence(input: DecisionIntelligenceInput): { r
         { metric: "operationalExposure", observedValue: exposure, threshold: input.risk.stopOnHoldValueAt, operator: "GTE", result: exposure === null ? "NOT_EVALUATED" : exposureFailed ? "FAIL" : "PASS", triggeredReason: exposureFailed ? "OPERATIONAL_EXPOSURE_LIMIT_REACHED" : null },
         { metric: "deliveryRate", observedValue: input.metrics.deliveryRate, threshold: input.risk.stopDeliveryRateBelow, operator: "LT", result: input.metrics.deliveryRate === null || !input.risk.dataSufficient ? "NOT_EVALUATED" : rateFailed ? "FAIL" : "PASS", triggeredReason: rateFailed ? "DELIVERY_RATE_BELOW_LIMIT" : null },
       ],
-      triggers: [...(exposureFailed ? ["OPERATIONAL_EXPOSURE" as const] : []), ...(rateFailed ? ["DELIVERY_RATE" as const] : [])],
-      expression: `operationalExposure >= ${new Decimal(input.risk.stopOnHoldValueAt).toString()} ${input.shop.currency} OR deliveryRate < ${new Decimal(input.risk.stopDeliveryRateBelow).times(100).toString()}%`,
+      triggers: targetRule === undefined
+        ? [...(exposureFailed ? ["OPERATIONAL_EXPOSURE" as const] : []), ...(rateFailed ? ["DELIVERY_RATE" as const] : [])]
+        : targetRule.triggers.map((trigger) => trigger === "OFFICIAL_ON_HOLD" ? "OFFICIAL_ON_HOLD" as const : "DELIVERY_RATE" as const),
+      expression: targetRule?.expression ?? `operationalExposure >= ${new Decimal(input.risk.stopOnHoldValueAt).toString()} ${input.shop.currency} OR deliveryRate < ${new Decimal(input.risk.stopDeliveryRateBelow).times(100).toString()}%`,
       evaluatedAt: input.observedAt.toISOString(),
     },
     previousCompatibleSnapshot: prior === null ? null : {
@@ -219,6 +227,7 @@ export function buildDecisionIntelligence(input: DecisionIntelligenceInput): { r
       risk: input.risk,
       ruleDecision: input.ruleDecision,
       ruleTriggers: input.ruleTriggers,
+      ...(input.targetRuleEvidence === undefined ? {} : { targetRuleEvidence: input.targetRuleEvidence }),
       owner: {
         shopId: input.shop.shopId,
         profileId: input.profile.profileId,

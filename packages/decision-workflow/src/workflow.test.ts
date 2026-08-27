@@ -329,6 +329,100 @@ describe("decision workflow", () => {
     });
   });
 
+  test("evaluates a stale complete/reconciled Official-OH capture before Case creation", async () => {
+    const store = createStore();
+    store.loadReviewStartSource = async () => ({
+      ...source,
+      officialOnHoldAmount: "3500.0000",
+      officialOnHoldCapturedAt: new Date("2026-08-13T08:30:00.000Z"),
+      financeSnapshot: {
+        ...source.financeSnapshot,
+        capturedAt: "2026-08-13T08:30:00.000Z",
+        officialOnHoldAmount: "3500.0000",
+      },
+      coverageSnapshot: {
+        coverageState: "COMPLETE",
+        persistedMetricsWindow: "FULL_PERSISTED_HISTORY",
+        provenSourceWindow: "ROLLING_12_MONTHS",
+        completeWithinSourceWindow: true,
+        lifetimeHistoryComplete: false,
+        source: "SELLER_CENTER",
+        ordersSourceComplete: true,
+        financeRequiredSourceComplete: true,
+        sourceReconciled: true,
+        latestSuccessfulSyncAt: now.toISOString(),
+        financeCapturedAt: "2026-08-13T08:30:00.000Z",
+        freshness: "STALE",
+        financeHealth: {
+          schemaVersion: "finance-health.v1",
+          provider: "SELLER_CENTER",
+          capability: "OFFICIAL_ON_HOLD",
+          capabilityProofRevision: "seller-center-official-on-hold.v1",
+          providerUpdatedAt: null,
+          collectedAt: "2026-08-13T08:30:00.000Z",
+          evaluatedAt: now.toISOString(),
+          ageMs: 86_400_000,
+          health: "STALE",
+          completeness: "COMPLETE",
+          reconciliation: "RECONCILED",
+          officialOnHoldAvailability: "AVAILABLE",
+          refreshState: "FAILED",
+        },
+      },
+    });
+    const workflow = createDecisionWorkflow({
+      store,
+      aiClient: { recommend: async () => unavailableResult },
+      now: () => now,
+    });
+
+    await workflow.startReview({ profileNo: "DEMO-001" });
+
+    expect(store.created[0]).toMatchObject({
+      decisionCase: {
+        ruleDecision: "PAUSE",
+        ruleTriggers: ["ONHOLD_VALUE"],
+        decisionContextSnapshot: expect.objectContaining({
+          targetRuleEvidence: expect.objectContaining({
+            schemaVersion: "official-on-hold-rule.v1",
+            decision: "PAUSE",
+            officialOnHold: expect.objectContaining({
+              state: "TRIGGERED",
+              observedValue: "3500.0000",
+              quality: "STALE",
+              ageMs: 86_400_000,
+              refreshState: "FAILED",
+            }),
+          }),
+        }),
+      },
+    });
+  });
+
+  test("freezes the versioned Official-OH Rule before creating a new Case", async () => {
+    const store = createStore();
+    const workflow = createDecisionWorkflow({
+      store,
+      aiClient: { recommend: async () => unavailableResult },
+      now: () => now,
+    });
+
+    await workflow.startReview({ profileNo: "DEMO-001" });
+
+    expect(store.created[0]).toMatchObject({
+      decisionCase: {
+        decisionContextSnapshot: expect.objectContaining({
+          targetRuleEvidence: expect.objectContaining({
+            schemaVersion: "official-on-hold-rule.v1",
+            decision: "INSUFFICIENT_DATA",
+            officialOnHold: expect.objectContaining({ state: "NOT_EVALUATED" }),
+          }),
+        }),
+      },
+    });
+    expect(store.executionRecords).toHaveLength(0);
+  });
+
   test("starts an immutable case from persisted facts and stores a separate AI result", async () => {
     const store = createStore();
     let receivedAiInput: unknown;
@@ -356,8 +450,8 @@ describe("decision workflow", () => {
       decisionCase: {
         shopId,
         observedAt: now,
-        ruleDecision: "PAUSE",
-        ruleTriggers: ["ONHOLD_VALUE"],
+        ruleDecision: "INSUFFICIENT_DATA",
+        ruleTriggers: [],
         dataCoverage: "UNKNOWN",
         sourceSyncRunId: null,
         resolvedPolicySnapshot,

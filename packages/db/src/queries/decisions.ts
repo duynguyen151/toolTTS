@@ -313,7 +313,12 @@ function contextCanonicalFacts(
       onHoldValue: decimalString(context.risk.operationalExposure),
     },
     ruleDecision: context.rule.result,
-    ruleTriggers: context.rule.triggers.map((trigger) => trigger === "OPERATIONAL_EXPOSURE" ? "ONHOLD_VALUE" : "DELIVERY_RATE"),
+    ruleTriggers: context.rule.triggers.map((trigger) =>
+      trigger === "OPERATIONAL_EXPOSURE" || trigger === "OFFICIAL_ON_HOLD"
+        ? "ONHOLD_VALUE"
+        : "DELIVERY_RATE",
+    ),
+    ...(context.targetRuleEvidence === undefined ? {} : { targetRuleEvidence: context.targetRuleEvidence }),
     ...(owner === undefined ? {} : { owner }),
   };
 }
@@ -460,6 +465,7 @@ export async function getDecisionAiInput(
       risk: DecisionRiskSnapshotSchema.parse(decisionCase.riskSnapshot),
       ruleDecision: decisionCase.ruleDecision,
       ruleTriggers: decisionCase.ruleTriggers,
+      ...(decisionCase.decisionContextSnapshot?.targetRuleEvidence === undefined ? {} : { targetRuleEvidence: decisionCase.decisionContextSnapshot.targetRuleEvidence }),
       owner: {
         shopId: decisionCase.shopId,
         ...(owner === null ? {} : { profileId: owner.profileId, profileNo: owner.profileNo }),
@@ -656,6 +662,7 @@ function makeReview(
       risk: DecisionRiskSnapshotSchema.parse(risk),
       ruleDecision: decisionCase.ruleDecision,
       ruleTriggers: decisionCase.ruleTriggers,
+      ...(decisionCase.decisionContextSnapshot?.targetRuleEvidence === undefined ? {} : { targetRuleEvidence: decisionCase.decisionContextSnapshot.targetRuleEvidence }),
       owner: { shopId: shop.id, profileId: shop.profileId, profileNo: shop.profileNo },
     },
   );

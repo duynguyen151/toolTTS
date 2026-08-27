@@ -440,6 +440,82 @@ describe("decision workflow persistence boundaries", () => {
       });
   });
 
+  it("keeps frozen target-rule evidence available to AI input readback", async () => {
+    const targetRuleEvidence = {
+      schemaVersion: "official-on-hold-rule.v1" as const,
+      policyVersion: "risk-control-policy.v1",
+      evaluatedAt: "2026-08-14T00:00:00.000Z",
+      decision: "CONTINUE" as const,
+      triggers: [],
+      expression: "officialFinanceOnHold >= 3500 USD OR deliveryRate < 70%",
+      officialOnHold: {
+        state: "CLEAR" as const,
+        source: "SELLER_CENTER" as const,
+        observedValue: "1200.0000",
+        observedAt: "2026-08-14T00:00:00.000Z",
+        ageMs: 0,
+        quality: "FRESH" as const,
+        completeness: "COMPLETE" as const,
+        reconciliation: "RECONCILED" as const,
+        refreshState: "SUCCEEDED" as const,
+        threshold: "3500.0000",
+      },
+      deliveryRate: {
+        state: "CLEAR" as const,
+        source: "SELLER_CENTER" as const,
+        observedValue: 0.84,
+        observedAt: "2026-08-14T00:00:00.000Z",
+        ageMs: 0,
+        quality: "FRESH" as const,
+        deliveredCount: 84,
+        totalCount: 100,
+        threshold: 0.7,
+        unavailableReasons: [],
+      },
+    };
+    const context = {
+      ...decisionContextSnapshot,
+      targetRuleEvidence,
+      rule: {
+        ...decisionContextSnapshot.rule,
+        expression: targetRuleEvidence.expression,
+        triggers: [],
+      },
+    };
+    const db = {
+      select() {
+        return {
+          from() {
+            return {
+              where() {
+                return {
+                  async limit() {
+                    return [{
+                      shopId: input.decisionCase.shopId,
+                      metricsSnapshot: input.decisionCase.metricsSnapshot,
+                      financeSnapshot: input.decisionCase.financeSnapshot,
+                      coverageSnapshot: input.decisionCase.coverageSnapshot,
+                      riskSnapshot: input.decisionCase.riskSnapshot,
+                      ruleDecision: input.decisionCase.ruleDecision,
+                      ruleTriggers: input.decisionCase.ruleTriggers,
+                      dataCoverage: input.decisionCase.dataCoverage,
+                      decisionContextSnapshot: context,
+                    }];
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+    } as unknown as Database;
+
+    await expect(getDecisionAiInput(db, "00000000-0000-4000-8000-000000000021"))
+      .resolves.toMatchObject({
+        decisionContextSnapshot: { targetRuleEvidence },
+      });
+  });
+
   it("treats a legacy frozen context with onHoldValue as unavailable on readback", async () => {
     const legacyContext = {
       ...decisionContextSnapshot,

@@ -10,6 +10,7 @@ const db = vi.hoisted(() => ({
   listSyncRuns: vi.fn(),
   getLatestDecisionContext: vi.fn(),
   getRiskControlState: vi.fn(),
+  recordBaDecisionForCase: vi.fn(),
 }));
 
 vi.mock("@shop-health/db", async (importOriginal) => ({
@@ -229,6 +230,33 @@ describe("review workflow DB mapping", () => {
       reason: null,
       failureCode: "CONFIG_MISSING",
       humanReviewRequired: true,
+    });
+  });
+
+  test("passes SLOW_SELL methods through persisted BA revision mapping", async () => {
+    const record = db.recordBaDecisionForCase.mockResolvedValue({});
+    const store = createDbDecisionWorkflowStore({} as never);
+
+    await store.recordBaDecision({
+      requestId: "8d0c6464-1976-4a2f-84fb-25e2cd6efea5",
+      decisionCaseId: "0df4a641-4555-4f4d-bb32-595f95ad3c7c",
+      decision: "SLOW_SELL",
+      reasonCode: "LOW_DELIVERY_RATE",
+      reasonCodes: ["LOW_DELIVERY_RATE"],
+      plannedMethods: ["DISABLE_FLASH_SALE", "INCREASE_PRICE"],
+      notes: "Slow new demand",
+    });
+
+    expect(record).toHaveBeenCalledWith(expect.anything(), {
+      requestId: "8d0c6464-1976-4a2f-84fb-25e2cd6efea5",
+      decisionCaseId: "0df4a641-4555-4f4d-bb32-595f95ad3c7c",
+      baDecision: {
+        decision: "SLOW_SELL",
+        reasonCode: "LOW_DELIVERY_RATE",
+        reasonCodes: ["LOW_DELIVERY_RATE"],
+        plannedMethods: ["DISABLE_FLASH_SALE", "INCREASE_PRICE"],
+        notes: "Slow new demand",
+      },
     });
   });
 });

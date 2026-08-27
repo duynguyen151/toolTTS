@@ -61,6 +61,7 @@ function reviewSections(view: DecisionReviewView, timeZone: string): string[] {
       ["Decision", view.ba.decision],
       ["Confidence", view.ba.confidence === null ? "-" : String(view.ba.confidence)],
       ["Reason Codes", view.ba.reasonCodes.join(", ")],
+      ["Planned Methods", view.ba.plannedMethods?.join(", ") ?? "-"],
       ["Note", view.ba.note ?? "-"],
       ["Decided At", formatDate(view.ba.decidedAt, timeZone)],
     );

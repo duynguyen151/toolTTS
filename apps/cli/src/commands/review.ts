@@ -1,8 +1,12 @@
 import {
+  BaDecisionInputSchema,
   BaDecisionReasonCodeSchema,
   BaDecisionSchema,
+  BaPlannedMethodSchema,
   type BaDecision,
   type BaDecisionReasonCode,
+  type BaDecisionInput,
+  type BaPlannedMethod,
 } from "@shop-health/domain";
 import type { DecisionWorkflow } from "@shop-health/decision-workflow";
 import { Command, InvalidArgumentError } from "commander";
@@ -33,6 +37,10 @@ function decision(value: string): BaDecision {
 
 function reasonCode(value: string, previous: BaDecisionReasonCode[]): BaDecisionReasonCode[] {
   return [...previous, parseWithSchema(BaDecisionReasonCodeSchema, value, "BA reason code")];
+}
+
+function plannedMethod(value: string, previous: BaPlannedMethod[]): BaPlannedMethod[] {
+  return [...previous, parseWithSchema(BaPlannedMethodSchema, value, "SLOW_SELL planned method")];
 }
 
 function confidence(value: string): number {
@@ -74,10 +82,12 @@ export function registerReviewCommands(
     });
 
   review.command("decide <caseId>")
-    .requiredOption("--decision <decision>", "SCALE, CONTINUE, WATCH, or PAUSE", decision)
+    .requiredOption("--decision <decision>", "SCALE, CONTINUE, WATCH, PAUSE, or SLOW_SELL", decision)
     .requiredOption("--reason-code <code>", "Repeatable BA reason code", reasonCode, [])
     .option("--confidence <number>", "Confidence from 0 through 1", confidence)
     .option("--note <text>", "Optional BA note")
+    .option("--notes <text>", "Optional BA notes; required for OTHER planned method")
+    .option("--planned-method <method>", "Repeatable SLOW_SELL method", plannedMethod, [])
     .option("--request-id <uuid>", "Idempotency request UUID", uuid)
     .option("--json", "Print stable JSON output")
     .action(async (caseId: string, options: {
@@ -85,16 +95,29 @@ export function registerReviewCommands(
       reasonCode: BaDecisionReasonCode[];
       confidence?: number;
       note?: string;
+      notes?: string;
+      plannedMethod: BaPlannedMethod[];
       requestId?: string;
       json?: boolean;
     }) => {
-      const view = await workflow.decide({
-        caseId: uuid(caseId),
+      const baInput = BaDecisionInputSchema.parse({
         decision: options.decision,
-        reasonCode: options.reasonCode[0]!,
+        reasonCode: options.reasonCode[0],
         reasonCodes: options.reasonCode,
         ...(options.confidence === undefined ? {} : { confidence: options.confidence }),
         ...(options.note === undefined ? {} : { note: options.note }),
+        ...(options.notes === undefined ? {} : { notes: options.notes }),
+        ...(options.plannedMethod.length === 0 ? {} : { plannedMethods: options.plannedMethod }),
+      }) satisfies BaDecisionInput;
+      const view = await workflow.decide({
+        caseId: uuid(caseId),
+        decision: baInput.decision,
+        reasonCode: baInput.reasonCode,
+        ...(baInput.reasonCodes === undefined ? {} : { reasonCodes: baInput.reasonCodes }),
+        ...(baInput.confidence === undefined ? {} : { confidence: baInput.confidence }),
+        ...(baInput.plannedMethods === undefined ? {} : { plannedMethods: baInput.plannedMethods }),
+        ...(baInput.note === undefined ? {} : { note: baInput.note }),
+        ...(baInput.notes === undefined ? {} : { notes: baInput.notes }),
         ...(options.requestId === undefined ? {} : { requestId: options.requestId }),
       });
       write(options.json === true

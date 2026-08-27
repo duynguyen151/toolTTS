@@ -74,6 +74,93 @@ describe("review commands", () => {
     expect(JSON.parse(startOutput)).toEqual(review);
   });
 
+  test("submits each of the five BA decisions, including repeatable SLOW_SELL methods", async () => {
+    for (const selectedDecision of ["SCALE", "CONTINUE", "WATCH", "PAUSE", "SLOW_SELL"] as const) {
+      const workflow = createWorkflow();
+      const args = [
+        "review", "decide", caseId,
+        "--decision", selectedDecision,
+        "--reason-code", "LOW_DELIVERY_RATE",
+        "--json",
+      ];
+      if (selectedDecision === "SLOW_SELL") {
+        args.splice(-1, 0,
+          "--planned-method", "DISABLE_FLASH_SALE",
+          "--planned-method", "INCREASE_PRICE",
+          "--notes", "Operator will slow new demand.",
+        );
+      }
+
+      await run(workflow, args);
+
+      expect(workflow.decide).toHaveBeenCalledWith({
+        caseId,
+        decision: selectedDecision,
+        reasonCode: "LOW_DELIVERY_RATE",
+        reasonCodes: ["LOW_DELIVERY_RATE"],
+        ...(selectedDecision === "SLOW_SELL" ? {
+          plannedMethods: ["DISABLE_FLASH_SALE", "INCREASE_PRICE"],
+          notes: "Operator will slow new demand.",
+        } : {}),
+      });
+    }
+  });
+
+  test("rejects SLOW_SELL without methods and planned OTHER without notes before workflow submission", async () => {
+    const workflow = createWorkflow();
+
+    await expect(run(workflow, [
+      "review", "decide", caseId,
+      "--decision", "SLOW_SELL",
+      "--reason-code", "LOW_DELIVERY_RATE",
+      "--json",
+    ])).rejects.toThrow("SLOW_SELL requires at least one planned method");
+    await expect(run(workflow, [
+      "review", "decide", caseId,
+      "--decision", "SLOW_SELL",
+      "--reason-code", "LOW_DELIVERY_RATE",
+      "--planned-method", "OTHER",
+      "--json",
+    ])).rejects.toThrow("BA notes are required for planned method OTHER");
+    expect(workflow.decide).not.toHaveBeenCalled();
+  });
+
+  test("appends repeated revisions by the same persisted case ID", async () => {
+    const workflow = createWorkflow();
+
+    await run(workflow, [
+      "review", "decide", caseId,
+      "--decision", "SLOW_SELL",
+      "--reason-code", "LOW_DELIVERY_RATE",
+      "--planned-method", "DISABLE_FLASH_SALE",
+      "--notes", "First operator revision",
+      "--json",
+    ]);
+    await run(workflow, [
+      "review", "decide", caseId,
+      "--decision", "PAUSE",
+      "--reason-code", "HIGH_ABSOLUTE_EXPOSURE",
+      "--json",
+    ]);
+
+    expect(workflow.decide).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      caseId,
+      decision: "SLOW_SELL",
+      plannedMethods: ["DISABLE_FLASH_SALE"],
+      notes: "First operator revision",
+    }));
+    expect(workflow.decide).toHaveBeenNthCalledWith(2, {
+      caseId,
+      decision: "PAUSE",
+      reasonCode: "HIGH_ABSOLUTE_EXPOSURE",
+      reasonCodes: ["HIGH_ABSOLUTE_EXPOSURE"],
+    });
+    const decideCalls = (workflow.decide as unknown as ReturnType<typeof vi.fn>).mock.calls as Array<[
+      { readonly caseId: string },
+    ]>;
+    expect(decideCalls.every(([input]) => input.caseId === caseId)).toBe(true);
+  });
+
   test("show and history are read-only workflow calls", async () => {
     const workflow = createWorkflow();
 

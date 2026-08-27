@@ -271,6 +271,7 @@ export function createDbDecisionWorkflowStore(
           reasonCode: input.reasonCode,
           reasonCodes: [...input.reasonCodes],
           ...(input.confidence === undefined ? {} : { confidence: input.confidence }),
+          ...(input.plannedMethods === undefined ? {} : { plannedMethods: [...input.plannedMethods] }),
           ...(input.notes === undefined ? {} : { notes: input.notes }),
         },
       });

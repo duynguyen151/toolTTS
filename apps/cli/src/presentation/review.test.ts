@@ -110,4 +110,31 @@ describe("decision review human presentation", () => {
     expect(output).toContain("EXECUTION\n");
     expect(output).toContain("Origin: DEMO_SANITIZED");
   });
+
+  test("renders SLOW_SELL methods and notes in current and history output", () => {
+    const decided = {
+      ...view,
+      ba: {
+        status: "DECIDED" as const,
+        decision: "SLOW_SELL" as const,
+        confidence: null,
+        reasonCodes: ["LOW_DELIVERY_RATE" as const],
+        plannedMethods: ["DISABLE_FLASH_SALE" as const, "OTHER" as const],
+        note: "Operator review: use a safer fallback.",
+        decidedAt: "2026-08-14T01:00:03.000Z",
+      },
+    };
+    const output = formatDecisionReview(decided, "Asia/Bangkok");
+    const history = formatDecisionHistory({
+      schemaVersion: "decision-history.v1",
+      items: [decided],
+      nextCursor: null,
+    }, "Asia/Bangkok");
+
+    for (const rendered of [output, history]) {
+      expect(rendered).toContain("Decision: SLOW_SELL");
+      expect(rendered).toContain("Planned Methods: DISABLE_FLASH_SALE, OTHER");
+      expect(rendered).toContain("Note: Operator review: use a safer fallback.");
+    }
+  });
 });

@@ -917,14 +917,30 @@ export const refreshCheckpointAttempts = pgTable(
     )`),
     check("refresh_checkpoint_attempts_proxy_preflight_valid", sql`${table.proxyPreflight} is null or (
       jsonb_typeof(${table.proxyPreflight}) = 'object'
+      and jsonb_object_length(${table.proxyPreflight}) = 4
       and (${table.proxyPreflight} ?& array['status', 'latencyMs', 'exitIp', 'reasonClass'])
-      and (${table.proxyPreflight} - array['status', 'latencyMs', 'exitIp', 'reasonClass']) = '{}'::jsonb
       and (${table.proxyPreflight}->>'status') in ('HEALTHY', 'DEGRADED', 'UNAVAILABLE', 'UNKNOWN')
       and jsonb_typeof(${table.proxyPreflight}->'latencyMs') = 'number'
       and (${table.proxyPreflight}->>'latencyMs')::numeric between 0 and 10000
       and mod((${table.proxyPreflight}->>'latencyMs')::numeric, 1) = 0
       and jsonb_typeof(${table.proxyPreflight}->'exitIp') in ('string', 'null')
-      and (${table.proxyPreflight}->>'reasonClass') in ('OBSERVED_HEALTHY', 'OBSERVED_SLOW', 'OBSERVED_UNAVAILABLE', 'OBSERVATION_UNAVAILABLE', 'AUTH_REJECTED', 'HTTP_REJECTED', 'REQUEST_TIMEOUT', 'NETWORK_UNAVAILABLE')
+      and (jsonb_typeof(${table.proxyPreflight}->'exitIp') = 'null' or (
+        (${table.proxyPreflight}->>'exitIp') ~ '^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])$'
+        and split_part(${table.proxyPreflight}->>'exitIp', '.', 1)::integer not in (0, 10, 127)
+        and split_part(${table.proxyPreflight}->>'exitIp', '.', 1)::integer < 224
+        and not (split_part(${table.proxyPreflight}->>'exitIp', '.', 1)::integer = 100 and split_part(${table.proxyPreflight}->>'exitIp', '.', 2)::integer between 64 and 127)
+        and not (split_part(${table.proxyPreflight}->>'exitIp', '.', 1)::integer = 169 and split_part(${table.proxyPreflight}->>'exitIp', '.', 2)::integer = 254)
+        and not (split_part(${table.proxyPreflight}->>'exitIp', '.', 1)::integer = 172 and split_part(${table.proxyPreflight}->>'exitIp', '.', 2)::integer between 16 and 31)
+        and not (split_part(${table.proxyPreflight}->>'exitIp', '.', 1)::integer = 192 and (split_part(${table.proxyPreflight}->>'exitIp', '.', 2)::integer in (0, 168) or (split_part(${table.proxyPreflight}->>'exitIp', '.', 2)::integer = 88 and split_part(${table.proxyPreflight}->>'exitIp', '.', 3)::integer = 99)))
+        and not (split_part(${table.proxyPreflight}->>'exitIp', '.', 1)::integer = 198 and split_part(${table.proxyPreflight}->>'exitIp', '.', 2)::integer in (18, 19, 51))
+        and not (split_part(${table.proxyPreflight}->>'exitIp', '.', 1)::integer = 203 and split_part(${table.proxyPreflight}->>'exitIp', '.', 2)::integer = 0)
+      ))
+      and (
+        ((${table.proxyPreflight}->>'status') = 'HEALTHY' and (${table.proxyPreflight}->>'reasonClass') = 'OBSERVED_HEALTHY')
+        or ((${table.proxyPreflight}->>'status') = 'DEGRADED' and (${table.proxyPreflight}->>'reasonClass') = 'OBSERVED_SLOW')
+        or ((${table.proxyPreflight}->>'status') = 'UNAVAILABLE' and (${table.proxyPreflight}->>'exitIp') is null and (${table.proxyPreflight}->>'reasonClass') in ('OBSERVED_UNAVAILABLE', 'AUTH_REJECTED', 'HTTP_REJECTED', 'REQUEST_TIMEOUT', 'NETWORK_UNAVAILABLE'))
+        or ((${table.proxyPreflight}->>'status') = 'UNKNOWN' and (${table.proxyPreflight}->>'exitIp') is null and (${table.proxyPreflight}->>'reasonClass') = 'OBSERVATION_UNAVAILABLE')
+      )
     )`),
     check("refresh_checkpoint_attempts_timestamps_finite", sql`${table.startedAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz) and ${table.createdAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz) and (${table.finishedAt} is null or ${table.finishedAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz)) and (${table.nextAttemptAt} is null or ${table.nextAttemptAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz))`),
   ],

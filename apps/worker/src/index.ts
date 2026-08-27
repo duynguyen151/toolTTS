@@ -11,10 +11,12 @@ import {
   listAutomaticRefreshEligibleAdsPowerProfileShops,
   listReadyAdsPowerProfileShops,
   recordRefreshAttemptStarted,
+  recordRefreshAttemptProxyPreflight,
   withRefreshProfileExecutionLock,
   type ShopRow
 } from "@shop-health/db";
 import { createSellerCenterDataSource } from "@shop-health/seller-center";
+import { createAdsPowerProxyPreflight } from "@shop-health/seller-center/proxy-preflight";
 import { evaluateAndStoreRiskControl, runShopSync, type SyncKind } from "@shop-health/sync";
 import pino from "pino";
 
@@ -35,6 +37,9 @@ const sourceOptions = { baseUrl: config.ADSPOWER_BASE_URL, logger };
 const source = createSellerCenterDataSource(config.ADSPOWER_API_KEY === undefined
   ? sourceOptions
   : { ...sourceOptions, apiKey: config.ADSPOWER_API_KEY });
+const proxyPreflight = createAdsPowerProxyPreflight(config.ADSPOWER_API_KEY === undefined
+  ? { baseUrl: config.ADSPOWER_BASE_URL }
+  : { baseUrl: config.ADSPOWER_BASE_URL, apiKey: config.ADSPOWER_API_KEY });
 
 let stopping = false;
 const lastRun = new Map<string, number>();
@@ -73,10 +78,12 @@ async function runClaimedRefreshAttempts(shops: readonly ShopRow[], now: Date): 
     now,
     repository: {
       recordRefreshAttemptStarted: (input) => recordRefreshAttemptStarted(context.db, input),
+      recordRefreshAttemptProxyPreflight: (input) => recordRefreshAttemptProxyPreflight(context.db, input),
       renewRefreshAttemptLease: (input) => renewRefreshAttemptLease(context.db, input),
       releaseRefreshClaim: (input) => releaseRefreshClaim(context.db, input),
       completeRefreshAttempt: (input) => completeRefreshAttempt(context.db, input),
     },
+    preflight: async (shop) => proxyPreflight.preflight({ profileId: shop.profileId }),
     withExecutionLock: (shop, operation) => withRefreshProfileExecutionLock(context, shop.profileId, operation),
     execute: async (shop) => {
       // W6 owns durable scheduling only. W8 will replace this with its health-aware

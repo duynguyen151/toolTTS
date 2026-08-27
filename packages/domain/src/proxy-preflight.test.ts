@@ -37,6 +37,21 @@ describe("proxy preflight contract", () => {
     })).toThrow();
   });
 
+  it("rejects the 6to4 relay anycast /24 without rejecting an adjacent public address", () => {
+    expect(() => ProxyPreflightResultSchema.parse({
+      status: "HEALTHY",
+      latencyMs: 42,
+      exitIp: "192.88.99.1",
+      reasonClass: "OBSERVED_HEALTHY",
+    })).toThrow();
+    expect(ProxyPreflightResultSchema.parse({
+      status: "HEALTHY",
+      latencyMs: 42,
+      exitIp: "192.88.98.1",
+      reasonClass: "OBSERVED_HEALTHY",
+    })).toMatchObject({ exitIp: "192.88.98.1" });
+  });
+
   it("rejects invented expiry, secrets, and unbounded latency", () => {
     expect(() => ProxyPreflightResultSchema.parse({
       status: "PROXY_EXPIRED",

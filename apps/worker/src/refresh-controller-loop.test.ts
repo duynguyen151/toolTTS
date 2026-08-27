@@ -1,6 +1,18 @@
+import type { ProxyPreflightResult } from "@shop-health/domain";
 import { describe, expect, it, vi } from "vitest";
 
 import { executeClaimedRefreshAttempts } from "./refresh-controller-loop.js";
+
+const healthyPreflight: ProxyPreflightResult = {
+  status: "HEALTHY",
+  latencyMs: 42,
+  exitIp: null,
+  reasonClass: "OBSERVED_HEALTHY",
+};
+
+function preflightFor(result: ProxyPreflightResult = healthyPreflight) {
+  return async () => result;
+}
 
 describe("executeClaimedRefreshAttempts", () => {
   it("serializes profile work and records one bounded attempt outcome per claim", async () => {
@@ -11,6 +23,10 @@ describe("executeClaimedRefreshAttempts", () => {
       recordRefreshAttemptStarted: vi.fn(async (input: { runId: string; claimToken: string; now: Date }) => {
         events.push(`start:${input.runId}`);
         return { id: `attempt-${input.runId}` };
+      }),
+      recordRefreshAttemptProxyPreflight: vi.fn(async (input: { runId: string; attemptId: string; claimToken: string; preflight: ProxyPreflightResult }) => {
+        events.push(`preflight:${input.runId}:${input.preflight.status}`);
+        return true;
       }),
       renewRefreshAttemptLease: vi.fn(async () => true),
       releaseRefreshClaim: vi.fn(async () => true),
@@ -29,6 +45,7 @@ describe("executeClaimedRefreshAttempts", () => {
       shops: [{ id: "shop-1" }, { id: "shop-2" }],
       now: new Date("2026-01-15T01:00:00.000Z"),
       repository,
+      preflight: preflightFor(),
       withExecutionLock: async (_shop, operation) => operation(),
       execute: async (shop) => {
         active += 1;
@@ -41,8 +58,8 @@ describe("executeClaimedRefreshAttempts", () => {
 
     expect(maximumActive).toBe(1);
     expect(events).toEqual([
-      "start:run-1", "execute:shop-1", "complete:run-1:SUCCESS",
-      "start:run-2", "execute:shop-2", "complete:run-2:FAILURE",
+      "start:run-1", "preflight:run-1:HEALTHY", "execute:shop-1", "complete:run-1:SUCCESS",
+      "start:run-2", "preflight:run-2:HEALTHY", "execute:shop-2", "complete:run-2:FAILURE",
     ]);
     expect(repository.completeRefreshAttempt).toHaveBeenCalledTimes(2);
   });
@@ -54,6 +71,7 @@ describe("executeClaimedRefreshAttempts", () => {
       const execution = new Promise<boolean>((resolve) => { releaseExecution = () => resolve(true); });
       const repository = {
         recordRefreshAttemptStarted: vi.fn(async () => ({ id: "attempt-1" })),
+        recordRefreshAttemptProxyPreflight: vi.fn(async () => true),
         renewRefreshAttemptLease: vi.fn(async () => true),
         releaseRefreshClaim: vi.fn(async () => true),
         completeRefreshAttempt: vi.fn(async () => ({})),
@@ -63,6 +81,7 @@ describe("executeClaimedRefreshAttempts", () => {
         shops: [{ id: "shop-1" }],
         now: new Date("2026-01-15T01:00:00.000Z"),
         repository,
+        preflight: preflightFor(),
         withExecutionLock: async (_shop, operation) => operation(),
         execute: async () => execution,
       });
@@ -81,6 +100,7 @@ describe("executeClaimedRefreshAttempts", () => {
   it("does not consume an attempt when the profile execution lock is unavailable", async () => {
     const repository = {
       recordRefreshAttemptStarted: vi.fn(async () => ({ id: "attempt-1" })),
+      recordRefreshAttemptProxyPreflight: vi.fn(async () => true),
       renewRefreshAttemptLease: vi.fn(async () => true),
       releaseRefreshClaim: vi.fn(async () => true),
       completeRefreshAttempt: vi.fn(async () => ({})),
@@ -92,6 +112,7 @@ describe("executeClaimedRefreshAttempts", () => {
       shops: [{ id: "shop-1" }],
       now: new Date("2026-01-15T01:00:00.000Z"),
       repository,
+      preflight: preflightFor(),
       withExecutionLock: async () => null,
       execute,
     });
@@ -99,5 +120,75 @@ describe("executeClaimedRefreshAttempts", () => {
     expect(repository.recordRefreshAttemptStarted).not.toHaveBeenCalled();
     expect(repository.releaseRefreshClaim).toHaveBeenCalledOnce();
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it.each(["UNKNOWN", "UNAVAILABLE"] as const)("records %s and completes the attempt without browser execution", async (status) => {
+    const repository = {
+      recordRefreshAttemptStarted: vi.fn(async () => ({ id: "attempt-1" })),
+      recordRefreshAttemptProxyPreflight: vi.fn(async () => true),
+      renewRefreshAttemptLease: vi.fn(async () => true),
+      releaseRefreshClaim: vi.fn(async () => true),
+      completeRefreshAttempt: vi.fn(async () => ({})),
+    };
+    const execute = vi.fn(async () => true);
+    const preflight = preflightFor({
+      status,
+      latencyMs: 42,
+      exitIp: null,
+      reasonClass: status === "UNKNOWN" ? "OBSERVATION_UNAVAILABLE" : "NETWORK_UNAVAILABLE",
+    });
+
+    await executeClaimedRefreshAttempts({
+      runs: [{ id: "run-1", shopId: "shop-1", claimToken: "token-1" }],
+      shops: [{ id: "shop-1", profileId: "profile-1" }],
+      now: new Date("2026-01-15T01:00:00.000Z"),
+      repository,
+      preflight,
+      withExecutionLock: async (_shop, operation) => operation(),
+      execute,
+    });
+
+    expect(repository.recordRefreshAttemptProxyPreflight).toHaveBeenCalledWith({
+      runId: "run-1",
+      attemptId: "attempt-1",
+      claimToken: "token-1",
+      preflight: expect.objectContaining({ status }),
+    });
+    expect(execute).not.toHaveBeenCalled();
+    expect(repository.completeRefreshAttempt).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: "FAILURE",
+      failureMessage: `Proxy preflight ${status}`,
+    }));
+  });
+
+  it.each(["HEALTHY", "DEGRADED"] as const)("executes browser work after recording %s", async (status) => {
+    const events: string[] = [];
+    const repository = {
+      recordRefreshAttemptStarted: vi.fn(async () => ({ id: "attempt-1" })),
+      recordRefreshAttemptProxyPreflight: vi.fn(async () => { events.push("persist"); return true; }),
+      renewRefreshAttemptLease: vi.fn(async () => true),
+      releaseRefreshClaim: vi.fn(async () => true),
+      completeRefreshAttempt: vi.fn(async () => ({})),
+    };
+    const execute = vi.fn(async () => { events.push("execute"); return true; });
+    const preflight = preflightFor({
+      status,
+      latencyMs: status === "HEALTHY" ? 42 : 1_001,
+      exitIp: null,
+      reasonClass: status === "HEALTHY" ? "OBSERVED_HEALTHY" : "OBSERVED_SLOW",
+    });
+
+    await executeClaimedRefreshAttempts({
+      runs: [{ id: "run-1", shopId: "shop-1", claimToken: "token-1" }],
+      shops: [{ id: "shop-1", profileId: "profile-1" }],
+      now: new Date("2026-01-15T01:00:00.000Z"),
+      repository,
+      preflight,
+      withExecutionLock: async (_shop, operation) => operation(),
+      execute,
+    });
+
+    expect(events).toEqual(["persist", "execute"]);
+    expect(repository.completeRefreshAttempt).toHaveBeenCalledWith(expect.objectContaining({ outcome: "SUCCESS" }));
   });
 });

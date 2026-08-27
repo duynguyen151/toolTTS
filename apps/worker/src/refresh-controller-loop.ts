@@ -1,4 +1,4 @@
-import type { RefreshCheckpointRunRecord } from "@shop-health/domain";
+import type { ProxyPreflightResult, RefreshCheckpointRunRecord } from "@shop-health/domain";
 
 export const REFRESH_ATTEMPT_HEARTBEAT_MS = 30_000;
 
@@ -8,6 +8,12 @@ export interface RefreshAttemptRepository {
     readonly claimToken: string;
     readonly now: Date;
   }) => Promise<{ readonly id: string }>;
+  readonly recordRefreshAttemptProxyPreflight: (input: {
+    readonly runId: string;
+    readonly attemptId: string;
+    readonly claimToken: string;
+    readonly preflight: ProxyPreflightResult;
+  }) => Promise<boolean>;
   readonly renewRefreshAttemptLease: (input: {
     readonly runId: string;
     readonly attemptId: string;
@@ -34,6 +40,7 @@ export interface ExecuteClaimedRefreshAttemptsInput<TShop extends { readonly id:
   readonly shops: readonly TShop[];
   readonly now: Date;
   readonly repository: RefreshAttemptRepository;
+  readonly preflight: (shop: TShop) => Promise<ProxyPreflightResult>;
   readonly withExecutionLock: (shop: TShop, operation: () => Promise<boolean>) => Promise<boolean | null>;
   readonly execute: (shop: TShop) => Promise<boolean>;
 }
@@ -74,8 +81,21 @@ export async function executeClaimedRefreshAttempts<TShop extends { readonly id:
           claimToken,
           now: new Date(),
         });
-        outcome = (await input.execute(shop)) ? "SUCCESS" : "FAILURE";
-        if (outcome === "FAILURE") failureMessage = "Refresh execution returned unsuccessful";
+        const preflight = await input.preflight(shop);
+        const recorded = await input.repository.recordRefreshAttemptProxyPreflight({
+          runId: run.id,
+          attemptId: attempt.id,
+          claimToken,
+          preflight,
+        });
+        if (!recorded) throw new Error("Proxy preflight result was not recorded for the owned attempt");
+        if (preflight.status === "UNKNOWN" || preflight.status === "UNAVAILABLE") {
+          outcome = "FAILURE";
+          failureMessage = `Proxy preflight ${preflight.status}`;
+        } else {
+          outcome = (await input.execute(shop)) ? "SUCCESS" : "FAILURE";
+          if (outcome === "FAILURE") failureMessage = "Refresh execution returned unsuccessful";
+        }
       } catch (error) {
         outcome = "FAILURE";
         failureMessage = error instanceof Error ? error.message : "Unknown refresh execution failure";

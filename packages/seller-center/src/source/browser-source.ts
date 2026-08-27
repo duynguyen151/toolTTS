@@ -89,26 +89,17 @@ export class SellerCenterBrowserDataSource implements SellerDataSource {
   private readonly logger: Logger | undefined;
   private readonly responseTimeoutMs: number;
   private readonly endpointResponseTimeoutMs: number;
-  private readonly credentialReference: string | undefined;
 
   constructor(options: SellerCenterDataSourceOptions = {}) {
     this.adsPower = options.adsPowerClient ?? new AdsPowerClient(options);
     this.logger = options.logger;
     this.responseTimeoutMs = options.responseTimeoutMs ?? 30_000;
     this.endpointResponseTimeoutMs = options.endpointResponseTimeoutMs ?? 90_000;
-    this.credentialReference = options.credentialReference?.trim() || undefined;
   }
 
   async credentialCapability(): Promise<CredentialCapability> {
-    const capability = this.credentialReference === undefined
-      ? { status: "MISSING", mechanism: null, reference: null }
-      : {
-          status: "AVAILABLE",
-          mechanism: "ADSPOWER_AUTOFILL",
-          reference: this.credentialReference,
-        };
-    return CredentialCapabilitySchema.safeParse(capability).data
-      ?? { status: "MISSING", mechanism: null, reference: null };
+    // A configured opaque reference alone cannot prove an executable autofill action.
+    return CredentialCapabilitySchema.parse({ status: "MISSING", mechanism: null, reference: null });
   }
 
   async health(config: ShopSourceConfig): Promise<SourceHealth> {

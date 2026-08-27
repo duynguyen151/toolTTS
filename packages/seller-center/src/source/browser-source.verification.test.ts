@@ -224,15 +224,15 @@ describe("SellerCenterBrowserDataSource.verifyProfile", () => {
     expect(openReady).toHaveBeenCalledWith("profile-under-test");
   });
 
-  it("exposes only an opaque configured AdsPower autofill reference", async () => {
+  it("does not treat an opaque configured reference as executable autofill capability", async () => {
     const source = new SellerCenterBrowserDataSource({
       credentialReference: "ADSPOWER_PROFILE_AUTOFILL",
     });
 
     await expect(source.credentialCapability()).resolves.toEqual({
-      status: "AVAILABLE",
-      mechanism: "ADSPOWER_AUTOFILL",
-      reference: "ADSPOWER_PROFILE_AUTOFILL",
+      status: "MISSING",
+      mechanism: null,
+      reference: null,
     });
   });
 

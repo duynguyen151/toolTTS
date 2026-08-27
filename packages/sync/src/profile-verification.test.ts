@@ -112,6 +112,44 @@ describe("verifySelectedProfile", () => {
     }));
   });
 
+  it("requires canonical identity re-verification after manual bootstrap before marking the profile ready", async () => {
+    const profile = {
+      profileId: "profile-957",
+      profileNo: "957",
+      groupName: null,
+      tags: [],
+      state: "OPEN",
+    } as const;
+    const source = {
+      verifyProfile: vi.fn()
+        .mockRejectedValueOnce(new SellerCenterError("LOGIN_REQUIRED", "Seller Center login is required"))
+        .mockResolvedValueOnce({ status: "IDENTIFIED", tiktokShopId: "seller-957" }),
+      credentialCapability: vi.fn().mockResolvedValue({ status: "MISSING", mechanism: null, reference: null }),
+    };
+    db.getAdsPowerProfile.mockResolvedValue({ id: "persisted-profile", verifiedTiktokShopId: null, activeShopId: "shop-957" });
+    db.findShopByProfileId.mockResolvedValue({ id: "shop-957", tiktokShopId: "seller-957" });
+    db.findShopByTikTokShopId.mockResolvedValue(null);
+    db.setAdsPowerProfileVerification.mockResolvedValue({ id: "persisted-profile" });
+    db.setShopVerificationState.mockResolvedValue({ id: "shop-957" });
+
+    await expect(verifySelectedProfile({} as never, profile, source as never)).resolves.toEqual({
+      profileNo: "957",
+      verificationState: "CREDENTIALS_REQUIRED",
+      shop: null,
+    });
+
+    await expect(verifySelectedProfile({} as never, profile, source as never)).resolves.toMatchObject({
+      profileNo: "957",
+      verificationState: "READY",
+      shop: { id: "shop-957" },
+    });
+    expect(db.setShopVerificationState).toHaveBeenCalledWith({}, "shop-957", expect.objectContaining({
+      tiktokShopId: "seller-957",
+      verificationStatus: "VERIFIED",
+      eligibilityStatus: "ELIGIBLE",
+    }));
+  });
+
   it("keeps legacy sources without a credential capability on the login-required state", async () => {
     db.getAdsPowerProfile.mockResolvedValue({ id: "persisted-profile", verifiedTiktokShopId: null });
     db.setAdsPowerProfileVerification.mockResolvedValue({ id: "persisted-profile" });

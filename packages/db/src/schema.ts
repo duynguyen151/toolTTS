@@ -369,6 +369,97 @@ export const settlementRecords = pgTable(
   ]
 );
 
+/**
+ * COTIK statement rows are separate supplementary Finance facts. They do not
+ * feed settlement_records, financial_snapshots, finance_captures, or Rule input.
+ */
+export const cotikSupplementaryStatements = pgTable(
+  "cotik_supplementary_statements",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    shopId: uuid("shop_id")
+      .notNull()
+      .references(() => shops.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    providerStatementId: text("provider_statement_id").notNull(),
+    providerPaymentId: text("provider_payment_id"),
+    providerShopId: text("provider_shop_id").notNull(),
+    statementAt: timestamp("statement_at", { withTimezone: true }).notNull(),
+    currency: text("currency").notNull(),
+    revenueAmount: numeric("revenue_amount", { precision: 20, scale: 4 }).notNull(),
+    feeAmount: numeric("fee_amount", { precision: 20, scale: 4 }).notNull(),
+    adjustmentAmount: numeric("adjustment_amount", { precision: 20, scale: 4 }).notNull(),
+    shippingCostAmount: numeric("shipping_cost_amount", { precision: 20, scale: 4 }).notNull(),
+    netSalesAmount: numeric("net_sales_amount", { precision: 20, scale: 4 }).notNull(),
+    settlementAmount: numeric("settlement_amount", { precision: 20, scale: 4 }).notNull(),
+    paymentStatus: text("payment_status").notNull(),
+    orderIds: jsonb("order_ids").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    sourceHash: text("source_hash").notNull(),
+    sourceSchemaVersion: text("source_schema_version").notNull(),
+    rawData: jsonb("raw_data").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("cotik_supplementary_statements_shop_provider_statement_unique").on(table.shopId, table.providerStatementId),
+    index("cotik_supplementary_statements_shop_payment_idx").on(table.shopId, table.providerPaymentId),
+    index("cotik_supplementary_statements_shop_statement_at_idx").on(table.shopId, table.statementAt),
+    check("cotik_supplementary_statements_provider_statement_not_blank", sql`length(btrim(${table.providerStatementId})) > 0`),
+    check("cotik_supplementary_statements_provider_shop_not_blank", sql`length(btrim(${table.providerShopId})) > 0`),
+    check("cotik_supplementary_statements_payment_status_not_blank", sql`length(btrim(${table.paymentStatus})) > 0`),
+    check("cotik_supplementary_statements_currency_format", sql`${table.currency} ~ '^[A-Z]{3}$'`),
+    check("cotik_supplementary_statements_order_ids_array", sql`jsonb_typeof(${table.orderIds}) = 'array'`),
+    check("cotik_supplementary_statements_observed_at_finite", sql`${table.observedAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz)`),
+    check("cotik_supplementary_statements_statement_at_finite", sql`${table.statementAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz)`),
+    check("cotik_supplementary_statements_source_hash_sha256", sql`${table.sourceHash} ~ '^[0-9a-f]{64}$'`),
+    check("cotik_supplementary_statements_schema_version_not_blank", sql`length(btrim(${table.sourceSchemaVersion})) > 0`),
+  ],
+);
+
+/** COTIK payout rows join statements by provider payment ID and stay supplementary. */
+export const cotikSupplementaryPayments = pgTable(
+  "cotik_supplementary_payments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    shopId: uuid("shop_id")
+      .notNull()
+      .references(() => shops.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    providerPaymentId: text("provider_payment_id").notNull(),
+    providerShopId: text("provider_shop_id").notNull(),
+    paymentStatus: text("payment_status").notNull(),
+    currency: text("currency").notNull(),
+    amount: numeric("amount", { precision: 20, scale: 4 }).notNull(),
+    settlementAmount: numeric("settlement_amount", { precision: 20, scale: 4 }).notNull(),
+    reserveAmount: numeric("reserve_amount", { precision: 20, scale: 4 }).notNull(),
+    paymentAmountBeforeExchange: numeric("payment_amount_before_exchange", { precision: 20, scale: 4 }).notNull(),
+    createdAtProvider: timestamp("created_at_provider", { withTimezone: true }).notNull(),
+    paidAt: timestamp("paid_at", { withTimezone: true }).notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    sourceHash: text("source_hash").notNull(),
+    sourceSchemaVersion: text("source_schema_version").notNull(),
+    rawData: jsonb("raw_data").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("cotik_supplementary_payments_shop_provider_payment_unique").on(table.shopId, table.providerPaymentId),
+    index("cotik_supplementary_payments_shop_paid_at_idx").on(table.shopId, table.paidAt),
+    check("cotik_supplementary_payments_provider_payment_not_blank", sql`length(btrim(${table.providerPaymentId})) > 0`),
+    check("cotik_supplementary_payments_provider_shop_not_blank", sql`length(btrim(${table.providerShopId})) > 0`),
+    check("cotik_supplementary_payments_status_not_blank", sql`length(btrim(${table.paymentStatus})) > 0`),
+    check("cotik_supplementary_payments_currency_format", sql`${table.currency} ~ '^[A-Z]{3}$'`),
+    check("cotik_supplementary_payments_created_at_finite", sql`${table.createdAtProvider} not in ('infinity'::timestamptz, '-infinity'::timestamptz)`),
+    check("cotik_supplementary_payments_paid_at_finite", sql`${table.paidAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz)`),
+    check("cotik_supplementary_payments_observed_at_finite", sql`${table.observedAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz)`),
+    check("cotik_supplementary_payments_source_hash_sha256", sql`${table.sourceHash} ~ '^[0-9a-f]{64}$'`),
+    check("cotik_supplementary_payments_schema_version_not_blank", sql`length(btrim(${table.sourceSchemaVersion})) > 0`),
+  ],
+);
+
 export const financialSnapshots = pgTable(
   "financial_snapshots",
   {
@@ -1334,6 +1425,8 @@ export type ShopRow = typeof shops.$inferSelect;
 export type AdsPowerProfileRow = typeof adspowerProfiles.$inferSelect;
 export type OrderRow = typeof orders.$inferSelect;
 export type SettlementRecordRow = typeof settlementRecords.$inferSelect;
+export type CotikSupplementaryStatementRow = typeof cotikSupplementaryStatements.$inferSelect;
+export type CotikSupplementaryPaymentRow = typeof cotikSupplementaryPayments.$inferSelect;
 export type FinancialSnapshotRow = typeof financialSnapshots.$inferSelect;
 export type FinanceCaptureRow = typeof financeCaptures.$inferSelect;
 export type FinanceCaptureItemRow = typeof financeCaptureItems.$inferSelect;

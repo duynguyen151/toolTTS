@@ -25,6 +25,8 @@ export {
   refreshCheckpoints,
   refreshSettings,
   aiDecisions,
+  cotikSupplementaryPayments,
+  cotikSupplementaryStatements,
   adspowerProfileVerificationStateEnum,
   adspowerProfiles,
   baDecisionEnum,
@@ -60,6 +62,8 @@ export {
   syncRuns,
   syncRunStatusEnum,
   type AiDecisionRow,
+  type CotikSupplementaryPaymentRow,
+  type CotikSupplementaryStatementRow,
   type AiTaskConfigRow,
   type RefreshCheckpointAttemptRow,
   type RefreshCheckpointRunRow,
@@ -105,6 +109,14 @@ export {
   type RecordBaDecisionForCaseInput,
   type RecordDryRunExecutionInput,
 } from "./queries/decisions.js";
+export {
+  listCotikSupplementaryStatementsWithPayments,
+  upsertCotikSupplementaryPaymentBatch,
+  upsertCotikSupplementaryStatementBatch,
+  type CotikSupplementaryPaymentUpsertInput,
+  type CotikSupplementaryStatementUpsertInput,
+  type CotikSupplementaryStatementWithPayment,
+} from "./queries/cotik-supplementary-finance.js";
 export {
   buildDecisionFinanceSnapshot,
   finalizeFinanceSyncRun,

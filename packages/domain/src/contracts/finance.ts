@@ -80,3 +80,57 @@ export const NormalizedFinancialBatchSchema = z.object({
 export type NormalizedFinancialBatch = z.infer<
   typeof NormalizedFinancialBatchSchema
 >;
+
+/** Signed COTIK amounts are bounded to PostgreSQL numeric(20,4) without rounding. */
+export const CotikSignedDecimalAmountSchema = z
+  .string()
+  .regex(/^-?\d{1,16}(?:\.\d{1,4})?$/, "Expected a signed decimal amount with at most 4 fractional digits");
+
+/** COTIK statements are supplementary facts, never Official On Hold evidence. */
+export const CotikSupplementaryStatementSchema = z.strictObject({
+  shopId: z.string().min(1),
+  providerStatementId: z.string().min(1),
+  providerPaymentId: z.string().min(1).nullable(),
+  providerShopId: z.string().min(1),
+  statementAt: z.date(),
+  currency: CurrencyCodeSchema,
+  revenueAmount: CotikSignedDecimalAmountSchema,
+  feeAmount: CotikSignedDecimalAmountSchema,
+  adjustmentAmount: CotikSignedDecimalAmountSchema,
+  shippingCostAmount: CotikSignedDecimalAmountSchema,
+  netSalesAmount: CotikSignedDecimalAmountSchema,
+  settlementAmount: CotikSignedDecimalAmountSchema,
+  paymentStatus: z.string().min(1),
+  orderIds: z.array(z.string().min(1)),
+  observedAt: z.date(),
+  sourceHash: z.string().min(1),
+  sourceSchemaVersion: z.string().min(1),
+  rawData: JsonObjectSchema,
+  classification: z.literal("SUPPLEMENTARY_FINANCE"),
+  officialOnHoldCapabilityStatus: z.literal("OFFICIAL_ON_HOLD_UNPROVEN"),
+});
+
+export type CotikSupplementaryStatement = z.infer<typeof CotikSupplementaryStatementSchema>;
+
+/** COTIK payouts join supplementary statements by `providerPaymentId` only. */
+export const CotikSupplementaryPaymentSchema = z.strictObject({
+  shopId: z.string().min(1),
+  providerPaymentId: z.string().min(1),
+  providerShopId: z.string().min(1),
+  paymentStatus: z.string().min(1),
+  currency: CurrencyCodeSchema,
+  amount: CotikSignedDecimalAmountSchema,
+  settlementAmount: CotikSignedDecimalAmountSchema,
+  reserveAmount: CotikSignedDecimalAmountSchema,
+  paymentAmountBeforeExchange: CotikSignedDecimalAmountSchema,
+  createdAt: z.date(),
+  paidAt: z.date(),
+  observedAt: z.date(),
+  sourceHash: z.string().min(1),
+  sourceSchemaVersion: z.string().min(1),
+  rawData: JsonObjectSchema,
+  classification: z.literal("SUPPLEMENTARY_FINANCE"),
+  officialOnHoldCapabilityStatus: z.literal("OFFICIAL_ON_HOLD_UNPROVEN"),
+});
+
+export type CotikSupplementaryPayment = z.infer<typeof CotikSupplementaryPaymentSchema>;

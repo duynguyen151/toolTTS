@@ -7,6 +7,20 @@ export {
 } from "./client.js";
 
 export {
+  buildCotikPaymentListPath,
+  buildCotikStatementListPath,
+  COTIK_SUPPLEMENTARY_FINANCE_SCHEMA_VERSION,
+  CotikSupplementaryFinanceIngestionError,
+  ingestCotikSupplementaryFinance,
+  normalizeCotikPayment,
+  normalizeCotikStatement,
+  type CotikSupplementaryFinanceIngestionErrorCode,
+  type CotikSupplementaryFinanceIngestionInput,
+  type CotikSupplementaryFinanceIngestionResult,
+  type CotikSupplementaryFinancePathInput,
+} from "./supplementary-finance.js";
+
+export {
   buildCotikOrderListPath,
   COTIK_ORDERS_CHECKPOINT_SCHEMA_VERSION,
   CotikOrderIngestionError,

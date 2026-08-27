@@ -325,6 +325,14 @@ export async function runShopSync(input: RunSyncInput): Promise<SyncResult> {
   };
 }
 
+// --- W4-T01 appended exports (isolated hunk; do not merge with pre-existing WIP) ---
+export {
+  runCotikSupplementaryFinanceSync,
+  type CotikSupplementaryFinanceSyncResult,
+  type CotikSupplementaryFinanceSyncSkipReason,
+  type RunCotikSupplementaryFinanceSyncInput,
+} from "./cotik-supplementary-finance.js";
+
 // --- W2-T02 appended exports (isolated hunk; do not merge with pre-existing WIP) ---
 export {
   runCotikOrdersSync,

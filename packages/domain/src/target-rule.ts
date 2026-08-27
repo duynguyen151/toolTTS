@@ -146,6 +146,7 @@ export function evaluateOfficialOnHoldRule(
     officialOnHold.amount !== null &&
     capturedAt !== null &&
     officialOnHold.currency === policy.currency &&
+    health.provider === "SELLER_CENTER" &&
     health.capability === "OFFICIAL_ON_HOLD" &&
     health.officialOnHoldAvailability === "AVAILABLE" &&
     health.completeness === "COMPLETE" &&

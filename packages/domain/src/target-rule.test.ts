@@ -162,6 +162,27 @@ describe("Official On-Hold target Rule", () => {
     expect(result.decision).toBe("INSUFFICIENT_DATA");
   });
 
+  it("fails closed when an Official-OH capability is claimed by a non-Seller Center provider", () => {
+    const result = evaluateOfficialOnHoldRule(input({
+      officialOnHold: {
+        amount: "9999.0000",
+        currency: "USD",
+        capturedAt,
+        health: financeHealth({
+          provider: "COTIK",
+          capability: "OFFICIAL_ON_HOLD",
+          capabilityProofRevision: "contradictory-test-proof.v1",
+        }),
+      },
+    }));
+
+    expect(result.officialOnHold).toMatchObject({
+      state: "NOT_EVALUATED",
+      source: "COTIK",
+    });
+    expect(result.decision).toBe("INSUFFICIENT_DATA");
+  });
+
   it("does not accept analytical periods as Rule input", () => {
     expect(() => evaluateOfficialOnHoldRule({
       ...input(),

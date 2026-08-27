@@ -870,11 +870,11 @@ async function fetchJsonInPage(
 
 async function detectAccessState(page: Page, timeoutMs = 5_000): Promise<SourceHealth["status"]> {
   const url = page.url().toLowerCase();
-  if (/login|signin|passport/.test(url)) return "LOGIN_REQUIRED";
   if (/captcha|challenge|verification|verify/.test(url)) return "CHALLENGE_REQUIRED";
+  if (/login|signin|passport/.test(url)) return "LOGIN_REQUIRED";
   const body = (await page.locator("body").innerText({ timeout: Math.min(5_000, Math.max(1, timeoutMs)) }).catch(() => "")).slice(0, 20_000).toLowerCase();
-  if (/log in|sign in/.test(body) && /password|email|phone/.test(body)) return "LOGIN_REQUIRED";
   if (/captcha|security verification|verify (?:that )?you are human|unusual activity/.test(body)) return "CHALLENGE_REQUIRED";
+  if (/log in|sign in/.test(body) && /password|email|phone/.test(body)) return "LOGIN_REQUIRED";
   return url.startsWith(SELLER_ORIGIN) ? "HEALTHY" : "LAYOUT_CHANGED";
 }
 

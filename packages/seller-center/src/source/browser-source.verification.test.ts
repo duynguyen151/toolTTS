@@ -65,6 +65,19 @@ describe("SellerCenterBrowserDataSource.verifyProfile", () => {
     expect(page.gotoUrls).toEqual([financeRoute]);
   });
 
+  it("gives a Seller Center security challenge precedence over overlapping login signals", async () => {
+    const page = new FakeVerificationPage(
+      "https://seller-us.tiktok.com/home",
+      "https://seller-us.tiktok.com/login/challenge",
+      "Log in with email and password. Complete security verification.",
+    );
+    const source = sourceFor(page);
+
+    await expect(source.verifyProfile({ profileId: "profile-under-test" })).rejects.toMatchObject({
+      failureType: "CHALLENGE_REQUIRED",
+    } satisfies Partial<SellerCenterError>);
+  });
+
   it("classifies a canonical navigation proxy timeout without exposing proxy details", async () => {
     const page = new FakeVerificationPage("https://seller-us.tiktok.com/home", new Error(
       "net::ERR_PROXY_CONNECTION_TIMED_OUT at http://private-proxy.example:8080",

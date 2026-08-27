@@ -4,6 +4,7 @@ import {
   RefreshBusinessDateSchema,
   RefreshCheckpointAttemptRecordSchema,
   RefreshCheckpointRunRecordSchema,
+  ProxyPreflightResultSchema,
   RefreshRetryOffsetsSchema,
   calculateRetryAt,
   getBangkokBusinessDate,
@@ -52,6 +53,12 @@ const ReleaseClaimInputSchema = z.strictObject({
   claimToken: UuidSchema,
   now: FiniteDateSchema,
 });
+const RecordProxyPreflightInputSchema = z.strictObject({
+  runId: UuidSchema,
+  attemptId: UuidSchema,
+  claimToken: UuidSchema,
+  preflight: ProxyPreflightResultSchema,
+});
 const GetRunInputSchema = z.strictObject({
   shopId: UuidSchema,
   checkpointId: UuidSchema,
@@ -63,6 +70,7 @@ export type RecordRefreshAttemptStartedInput = z.input<typeof StartInputSchema>;
 export type CompleteRefreshAttemptInput = z.input<typeof CompleteInputSchema>;
 export type RenewRefreshAttemptLeaseInput = z.input<typeof RenewLeaseInputSchema>;
 export type ReleaseRefreshClaimInput = z.input<typeof ReleaseClaimInputSchema>;
+export type RecordRefreshAttemptProxyPreflightInput = z.input<typeof RecordProxyPreflightInputSchema>;
 export type GetRefreshCheckpointRunInput = z.input<typeof GetRunInputSchema>;
 
 function toRun(row: typeof refreshCheckpointRuns.$inferSelect): RefreshCheckpointRunRecord {
@@ -341,6 +349,23 @@ export async function recordRefreshAttemptStarted(
     if (!updated) throw new Error(`Refresh checkpoint run transition failed: ${durableRun.id}`);
     return toAttempt(attempt);
   });
+}
+
+/** Stores only a previously sanitized proxy preflight result on the currently owned attempt. */
+export async function recordRefreshAttemptProxyPreflight(
+  db: Database,
+  input: RecordRefreshAttemptProxyPreflightInput,
+): Promise<boolean> {
+  const parsed = RecordProxyPreflightInputSchema.parse(input);
+  const [updated] = await db.update(refreshCheckpointAttempts).set({
+    proxyPreflight: parsed.preflight,
+  }).where(and(
+    eq(refreshCheckpointAttempts.id, parsed.attemptId),
+    eq(refreshCheckpointAttempts.runId, parsed.runId),
+    eq(refreshCheckpointAttempts.claimToken, parsed.claimToken),
+    eq(refreshCheckpointAttempts.status, "RUNNING"),
+  )).returning({ id: refreshCheckpointAttempts.id });
+  return updated !== undefined;
 }
 
 /** Completes the claimed attempt atomically, scheduling the snapshotted next retry or terminal exhaustion. */

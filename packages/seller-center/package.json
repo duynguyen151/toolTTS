@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./adspower": "./src/adspower/client.ts",
+    "./proxy-preflight": "./src/adspower/proxy-preflight.ts",
     "./browser-source": "./src/source/browser-source.ts",
     "./errors": "./src/errors.ts"
   },

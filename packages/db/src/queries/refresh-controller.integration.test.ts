@@ -13,13 +13,15 @@ import {
   completeRefreshAttempt,
   getRefreshCheckpointRun,
   recordRefreshAttemptStarted,
+  recordRefreshAttemptProxyPreflight,
   renewRefreshAttemptLease,
 } from "./refresh-controller.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const describeWithDatabase = databaseUrl ? describe : describe.skip;
 const checkpointTime = "07:00";
-const nextCheckpointTime = "07:01";
+const preflightCheckpointTime = "07:02";
+const nextCheckpointTime = "07:03";
 const initialNow = new Date("2026-01-15T00:00:00.000Z");
 
 describeWithDatabase("refresh checkpoint controller PostgreSQL persistence", () => {
@@ -27,6 +29,7 @@ describeWithDatabase("refresh checkpoint controller PostgreSQL persistence", () 
   let firstShopId: string;
   let secondShopId: string;
   let checkpointId: string;
+  let preflightCheckpointId: string;
   let nextCheckpointId: string;
   let originalAutoRefreshEnabled: boolean;
   let originalRetryOffsetsSeconds: number[];
@@ -38,15 +41,17 @@ describeWithDatabase("refresh checkpoint controller PostgreSQL persistence", () 
     originalAutoRefreshEnabled = settings[0]?.autoRefreshEnabled ?? true;
     originalRetryOffsetsSeconds = settings[0]?.retryOffsetsSeconds ?? [0, 30, 120, 300, 600];
     const suffix = randomUUID();
-    const [firstShop, secondShop, checkpoint, nextCheckpoint] = await Promise.all([
+    const [firstShop, secondShop, checkpoint, preflightCheckpoint, nextCheckpoint] = await Promise.all([
       context.db.insert(shops).values({ profileId: `refresh-controller-${suffix}-1`, profileNo: `refresh-controller-${suffix}-1`, region: "US", locale: "en-US" }).returning({ id: shops.id }),
       context.db.insert(shops).values({ profileId: `refresh-controller-${suffix}-2`, profileNo: `refresh-controller-${suffix}-2`, region: "US", locale: "en-US" }).returning({ id: shops.id }),
       context.db.insert(refreshCheckpoints).values({ localTime: checkpointTime, enabled: true }).returning({ id: refreshCheckpoints.id }),
+      context.db.insert(refreshCheckpoints).values({ localTime: preflightCheckpointTime, enabled: true }).returning({ id: refreshCheckpoints.id }),
       context.db.insert(refreshCheckpoints).values({ localTime: nextCheckpointTime, enabled: true }).returning({ id: refreshCheckpoints.id }),
     ]);
     firstShopId = firstShop[0]!.id;
     secondShopId = secondShop[0]!.id;
     checkpointId = checkpoint[0]!.id;
+    preflightCheckpointId = preflightCheckpoint[0]!.id;
     nextCheckpointId = nextCheckpoint[0]!.id;
   });
 
@@ -62,6 +67,7 @@ describeWithDatabase("refresh checkpoint controller PostgreSQL persistence", () 
     await context.db.delete(refreshCheckpointRuns).where(eq(refreshCheckpointRuns.shopId, firstShopId));
     await context.db.delete(refreshCheckpointRuns).where(eq(refreshCheckpointRuns.shopId, secondShopId));
     await context.db.delete(refreshCheckpoints).where(eq(refreshCheckpoints.id, checkpointId));
+    await context.db.delete(refreshCheckpoints).where(eq(refreshCheckpoints.id, preflightCheckpointId));
     await context.db.delete(refreshCheckpoints).where(eq(refreshCheckpoints.id, nextCheckpointId));
     await context.db.delete(shops).where(eq(shops.id, firstShopId));
     await context.db.delete(shops).where(eq(shops.id, secondShopId));
@@ -116,6 +122,51 @@ describeWithDatabase("refresh checkpoint controller PostgreSQL persistence", () 
     const durable = await getRefreshCheckpointRun(context.db, { shopId: firstShopId, checkpointId, businessDate: "2026-01-17" });
     expect(durable.run).toMatchObject({ status: "RETRY_WAIT", retryOffsetsSeconds: [0, 30], nextAttemptAt: new Date("2026-01-17T00:00:30.000Z") });
     expect(durable.attempts).toMatchObject([{ attemptNumber: 1, status: "FAILED", nextAttemptAt: new Date("2026-01-17T00:00:30.000Z") }]);
+  });
+
+  it("persists only safe proxy preflight metadata on the owned running attempt", async () => {
+    const now = new Date("2026-01-18T00:00:00.000Z");
+    const claimed = await claimDueRefreshAttempts(context.db, { now, shops: [{ id: firstShopId }] });
+    const run = claimed.find((candidate) => candidate.checkpointId === preflightCheckpointId)!;
+    const attempt = await recordRefreshAttemptStarted(context.db, {
+      runId: run.id,
+      claimToken: run.claimToken!,
+      now,
+    });
+
+    await expect(recordRefreshAttemptProxyPreflight(context.db, {
+      runId: run.id,
+      attemptId: attempt.id,
+      claimToken: run.claimToken!,
+      preflight: {
+        status: "DEGRADED",
+        latencyMs: 1_001,
+        exitIp: "8.8.8.8",
+        reasonClass: "OBSERVED_SLOW",
+      },
+    })).resolves.toBe(true);
+
+    const durable = await getRefreshCheckpointRun(context.db, {
+      shopId: firstShopId,
+      checkpointId: preflightCheckpointId,
+      businessDate: "2026-01-18",
+    });
+    expect(durable.attempts).toMatchObject([{
+      id: attempt.id,
+      proxyPreflight: {
+        status: "DEGRADED",
+        latencyMs: 1_001,
+        exitIp: "8.8.8.8",
+        reasonClass: "OBSERVED_SLOW",
+      },
+    }]);
+    await completeRefreshAttempt(context.db, {
+      runId: run.id,
+      attemptId: attempt.id,
+      claimToken: run.claimToken!,
+      outcome: "SUCCESS",
+      now: new Date(now.getTime() + 1),
+    });
   });
 
   it("closes success and creates a distinct later-checkpoint reevaluation cycle", async () => {

@@ -30,6 +30,7 @@ import type {
   GlobalRiskPolicyRevision,
   ResolvedRiskPolicySnapshot,
   ShopRiskPolicyOverrideRevision,
+  ProxyPreflightResult,
   SourceCoverageProof,
   SourceProvenance
 } from "@shop-health/domain";
@@ -901,6 +902,7 @@ export const refreshCheckpointAttempts = pgTable(
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
     failureMessage: text("failure_message"),
+    proxyPreflight: jsonb("proxy_preflight").$type<ProxyPreflightResult>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -912,6 +914,17 @@ export const refreshCheckpointAttempts = pgTable(
       (${table.status} = 'RUNNING' and ${table.finishedAt} is null and ${table.nextAttemptAt} is null and ${table.failureMessage} is null)
       or (${table.status} = 'SUCCEEDED' and ${table.finishedAt} is not null and ${table.nextAttemptAt} is null and ${table.failureMessage} is null)
       or (${table.status} = 'FAILED' and ${table.finishedAt} is not null and ${table.failureMessage} is not null)
+    )`),
+    check("refresh_checkpoint_attempts_proxy_preflight_valid", sql`${table.proxyPreflight} is null or (
+      jsonb_typeof(${table.proxyPreflight}) = 'object'
+      and (${table.proxyPreflight} ?& array['status', 'latencyMs', 'exitIp', 'reasonClass'])
+      and (${table.proxyPreflight} - array['status', 'latencyMs', 'exitIp', 'reasonClass']) = '{}'::jsonb
+      and (${table.proxyPreflight}->>'status') in ('HEALTHY', 'DEGRADED', 'UNAVAILABLE', 'UNKNOWN')
+      and jsonb_typeof(${table.proxyPreflight}->'latencyMs') = 'number'
+      and (${table.proxyPreflight}->>'latencyMs')::numeric between 0 and 10000
+      and mod((${table.proxyPreflight}->>'latencyMs')::numeric, 1) = 0
+      and jsonb_typeof(${table.proxyPreflight}->'exitIp') in ('string', 'null')
+      and (${table.proxyPreflight}->>'reasonClass') in ('OBSERVED_HEALTHY', 'OBSERVED_SLOW', 'OBSERVED_UNAVAILABLE', 'OBSERVATION_UNAVAILABLE', 'AUTH_REJECTED', 'HTTP_REJECTED', 'REQUEST_TIMEOUT', 'NETWORK_UNAVAILABLE')
     )`),
     check("refresh_checkpoint_attempts_timestamps_finite", sql`${table.startedAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz) and ${table.createdAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz) and (${table.finishedAt} is null or ${table.finishedAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz)) and (${table.nextAttemptAt} is null or ${table.nextAttemptAt} not in ('infinity'::timestamptz, '-infinity'::timestamptz))`),
   ],

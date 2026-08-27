@@ -6,6 +6,7 @@ import {
   completeRefreshAttempt,
   getRefreshCheckpointRun,
   recordRefreshAttemptStarted,
+  recordRefreshAttemptProxyPreflight,
 } from "./refresh-controller.js";
 
 const shopId = "00000000-0000-4000-8000-000000000001";
@@ -41,5 +42,16 @@ describe("refresh controller repository input validation", () => {
       now: new Date("2026-01-15T01:00:00.000Z"),
     })).rejects.toThrow();
     await expect(getRefreshCheckpointRun(unusedDb, { shopId, checkpointId, businessDate: "2026-1-15" })).rejects.toThrow();
+    await expect(recordRefreshAttemptProxyPreflight(unusedDb, {
+      runId,
+      attemptId,
+      claimToken: "00000000-0000-4000-8000-000000000010",
+      preflight: {
+        status: "UNAVAILABLE",
+        latencyMs: 1,
+        exitIp: "private.proxy.example",
+        reasonClass: "NETWORK_UNAVAILABLE",
+      },
+    })).rejects.toThrow();
   });
 });

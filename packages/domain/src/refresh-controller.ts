@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { ProxyPreflightResultSchema, type ProxyPreflightResult } from "./proxy-preflight.js";
+
 export const REFRESH_CONTROLLER_TIME_ZONE = "Asia/Bangkok" as const;
 export const RefreshBusinessDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
   const [year, month, day] = value.split("-").map(Number);
@@ -19,6 +21,7 @@ export const RefreshCheckpointRunStatusSchema = z.enum([
   "SUCCEEDED",
   "FAILED_EXHAUSTED",
 ]);
+
 const FiniteDateSchema = z.date().refine((value) => Number.isFinite(value.getTime()), "date must be finite");
 const NullableFiniteDateSchema = FiniteDateSchema.nullable();
 
@@ -57,6 +60,7 @@ export const RefreshCheckpointAttemptRecordSchema = z.strictObject({
   finishedAt: NullableFiniteDateSchema,
   nextAttemptAt: NullableFiniteDateSchema,
   failureMessage: z.string().nullable(),
+  proxyPreflight: ProxyPreflightResultSchema.nullable(),
   createdAt: FiniteDateSchema,
 });
 export const RefreshAttemptTransitionSchema = z.discriminatedUnion("type", [
@@ -69,6 +73,7 @@ export type RefreshCheckpointSchedule = z.output<typeof RefreshCheckpointSchedul
 export type RefreshCheckpointRunState = z.output<typeof RefreshCheckpointRunStateSchema>;
 export type RefreshCheckpointRunRecord = z.output<typeof RefreshCheckpointRunRecordSchema>;
 export type RefreshCheckpointAttemptRecord = z.output<typeof RefreshCheckpointAttemptRecordSchema>;
+export type RefreshAttemptProxyPreflight = ProxyPreflightResult;
 export type RefreshAttemptTransition = z.output<typeof RefreshAttemptTransitionSchema>;
 
 const BANGKOK_OFFSET_MS = 7 * 60 * 60 * 1_000;

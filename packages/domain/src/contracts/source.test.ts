@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { NormalizedOrderBatchSchema, ProviderNormalizedOrderBatchSchema } from "./orders.js";
 import {
   ProviderSourceCoverageProofSchema,
+  CredentialCapabilitySchema,
   SourceCoverageProofSchema,
   SourceProvenanceSchema,
   type ReadProviderDataSource,
@@ -115,6 +116,25 @@ describe("SourceProvenanceSchema", () => {
     });
 
     expect(result.success).toBe(true);
+  });
+});
+
+describe("CredentialCapabilitySchema", () => {
+  it("allows only opaque server-side AdsPower autofill references", () => {
+    expect(CredentialCapabilitySchema.parse({
+      status: "AVAILABLE",
+      mechanism: "ADSPOWER_AUTOFILL",
+      reference: "SELLER_CENTER_AUTOFILL",
+    })).toEqual({
+      status: "AVAILABLE",
+      mechanism: "ADSPOWER_AUTOFILL",
+      reference: "SELLER_CENTER_AUTOFILL",
+    });
+    expect(CredentialCapabilitySchema.safeParse({
+      status: "AVAILABLE",
+      mechanism: "ADSPOWER_AUTOFILL",
+      reference: "password",
+    }).success).toBe(false);
   });
 });
 

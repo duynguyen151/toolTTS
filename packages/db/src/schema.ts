@@ -74,6 +74,8 @@ export const shopEligibilityStatusEnum = pgEnum("shop_eligibility_status", [
 export const adspowerProfileVerificationStateEnum = pgEnum("adspower_profile_verification_state", [
   "UNVERIFIED",
   "LOGIN_REQUIRED",
+  "CREDENTIALS_REQUIRED",
+  "AUTH_FAILED",
   "HUMAN_ACTION_REQUIRED",
   "NOT_TIKTOK_SELLER",
   "UNSUPPORTED_REGION",

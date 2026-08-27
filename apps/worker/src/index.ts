@@ -34,7 +34,11 @@ const logger = pino({
   }
 });
 const context = createDatabase(config.DATABASE_URL);
-const sourceOptions = { baseUrl: config.ADSPOWER_BASE_URL, logger };
+const sourceOptions = {
+  baseUrl: config.ADSPOWER_BASE_URL,
+  logger,
+  ...(config.ADSPOWER_AUTOFILL_REFERENCE === undefined ? {} : { credentialReference: config.ADSPOWER_AUTOFILL_REFERENCE }),
+};
 const source = createSellerCenterDataSource(config.ADSPOWER_API_KEY === undefined
   ? sourceOptions
   : { ...sourceOptions, apiKey: config.ADSPOWER_API_KEY });

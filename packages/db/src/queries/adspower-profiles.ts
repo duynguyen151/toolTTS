@@ -19,6 +19,8 @@ const verificationInputSchema = z.object({
   verificationState: z.enum([
     "UNVERIFIED",
     "LOGIN_REQUIRED",
+    "CREDENTIALS_REQUIRED",
+    "AUTH_FAILED",
     "HUMAN_ACTION_REQUIRED",
     "NOT_TIKTOK_SELLER",
     "UNSUPPORTED_REGION",

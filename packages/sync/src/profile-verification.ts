@@ -16,14 +16,27 @@ import { SellerCenterError } from "@shop-health/seller-center";
 
 export interface ProfileVerificationResult {
   readonly profileNo: string;
-  readonly verificationState: "READY" | "LOGIN_REQUIRED" | "HUMAN_ACTION_REQUIRED" | "SHOP_SELECTION_REQUIRED" | "SHOP_IDENTITY_CHANGED" | "NOT_TIKTOK_SELLER" | "UNSUPPORTED_REGION";
+  readonly verificationState: "READY" | "LOGIN_REQUIRED" | "CREDENTIALS_REQUIRED" | "AUTH_FAILED" | "HUMAN_ACTION_REQUIRED" | "SHOP_SELECTION_REQUIRED" | "SHOP_IDENTITY_CHANGED" | "NOT_TIKTOK_SELLER" | "UNSUPPORTED_REGION";
   readonly shop: ShopRow | null;
+}
+
+function verificationStateForFailure(
+  failureType: SellerCenterError["failureType"],
+  credentialStatus: "AVAILABLE" | "MISSING" | undefined,
+): ProfileVerificationResult["verificationState"] | undefined {
+  if (failureType === "CHALLENGE_REQUIRED") return "HUMAN_ACTION_REQUIRED";
+  if (failureType === "AUTH_FAILED") return "AUTH_FAILED";
+  if (failureType === "LOGIN_REQUIRED") {
+    return credentialStatus === "MISSING" ? "CREDENTIALS_REQUIRED" : "LOGIN_REQUIRED";
+  }
+  return undefined;
 }
 
 export async function verifySelectedProfile(
   db: Database,
   profile: AdsPowerProfileSummary,
-  source: Pick<SellerCenterBrowserDataSource, "verifyProfile">,
+  source: Pick<SellerCenterBrowserDataSource, "verifyProfile"> &
+    Partial<Pick<SellerCenterBrowserDataSource, "credentialCapability">>,
 ): Promise<ProfileVerificationResult> {
   const persisted = await getAdsPowerProfile(db, profile.profileId)
     ?? await createAdsPowerProfile(db, { profileId: profile.profileId, profileNo: profile.profileNo });
@@ -36,11 +49,10 @@ export async function verifySelectedProfile(
     identity = await source.verifyProfile({ profileId: profile.profileId });
   } catch (error) {
     if (!(error instanceof SellerCenterError)) throw error;
-    const verificationState = error.failureType === "LOGIN_REQUIRED"
-      ? "LOGIN_REQUIRED"
-      : error.failureType === "CHALLENGE_REQUIRED"
-        ? "HUMAN_ACTION_REQUIRED"
-        : undefined;
+    const credentialCapability = error.failureType === "LOGIN_REQUIRED"
+      ? await source.credentialCapability?.()
+      : undefined;
+    const verificationState = verificationStateForFailure(error.failureType, credentialCapability?.status);
     if (verificationState === undefined) throw error;
     await setAdsPowerProfileVerification(db, persisted.id, {
       verificationState,

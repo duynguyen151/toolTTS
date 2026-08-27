@@ -210,6 +210,38 @@ describe("SellerCenterBrowserDataSource.verifyProfile", () => {
     });
     expect(openReady).toHaveBeenCalledWith("profile-under-test");
   });
+
+  it("exposes only an opaque configured AdsPower autofill reference", async () => {
+    const source = new SellerCenterBrowserDataSource({
+      credentialReference: "ADSPOWER_PROFILE_AUTOFILL",
+    });
+
+    await expect(source.credentialCapability()).resolves.toEqual({
+      status: "AVAILABLE",
+      mechanism: "ADSPOWER_AUTOFILL",
+      reference: "ADSPOWER_PROFILE_AUTOFILL",
+    });
+  });
+
+  it("reports missing capability when no AdsPower autofill reference is configured", async () => {
+    const source = new SellerCenterBrowserDataSource();
+
+    await expect(source.credentialCapability()).resolves.toEqual({
+      status: "MISSING",
+      mechanism: null,
+      reference: null,
+    });
+  });
+
+  it("fails closed for a malformed credential reference without returning the value", async () => {
+    const source = new SellerCenterBrowserDataSource({ credentialReference: "password-secret" });
+
+    await expect(source.credentialCapability()).resolves.toEqual({
+      status: "MISSING",
+      mechanism: null,
+      reference: null,
+    });
+  });
 });
 
 class FakeVerificationPage {

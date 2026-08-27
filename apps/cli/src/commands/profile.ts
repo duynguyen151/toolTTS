@@ -30,6 +30,7 @@ function source(runtime: CliRuntime): SellerCenterBrowserDataSource {
   return new SellerCenterBrowserDataSource({
     baseUrl: runtime.config.ADSPOWER_BASE_URL,
     logger: runtime.logger,
+    ...(runtime.config.ADSPOWER_AUTOFILL_REFERENCE === undefined ? {} : { credentialReference: runtime.config.ADSPOWER_AUTOFILL_REFERENCE }),
     ...(runtime.config.ADSPOWER_API_KEY === undefined ? {} : { apiKey: runtime.config.ADSPOWER_API_KEY }),
   });
 }

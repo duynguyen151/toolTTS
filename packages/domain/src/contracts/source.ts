@@ -30,6 +30,22 @@ export const SourceHealthSchema = z.object({
 
 export type SourceHealth = z.infer<typeof SourceHealthSchema>;
 
+export const CredentialCapabilitySchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("AVAILABLE"),
+    mechanism: z.literal("ADSPOWER_AUTOFILL"),
+    reference: z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/),
+  }),
+  z.object({
+    status: z.literal("MISSING"),
+    mechanism: z.null(),
+    reference: z.null(),
+  }),
+]);
+
+/** Server-only capability metadata; it never contains credential values. */
+export type CredentialCapability = z.infer<typeof CredentialCapabilitySchema>;
+
 export const SourceFingerprintSchema = z.object({
   value: z.string().min(1),
   capturedAt: z.date(),
@@ -115,6 +131,7 @@ export interface ReadProviderDataSource {
  * `collectFinancials()` retains its existing Official On-Hold meaning.
  */
 export interface SellerDataSource extends ReadProviderDataSource {
+  credentialCapability?(): Promise<CredentialCapability>;
   collectFinancials(
     request: SyncRequest,
   ): AsyncIterable<NormalizedFinancialBatch>;

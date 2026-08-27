@@ -1,0 +1,2 @@
+ALTER TYPE "public"."adspower_profile_verification_state" ADD VALUE 'CREDENTIALS_REQUIRED' BEFORE 'HUMAN_ACTION_REQUIRED';--> statement-breakpoint
+ALTER TYPE "public"."adspower_profile_verification_state" ADD VALUE 'AUTH_FAILED' BEFORE 'HUMAN_ACTION_REQUIRED';

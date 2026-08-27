@@ -281,6 +281,13 @@
       "when": 1787804982961,
       "tag": "0039_cotik_supplementary_finance",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1787825827512,
+      "tag": "0040_parallel_ironclad",
+      "breakpoints": true
     }
   ]
 }

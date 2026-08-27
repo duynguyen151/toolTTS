@@ -34,12 +34,16 @@ describe("verifySelectedProfile", () => {
       profileId: "profile-202",
       profileNo: "202",
       groupName: null,
+      tags: [],
       state: "CLOSED",
     }, {
       verifyProfile: vi.fn().mockResolvedValue({ status: "IDENTIFIED", tiktokShopId: "shop-after" }),
     } as never);
 
     expect(result).toEqual({ profileNo: "202", verificationState: "SHOP_IDENTITY_CHANGED", shop: null });
+    expect(db.setAdsPowerProfileObservedStatus).toHaveBeenCalledWith({}, "persisted-profile", expect.objectContaining({
+      observedStatus: null,
+    }));
     expect(db.setAdsPowerProfileVerification).toHaveBeenCalledWith({}, "persisted-profile", expect.objectContaining({
       verificationState: "SHOP_IDENTITY_CHANGED",
       activeShopId: null,
@@ -74,6 +78,7 @@ describe("verifySelectedProfile", () => {
       profileId: "profile-957",
       profileNo: "957",
       groupName: null,
+      tags: [],
       state: "OPEN",
     }, {
       verifyProfile: vi.fn().mockRejectedValue(new SellerCenterError(
@@ -83,6 +88,86 @@ describe("verifySelectedProfile", () => {
     } as never)).rejects.toMatchObject({ failureType: "BROWSER_DISCONNECTED" });
 
     expect(db.setAdsPowerProfileVerification).not.toHaveBeenCalled();
+  });
+
+  it("reports credentials required when login is needed and safe autofill is unavailable", async () => {
+    db.getAdsPowerProfile.mockResolvedValue({ id: "persisted-profile", verifiedTiktokShopId: null });
+    db.setAdsPowerProfileVerification.mockResolvedValue({ id: "persisted-profile" });
+
+    const result = await verifySelectedProfile({} as never, {
+      profileId: "profile-957",
+      profileNo: "957",
+      groupName: null,
+      tags: [],
+      state: "OPEN",
+    }, {
+      verifyProfile: vi.fn().mockRejectedValue(new SellerCenterError("LOGIN_REQUIRED", "Seller Center login is required")),
+      credentialCapability: vi.fn().mockResolvedValue({ status: "MISSING", mechanism: null, reference: null }),
+    } as never);
+
+    expect(result).toEqual({ profileNo: "957", verificationState: "CREDENTIALS_REQUIRED", shop: null });
+    expect(db.setAdsPowerProfileVerification).toHaveBeenCalledWith({}, "persisted-profile", expect.objectContaining({
+      verificationState: "CREDENTIALS_REQUIRED",
+      activeShopId: null,
+    }));
+  });
+
+  it("keeps legacy sources without a credential capability on the login-required state", async () => {
+    db.getAdsPowerProfile.mockResolvedValue({ id: "persisted-profile", verifiedTiktokShopId: null });
+    db.setAdsPowerProfileVerification.mockResolvedValue({ id: "persisted-profile" });
+
+    const result = await verifySelectedProfile({} as never, {
+      profileId: "profile-957",
+      profileNo: "957",
+      groupName: null,
+      tags: [],
+      state: "OPEN",
+    }, {
+      verifyProfile: vi.fn().mockRejectedValue(new SellerCenterError("LOGIN_REQUIRED", "Seller Center login is required")),
+    } as never);
+
+    expect(result).toEqual({ profileNo: "957", verificationState: "LOGIN_REQUIRED", shop: null });
+  });
+
+  it("keeps a Seller Center challenge actionable without consulting credential capability", async () => {
+    db.getAdsPowerProfile.mockResolvedValue({ id: "persisted-profile", verifiedTiktokShopId: null });
+    db.setAdsPowerProfileVerification.mockResolvedValue({ id: "persisted-profile" });
+    const credentialCapability = vi.fn().mockResolvedValue({
+      status: "AVAILABLE",
+      mechanism: "ADSPOWER_AUTOFILL",
+      reference: "SELLER_CENTER_AUTOFILL",
+    });
+
+    const result = await verifySelectedProfile({} as never, {
+      profileId: "profile-957",
+      profileNo: "957",
+      groupName: null,
+      tags: [],
+      state: "OPEN",
+    }, {
+      verifyProfile: vi.fn().mockRejectedValue(new SellerCenterError("CHALLENGE_REQUIRED", "Seller Center challenge requires manual action")),
+      credentialCapability,
+    } as never);
+
+    expect(result).toEqual({ profileNo: "957", verificationState: "HUMAN_ACTION_REQUIRED", shop: null });
+    expect(credentialCapability).not.toHaveBeenCalled();
+  });
+
+  it("persists an explicit normal-login failure as auth failed", async () => {
+    db.getAdsPowerProfile.mockResolvedValue({ id: "persisted-profile", verifiedTiktokShopId: null });
+    db.setAdsPowerProfileVerification.mockResolvedValue({ id: "persisted-profile" });
+
+    const result = await verifySelectedProfile({} as never, {
+      profileId: "profile-957",
+      profileNo: "957",
+      groupName: null,
+      tags: [],
+      state: "OPEN",
+    }, {
+      verifyProfile: vi.fn().mockRejectedValue(new SellerCenterError("AUTH_FAILED" as never, "Seller Center login failed")),
+    } as never);
+
+    expect(result).toEqual({ profileNo: "957", verificationState: "AUTH_FAILED", shop: null });
   });
 
   it("fails closed when a profile-linked shop has no stored canonical identity", async () => {
@@ -100,6 +185,7 @@ describe("verifySelectedProfile", () => {
       profileId: "profile-957",
       profileNo: "957",
       groupName: null,
+      tags: [],
       state: "OPEN",
     }, {
       verifyProfile: vi.fn().mockResolvedValue({ status: "IDENTIFIED", tiktokShopId: "seller-957" }),

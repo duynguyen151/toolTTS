@@ -105,7 +105,8 @@ function registerLiveSync(
         if (shop === null) throw new CliError({ failureType: "SHOP_NOT_FOUND", message: `Shop profile ${profileNo} is not configured` });
         const sourceOptions = {
           baseUrl: runtime.config.ADSPOWER_BASE_URL,
-          logger: runtime.logger
+          logger: runtime.logger,
+          ...(runtime.config.ADSPOWER_AUTOFILL_REFERENCE === undefined ? {} : { credentialReference: runtime.config.ADSPOWER_AUTOFILL_REFERENCE }),
         };
         const source = createSellerCenterDataSource(runtime.config.ADSPOWER_API_KEY === undefined
           ? sourceOptions

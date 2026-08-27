@@ -132,9 +132,16 @@ function syncMode(kind: SyncKind, mode: SyncRequest["mode"]): SyncMode {
 }
 
 function pauseState(error: SellerCenterError): "PAUSED_LOGIN" | "PAUSED_CHALLENGE" | "PAUSED_LAYOUT" | null {
-  if (error.failureType === "LOGIN_REQUIRED") return "PAUSED_LOGIN";
+  if (error.failureType === "LOGIN_REQUIRED" || error.failureType === "AUTH_FAILED") return "PAUSED_LOGIN";
   if (error.failureType === "CHALLENGE_REQUIRED") return "PAUSED_CHALLENGE";
-  if (error.failureType === "LAYOUT_CHANGED") return "PAUSED_LAYOUT";
+  if (
+    error.failureType === "LAYOUT_CHANGED"
+    || error.failureType === "ROUTE_CHANGED"
+    || error.failureType === "ENDPOINT_NOT_OBSERVED"
+    || error.failureType === "API_SCHEMA_CHANGED"
+    || error.failureType === "API_REJECTED"
+    || error.failureType === "INCOMPLETE_RESPONSE"
+  ) return "PAUSED_LAYOUT";
   return null;
 }
 

@@ -641,6 +641,8 @@ export const kpiSnapshots = pgTable(
     shopId: uuid("shop_id")
       .notNull()
       .references(() => shops.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    profileId: text("profile_id"),
+    profileNo: text("profile_no"),
     window: text("window").notNull(),
     periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
     periodEnd: timestamp("period_end", { withTimezone: true }).notNull(),
@@ -648,6 +650,8 @@ export const kpiSnapshots = pgTable(
     metricsHash: text("metrics_hash").notNull(),
     metrics: jsonb("metrics").$type<Record<string, unknown>>().notNull(),
     trends: jsonb("trends").$type<Record<string, unknown>>().notNull(),
+    providerProvenance: jsonb("provider_provenance").$type<Record<string, unknown>>(),
+    policyProvenance: jsonb("policy_provenance").$type<Record<string, unknown>>(),
     score: integer("score"),
     confidence: numeric("confidence", { precision: 7, scale: 6 }),
     recommendation: recommendationEnum("recommendation"),
@@ -663,6 +667,7 @@ export const kpiSnapshots = pgTable(
       table.metricsHash
     ),
     index("kpi_snapshots_shop_calculated_idx").on(table.shopId, table.calculatedAt),
+    index("kpi_snapshots_profile_calculated_idx").on(table.profileNo, table.calculatedAt),
     check("kpi_snapshots_period_valid", sql`${table.periodStart} < ${table.periodEnd}`),
     check("kpi_snapshots_score_range", sql`${table.score} is null or (${table.score} >= 0 and ${table.score} <= 100)`),
     check("kpi_snapshots_confidence_range", sql`${table.confidence} is null or (${table.confidence} >= 0 and ${table.confidence} <= 1)`)

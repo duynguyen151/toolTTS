@@ -7,7 +7,15 @@ import type {
 } from "@shop-health/domain";
 
 import type { Database } from "../client.js";
-import type { FinancialSnapshotRow, OrderRow, SettlementRecordRow } from "../schema.js";
+import {
+  financialSnapshots,
+  orders,
+  settlementRecords,
+  type FinancialSnapshotRow,
+  type OrderRow,
+  type SettlementRecordRow,
+} from "../schema.js";
+import { eq } from "drizzle-orm";
 import { getLatestFinancialSnapshot, listSettlementsForMetrics } from "./finance.js";
 import { listOrdersForMetrics } from "./orders.js";
 
@@ -33,6 +41,26 @@ export async function getMetricsSourceRows(
     orders: orderRows,
     settlements: settlementRows,
     financialSnapshots: financialSnapshot ? [financialSnapshot] : []
+  };
+}
+
+/**
+ * Historical analytics own their exact persisted source range. The compact
+ * rows exclude raw provider payloads when the history snapshot is built.
+ */
+export async function getObjectiveMetricsSourceRows(
+  db: Database,
+  shopId: string,
+): Promise<MetricsSourceRows> {
+  const [orderRows, settlementRows, financialSnapshot] = await Promise.all([
+    db.select().from(orders).where(eq(orders.shopId, shopId)).orderBy(orders.paidAt),
+    db.select().from(settlementRecords).where(eq(settlementRecords.shopId, shopId)).orderBy(settlementRecords.placedAt),
+    getLatestFinancialSnapshot(db, shopId),
+  ]);
+  return {
+    orders: orderRows,
+    settlements: settlementRows,
+    financialSnapshots: financialSnapshot ? [financialSnapshot] : [],
   };
 }
 

@@ -139,10 +139,12 @@ export {
 export {
   getLatestKpiSnapshot,
   insertKpiSnapshot,
+  listKpiSnapshots,
   type KpiSnapshotInput
 } from "./queries/kpi.js";
 export {
   getMetricsInput,
+  getObjectiveMetricsSourceRows,
   getMetricsSourceRows,
   type MetricsSourceRows
 } from "./queries/metrics-input.js";

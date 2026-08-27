@@ -1,6 +1,7 @@
 import type { ProxyPreflightResult, RefreshCheckpointRunRecord } from "@shop-health/domain";
 
 export const REFRESH_ATTEMPT_HEARTBEAT_MS = 30_000;
+export const PREFLIGHT_FAILURE_MESSAGE = "Proxy preflight failed before refresh";
 
 export interface RefreshAttemptRepository {
   readonly recordRefreshAttemptStarted: (input: {
@@ -72,29 +73,37 @@ export async function executeClaimedRefreshAttempts<TShop extends { readonly id:
           now: new Date(),
         });
       }, REFRESH_ATTEMPT_HEARTBEAT_MS);
-      let outcome: "SUCCESS" | "FAILURE";
+      let outcome: "SUCCESS" | "FAILURE" = "FAILURE";
       let failureMessage: string | undefined;
       try {
-        await input.repository.renewRefreshAttemptLease({
-          runId: run.id,
-          attemptId: attempt.id,
-          claimToken,
-          now: new Date(),
-        });
-        const preflight = await input.preflight(shop);
-        const recorded = await input.repository.recordRefreshAttemptProxyPreflight({
-          runId: run.id,
-          attemptId: attempt.id,
-          claimToken,
-          preflight,
-        });
-        if (!recorded) throw new Error("Proxy preflight result was not recorded for the owned attempt");
-        if (preflight.status === "UNKNOWN" || preflight.status === "UNAVAILABLE") {
+        let preflight: ProxyPreflightResult | undefined;
+        try {
+          await input.repository.renewRefreshAttemptLease({
+            runId: run.id,
+            attemptId: attempt.id,
+            claimToken,
+            now: new Date(),
+          });
+          preflight = await input.preflight(shop);
+          const recorded = await input.repository.recordRefreshAttemptProxyPreflight({
+            runId: run.id,
+            attemptId: attempt.id,
+            claimToken,
+            preflight,
+          });
+          if (!recorded) throw new Error("Proxy preflight result was not recorded for the owned attempt");
+        } catch {
           outcome = "FAILURE";
-          failureMessage = `Proxy preflight ${preflight.status}`;
-        } else {
-          outcome = (await input.execute(shop)) ? "SUCCESS" : "FAILURE";
-          if (outcome === "FAILURE") failureMessage = "Refresh execution returned unsuccessful";
+          failureMessage = PREFLIGHT_FAILURE_MESSAGE;
+        }
+        if (preflight !== undefined && failureMessage === undefined) {
+          if (preflight.status === "UNKNOWN" || preflight.status === "UNAVAILABLE") {
+            outcome = "FAILURE";
+            failureMessage = `Proxy preflight ${preflight.status}`;
+          } else {
+            outcome = (await input.execute(shop)) ? "SUCCESS" : "FAILURE";
+            if (outcome === "FAILURE") failureMessage = "Refresh execution returned unsuccessful";
+          }
         }
       } catch (error) {
         outcome = "FAILURE";

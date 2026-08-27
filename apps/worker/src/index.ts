@@ -23,6 +23,7 @@ import pino from "pino";
 import { loadWorkerConfig } from "./config.js";
 import { executeClaimedRefreshAttempts } from "./refresh-controller-loop.js";
 import { selectAutomaticOrdersShops } from "./automatic-shop-selector.js";
+import { runAutomaticOrdersWithPreflight } from "./automatic-orders-preflight.js";
 
 const config = loadWorkerConfig();
 const logger = pino({
@@ -106,7 +107,14 @@ async function workerLoop(): Promise<void> {
       const nowMs = now.getTime();
       for (const shop of automaticOrdersShops) {
         if (stopping) break;
-        if (isDue(shop, "orders", nowMs)) await syncShop(shop, "orders");
+        if (isDue(shop, "orders", nowMs)) {
+          await runAutomaticOrdersWithPreflight({
+            shop,
+            proxyPreflight,
+            execute: (eligibleShop) => syncShop(eligibleShop, "orders"),
+            logBlocked: (event, message) => logger.warn(event, message),
+          });
+        }
       }
       if (!stopping) await runClaimedRefreshAttempts(automaticRefreshShops, now);
     } catch (error) {

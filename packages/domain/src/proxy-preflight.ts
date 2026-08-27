@@ -26,21 +26,29 @@ export const ProxyPreflightReasonClassSchema = z.enum([
 // public IPv6 parser only when a documented server-side endpoint supplies it.
 const PublicIpv4Schema = z.string().regex(/^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/)
   .refine((value) => {
-    const octets = value.split(".").map(Number);
-    const [first, second, third] = octets;
-    return first !== undefined
-      && second !== undefined
-      && third !== undefined
-      && first !== 0
-      && first !== 10
-      && first !== 127
-      && first < 224
-      && !(first === 100 && second >= 64 && second <= 127)
-      && !(first === 169 && second === 254)
-      && !(first === 172 && second >= 16 && second <= 31)
-      && !(first === 192 && (second === 0 || second === 168 || (second === 88 && third === 99)))
-      && !(first === 198 && (second === 18 || second === 19 || second === 51))
-      && !(first === 203 && second === 0);
+    const [first, second, third, fourth] = value.split(".").map(Number);
+    const address = ((first ?? 0) * 256 ** 3) + ((second ?? 0) * 256 ** 2) + ((third ?? 0) * 256) + (fourth ?? 0);
+    const inRange = (start: number, end: number) => address >= start && address <= end;
+    return !inRange(0x00000000, 0x00ffffff)
+      && !inRange(0x0a000000, 0x0affffff)
+      && !inRange(0x64400000, 0x647fffff)
+      && !inRange(0x7f000000, 0x7fffffff)
+      && !inRange(0xa9fe0000, 0xa9feffff)
+      && !inRange(0xac100000, 0xac1fffff)
+      && !inRange(0xc0000000, 0xc00000ff)
+      && !inRange(0xc0000200, 0xc00002ff)
+      && !inRange(0xc01fc400, 0xc01fc4ff)
+      && !inRange(0xc0336400, 0xc03364ff)
+      && !inRange(0xc034c100, 0xc034c1ff)
+      && !inRange(0xc05b0000, 0xc05b00ff)
+      && !inRange(0xc0586300, 0xc05863ff)
+      && !inRange(0xc0702400, 0xc07024ff)
+      && !inRange(0xc0a80000, 0xc0a8ffff)
+      && !inRange(0xc0af3000, 0xc0af30ff)
+      && !inRange(0xc6120000, 0xc613ffff)
+      && !inRange(0xc6336400, 0xc63364ff)
+      && !inRange(0xcb007100, 0xcb0071ff)
+      && !inRange(0xe0000000, 0xffffffff);
   }, "exitIp must be a public IPv4 address");
 
 export const ProxyPreflightResultSchema = z.strictObject({

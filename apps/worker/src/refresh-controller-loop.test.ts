@@ -161,6 +161,42 @@ describe("executeClaimedRefreshAttempts", () => {
     }));
   });
 
+  it.each(["lease", "preflight", "persistence"] as const)("sanitizes %s failure before attempt completion", async (phase) => {
+    const secret = "http://private.proxy/?token=secret";
+    const repository = {
+      recordRefreshAttemptStarted: vi.fn(async () => ({ id: "attempt-1" })),
+      recordRefreshAttemptProxyPreflight: vi.fn(async () => {
+        if (phase === "persistence") throw new Error(secret);
+        return true;
+      }),
+      renewRefreshAttemptLease: vi.fn(async () => {
+        if (phase === "lease") throw new Error(secret);
+        return true;
+      }),
+      releaseRefreshClaim: vi.fn(async () => true),
+      completeRefreshAttempt: vi.fn(async () => ({})),
+    };
+
+    await executeClaimedRefreshAttempts({
+      runs: [{ id: "run-1", shopId: "shop-1", claimToken: "token-1" }],
+      shops: [{ id: "shop-1", profileId: "profile-1" }],
+      now: new Date("2026-01-15T01:00:00.000Z"),
+      repository,
+      preflight: async () => {
+        if (phase === "preflight") throw new Error(secret);
+        return healthyPreflight;
+      },
+      withExecutionLock: async (_shop, operation) => operation(),
+      execute: vi.fn(async () => true),
+    });
+
+    expect(repository.completeRefreshAttempt).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: "FAILURE",
+      failureMessage: "Proxy preflight failed before refresh",
+    }));
+    expect(JSON.stringify(repository.completeRefreshAttempt.mock.calls)).not.toContain(secret);
+  });
+
   it.each(["HEALTHY", "DEGRADED"] as const)("executes browser work after recording %s", async (status) => {
     const events: string[] = [];
     const repository = {

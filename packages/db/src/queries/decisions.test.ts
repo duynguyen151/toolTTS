@@ -4,6 +4,7 @@ import { ZodError } from "zod";
 process.env.TOOL_BA_ACTOR = "test-ba";
 
 import type { Database } from "../client.js";
+import type { AiDecisionContext } from "@shop-health/domain";
 import { baDecisions, decisionCases, shops } from "../schema.js";
 import {
   captureBaDecision,
@@ -384,6 +385,153 @@ describe("decision workflow persistence boundaries", () => {
         caseOrigin: "LIVE",
       }),
     ).rejects.toBeInstanceOf(ZodError);
+  });
+
+  it("persists target-Rule context when Official On Hold differs from Operational Exposure", async () => {
+    const targetRuleEvidence = {
+      schemaVersion: "official-on-hold-rule.v1" as const,
+      policyVersion: "risk-control-policy.v1",
+      evaluatedAt: "2026-08-14T00:00:00.000Z",
+      decision: "PAUSE" as const,
+      triggers: ["OFFICIAL_ON_HOLD" as const],
+      expression: "officialFinanceOnHold >= 3500 USD OR deliveryRate < 70%",
+      officialOnHold: {
+        state: "TRIGGERED" as const,
+        source: "SELLER_CENTER" as const,
+        observedValue: "5000.0000",
+        observedAt: "2026-08-14T00:00:00.000Z",
+        ageMs: 0,
+        quality: "FRESH" as const,
+        completeness: "COMPLETE" as const,
+        reconciliation: "RECONCILED" as const,
+        refreshState: "SUCCEEDED" as const,
+        threshold: "3500.0000",
+      },
+      deliveryRate: {
+        state: "CLEAR" as const,
+        source: "SELLER_CENTER" as const,
+        observedValue: 0.84,
+        observedAt: "2026-08-14T00:00:00.000Z",
+        ageMs: 0,
+        quality: "FRESH" as const,
+        deliveredCount: 84,
+        totalCount: 100,
+        threshold: 0.7,
+        unavailableReasons: [],
+      },
+    };
+    const baseContext = input.decisionCase.decisionContextSnapshot as unknown as AiDecisionContext;
+    const decisionContextSnapshot = {
+      ...baseContext,
+      targetRuleEvidence,
+      metrics: {
+        ...baseContext.metrics,
+        finance: {
+          ...baseContext.metrics.finance,
+          officialFinanceOnHold: "5000.0000",
+        },
+      },
+      risk: {
+        ...baseContext.risk,
+        operationalExposure: "5000.0000",
+        stopByOnHoldValue: true,
+      },
+      rule: {
+        ...baseContext.rule,
+        result: "PAUSE" as const,
+        triggers: ["OFFICIAL_ON_HOLD" as const],
+        expression: targetRuleEvidence.expression,
+      },
+    };
+    const caseInput = {
+      ...input.decisionCase,
+      requestId: "00000000-0000-4000-8000-000000000099",
+      caseOrigin: "LIVE" as const,
+      financeSnapshot: { ...input.decisionCase.financeSnapshot, officialOnHoldAmount: "5000.0000" },
+      riskSnapshot: {
+        ...input.decisionCase.riskSnapshot,
+        onHoldValue: "5000.0000",
+        stopByOnHoldValue: true,
+      },
+      ruleDecision: "PAUSE" as const,
+      ruleTriggers: ["ONHOLD_VALUE" as const],
+      decisionContextSnapshot,
+    };
+    const created = { id: "00000000-0000-4000-8000-000000000100", ...caseInput };
+    const db = {
+      select() {
+        return {
+          from() {
+            return {
+              where() {
+                return { async limit() { return [{ profileId: "profile-1", profileNo: "1" }]; } };
+              },
+            };
+          },
+        };
+      },
+      insert() {
+        return {
+          values() {
+            return {
+              onConflictDoNothing() {
+                return { async returning() { return [created]; } };
+              },
+            };
+          },
+        };
+      },
+    } as unknown as Database;
+
+    await expect(createDecisionCase(db, caseInput)).resolves.toMatchObject({ id: created.id });
+  });
+
+  it("keeps target-Rule context as the latest snapshot when Official On Hold differs from Operational Exposure", async () => {
+    const targetRuleEvidence = {
+      schemaVersion: "official-on-hold-rule.v1" as const,
+      policyVersion: "risk-control-policy.v1",
+      evaluatedAt: "2026-08-14T00:00:00.000Z",
+      decision: "PAUSE" as const,
+      triggers: ["OFFICIAL_ON_HOLD" as const],
+      expression: "officialFinanceOnHold >= 3500 USD OR deliveryRate < 70%",
+      officialOnHold: { state: "TRIGGERED" as const, source: "SELLER_CENTER" as const, observedValue: "5000.0000", observedAt: "2026-08-14T00:00:00.000Z", ageMs: 0, quality: "FRESH" as const, completeness: "COMPLETE" as const, reconciliation: "RECONCILED" as const, refreshState: "SUCCEEDED" as const, threshold: "3500.0000" },
+      deliveryRate: { state: "CLEAR" as const, source: "SELLER_CENTER" as const, observedValue: 0.84, observedAt: "2026-08-14T00:00:00.000Z", ageMs: 0, quality: "FRESH" as const, deliveredCount: 84, totalCount: 100, threshold: 0.7, unavailableReasons: [] },
+    };
+    const baseContext = input.decisionCase.decisionContextSnapshot as unknown as AiDecisionContext;
+    const context = {
+      ...baseContext,
+      targetRuleEvidence,
+      metrics: { ...baseContext.metrics, finance: { ...baseContext.metrics.finance, officialFinanceOnHold: "5000.0000" } },
+      risk: { ...baseContext.risk, operationalExposure: "5000.0000", stopByOnHoldValue: true },
+      rule: { ...baseContext.rule, result: "PAUSE" as const, triggers: ["OFFICIAL_ON_HOLD" as const], expression: targetRuleEvidence.expression },
+    };
+    const decisionCase = {
+      ...input.decisionCase,
+      caseOrigin: "LIVE" as const,
+      financeSnapshot: { ...input.decisionCase.financeSnapshot, officialOnHoldAmount: "5000.0000" },
+      riskSnapshot: { ...input.decisionCase.riskSnapshot, onHoldValue: "5000.0000", stopByOnHoldValue: true },
+      ruleDecision: "PAUSE" as const,
+      ruleTriggers: ["ONHOLD_VALUE" as const],
+      decisionContextSnapshot: context,
+    };
+    const db = {
+      select() {
+        return {
+          from() {
+            return {
+              where() {
+                return {
+                  orderBy() { return { async limit() { return [{ decisionCase }]; } }; },
+                  async limit() { return [{ profileId: "profile-1", profileNo: "1" }]; },
+                };
+              },
+            };
+          },
+        };
+      },
+    } as unknown as Database;
+
+    await expect(getLatestDecisionContext(db, decisionCase.shopId)).resolves.toMatchObject({ targetRuleEvidence });
   });
 
   it("normalizes legacy AI input snapshots without weakening recorded coverage", async () => {

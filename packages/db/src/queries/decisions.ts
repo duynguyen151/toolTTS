@@ -370,6 +370,9 @@ export async function createDecisionCase(
   if (parsed.decisionContextSnapshot !== null && parsed.decisionContextSnapshot !== undefined && owner === null) {
     throw new Error("Decision context owner shop was not found");
   }
+  const targetRuleEvidence = parsed.decisionContextSnapshot == null
+    ? undefined
+    : AiDecisionContextSchema.parse(parsed.decisionContextSnapshot).targetRuleEvidence;
   const decisionContextSnapshot = parseDecisionContextSnapshotForWrite(
     parsed.decisionContextSnapshot,
     {
@@ -379,6 +382,7 @@ export async function createDecisionCase(
       risk: parsed.riskSnapshot,
       ruleDecision: parsed.ruleDecision,
       ruleTriggers: parsed.ruleTriggers,
+      ...(targetRuleEvidence === undefined ? {} : { targetRuleEvidence }),
       owner: {
         shopId: parsed.shopId,
         ...(owner === null ? {} : { profileId: owner.profileId, profileNo: owner.profileNo }),
@@ -500,6 +504,9 @@ export async function getLatestDecisionContext(
   const owner = await loadContextOwner(db, shopId);
   for (const row of rows) {
     const decisionCase = row.decisionCase;
+    const targetRuleEvidence = AiDecisionContextSchema.safeParse(
+      decisionCase.decisionContextSnapshot,
+    ).data?.targetRuleEvidence;
     const coverageSnapshot = decisionCase.coverageSnapshot ?? {
       coverageState: decisionCase.dataCoverage,
       persistedMetricsWindow: decisionCase.metricsSnapshot.window,
@@ -520,6 +527,7 @@ export async function getLatestDecisionContext(
         risk: DecisionRiskSnapshotSchema.parse(decisionCase.riskSnapshot),
         ruleDecision: decisionCase.ruleDecision,
         ruleTriggers: decisionCase.ruleTriggers,
+        ...(targetRuleEvidence === undefined ? {} : { targetRuleEvidence }),
         owner: {
           shopId: decisionCase.shopId,
           ...(owner === null ? {} : { profileId: owner.profileId, profileNo: owner.profileNo }),

@@ -105,7 +105,7 @@ export const OfficialOnHoldRuleInputSchema = z.strictObject({
   delivery: z.strictObject({
     counts: z.array(DeliveryCountSchema),
     observedAt: z.date().nullable(),
-    source: SourceProviderSchema,
+    source: z.literal("SELLER_CENTER").nullable(),
     quality: TargetRuleDataQualitySchema,
   }),
 });

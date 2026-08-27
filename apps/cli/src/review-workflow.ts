@@ -21,6 +21,9 @@ import {
   type RiskOrderFactRow,
 } from "@shop-health/db";
 import {
+  SourceCoverageProofSchema,
+} from "@shop-health/domain";
+import {
   createBaselineAiClientFromConfig,
   readBaselineAiConfig,
   type BaselineAiClient,
@@ -107,6 +110,43 @@ export function normalizeRiskFacts(facts: readonly RiskOrderFactRow[]): RiskOrde
   }));
 }
 
+function ordersCoverage(latestOrdersRun: {
+  readonly sourceCoverage: { readonly source: "SELLER_CENTER"; readonly window: "ROLLING_12_MONTHS"; readonly completeWithinSourceWindow: boolean; readonly lifetimeHistoryComplete: false } | null;
+  readonly sourceComplete: boolean | null;
+  readonly sourceCapturedAt: Date | null;
+  readonly finishedAt: Date | null;
+} | null, effectiveAt: Date): {
+  readonly coverageState: "COMPLETE" | "PARTIAL" | "UNKNOWN";
+  readonly source: "SELLER_CENTER" | null;
+  readonly provenSourceWindow: "ROLLING_12_MONTHS" | null;
+  readonly completeWithinSourceWindow: boolean | null;
+  readonly lifetimeHistoryComplete: false | null;
+  readonly ordersSourceComplete: boolean | null;
+  readonly latestSuccessfulSyncAt: string | null;
+  readonly freshness: "FRESH" | "STALE" | "UNKNOWN";
+} {
+  const coverage = SourceCoverageProofSchema.safeParse(latestOrdersRun?.sourceCoverage).data ?? null;
+  const ordersSourceComplete = latestOrdersRun === null
+    ? null
+    : latestOrdersRun.sourceComplete === true && coverage?.completeWithinSourceWindow === true;
+  const observedAt = latestOrdersRun?.sourceCapturedAt ?? latestOrdersRun?.finishedAt ?? null;
+  const freshness = observedAt === null
+    ? "UNKNOWN"
+    : effectiveAt.getTime() - observedAt.getTime() > 86_400_000 ? "STALE" : "FRESH";
+  return {
+    coverageState: ordersSourceComplete === true && freshness === "FRESH"
+      ? "COMPLETE"
+      : latestOrdersRun === null ? "UNKNOWN" : "PARTIAL",
+    source: coverage?.source ?? null,
+    provenSourceWindow: coverage?.window ?? null,
+    completeWithinSourceWindow: coverage?.completeWithinSourceWindow ?? null,
+    lifetimeHistoryComplete: coverage?.lifetimeHistoryComplete ?? null,
+    ordersSourceComplete,
+    latestSuccessfulSyncAt: latestOrdersRun?.finishedAt?.toISOString() ?? null,
+    freshness,
+  };
+}
+
 export function resolveFullHistoryPeriod<T extends { readonly firstObservedAt: Date }>(
   facts: readonly T[],
   periodEnd: Date,
@@ -166,9 +206,9 @@ export function createDbDecisionWorkflowStore(
     async loadReviewStartSource(profileNo, effectiveAt) {
       const shop = await findShopByProfileNo(db, profileNo);
       if (shop === null) throw notFound("shop", profileNo);
-      const [facts, latestSuccessfulSync, latestFinanceRun, latestProvenFinanceRun, latestFinanceRefreshRun, sellerCenterBinding, riskState, previousDecisionContext, resolvedPolicySnapshot] = await Promise.all([
+      const [facts, latestOrdersRun, latestFinanceRun, latestProvenFinanceRun, latestFinanceRefreshRun, sellerCenterBinding, riskState, previousDecisionContext, resolvedPolicySnapshot] = await Promise.all([
         getFullPersistedRiskOrderFacts(db, shop.id),
-        findLatestSuccessfulSyncRun(db, shop.id),
+        findLatestSuccessfulSyncRun(db, shop.id, "ORDERS"),
         findLatestSuccessfulSyncRun(db, shop.id, "FINANCE"),
         findLatestSuccessfulSyncRun(db, shop.id, "FINANCE", true, true),
         listSyncRuns(db, shop.id, 1, "FINANCE").then(([run]) => run ?? null),
@@ -178,8 +218,12 @@ export function createDbDecisionWorkflowStore(
         getEffectiveRiskPolicy(db, { shopId: shop.id, effectiveAt }),
       ]);
       const selectedFinanceRun = latestProvenFinanceRun ?? latestFinanceRun;
+      const deliveryCoverage = ordersCoverage(latestOrdersRun, effectiveAt);
       const finance = await getFinanceSummary(db, shop.id, selectedFinanceRun?.sourceCapturedAt ?? null);
       const normalizedFacts = normalizeRiskFacts(facts);
+      const deliverySourceComplete = deliveryCoverage.ordersSourceComplete === true &&
+        normalizedFacts.length > 0 &&
+        normalizedFacts.every((fact) => fact.deliverySource === "SELLER_CENTER");
       const period = resolveFullHistoryPeriod(normalizedFacts, effectiveAt);
       const snapshot = finance.proofStatus === "PROVEN" ? finance.latestSnapshot : null;
       const statementCount = finance.proofStatus === "PROVEN" ? finance.statementCount : 0;
@@ -191,19 +235,31 @@ export function createDbDecisionWorkflowStore(
           displayName: shop.displayName ?? shop.profileNo,
           currency: shop.currency,
           dataOrigin: shop.dataOrigin,
-          dataCoverage: "UNKNOWN",
+          dataCoverage: deliverySourceComplete && deliveryCoverage.freshness === "FRESH"
+            ? "COMPLETE"
+            : latestOrdersRun === null ? "UNKNOWN" : "PARTIAL",
           lastSyncAt: latestDate(shop.lastOrdersSyncedAt, shop.lastFinanceSyncedAt),
         },
         periodStart: period.periodStart,
         periodEnd: period.periodEnd,
         facts: normalizedFacts,
         coverageSnapshot: {
-          coverageState: "UNKNOWN",
+          coverageState: deliverySourceComplete && deliveryCoverage.freshness === "FRESH"
+            ? "COMPLETE"
+            : latestOrdersRun === null ? "UNKNOWN" : "PARTIAL",
           persistedMetricsWindow: "FULL_PERSISTED_HISTORY",
-          source: null,
-          provenSourceWindow: null,
-          completeWithinSourceWindow: null,
-          lifetimeHistoryComplete: null,
+          source: deliverySourceComplete ? deliveryCoverage.source : null,
+          provenSourceWindow: deliveryCoverage.provenSourceWindow,
+          completeWithinSourceWindow: deliveryCoverage.completeWithinSourceWindow,
+          lifetimeHistoryComplete: deliveryCoverage.lifetimeHistoryComplete,
+          ordersSourceComplete: deliveryCoverage.ordersSourceComplete,
+          latestSuccessfulSyncAt: deliveryCoverage.latestSuccessfulSyncAt,
+          deliverySourceComplete: latestOrdersRun === null ? null : deliverySourceComplete,
+          deliveryObservedAt: latestOrdersRun?.sourceCapturedAt?.toISOString() ?? latestOrdersRun?.finishedAt?.toISOString() ?? null,
+          deliveryFreshness: deliverySourceComplete
+            ? deliveryCoverage.freshness
+            : "UNKNOWN",
+          freshness: deliveryCoverage.freshness,
           financeHealth: resolveDecisionFinanceHealth({
             evaluatedAt: effectiveAt,
             freshnessWindowMs: 86_400_000,
@@ -234,7 +290,7 @@ export function createDbDecisionWorkflowStore(
         },
         sourceSyncRunId: shop.dataOrigin === "DEMO_SANITIZED"
           ? null
-          : latestSuccessfulSync?.id ?? null,
+          : latestOrdersRun?.id ?? null,
         holidayModeCurrentlyEnabled: riskState?.observedHolidayModeEnabled ?? null,
         consecutiveSafeCycles: riskState?.consecutiveSafeCycles ?? 0,
         decisionIdentity: {

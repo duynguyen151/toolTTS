@@ -25,6 +25,7 @@ import {
   SELLER_CENTER_OFFICIAL_ON_HOLD_PROOF,
   type DecisionCoverageSnapshot,
   type DecisionFinanceSnapshot,
+  SourceCoverageProofSchema,
   type FinanceHealthSnapshot,
   type RiskOrderFact,
   type SourceCoverageProof,
@@ -135,6 +136,53 @@ export function assessDecisionFreshness(
     : "FRESH";
 }
 
+export interface DecisionDeliveryHealthEvidence {
+  readonly evaluatedAt: Date;
+  readonly freshnessWindowMs: number;
+  readonly facts: readonly RiskOrderFact[];
+  readonly latestOrdersRun: {
+    readonly sourceCoverage: SourceCoverageProof | null | undefined;
+    readonly sourceComplete: boolean | null | undefined;
+    readonly sourceCapturedAt: Date | null | undefined;
+    readonly finishedAt: Date | null | undefined;
+  } | null;
+}
+
+export function resolveDecisionDeliveryHealth(
+  evidence: DecisionDeliveryHealthEvidence,
+): {
+  readonly coverageState: "COMPLETE" | "PARTIAL" | "UNKNOWN";
+  readonly source: "SELLER_CENTER" | null;
+  readonly sourceComplete: boolean | null;
+  readonly observedAt: Date | null;
+  readonly freshness: "FRESH" | "STALE" | "UNKNOWN";
+} {
+  const coverage = SourceCoverageProofSchema.safeParse(evidence.latestOrdersRun?.sourceCoverage).data ?? null;
+  const runComplete = evidence.latestOrdersRun?.sourceComplete === true &&
+    coverage?.source === "SELLER_CENTER" &&
+    coverage.window === "ROLLING_12_MONTHS" &&
+    coverage.completeWithinSourceWindow === true &&
+    coverage.lifetimeHistoryComplete === false;
+  const sourceComplete = evidence.latestOrdersRun === null
+    ? null
+    : runComplete && evidence.facts.every((fact) => fact.deliverySource === "SELLER_CENTER");
+  const observedAt = evidence.latestOrdersRun?.sourceCapturedAt ?? evidence.latestOrdersRun?.finishedAt ?? null;
+  const freshness = sourceComplete !== true || observedAt === null
+    ? "UNKNOWN"
+    : evidence.evaluatedAt.getTime() - observedAt.getTime() > evidence.freshnessWindowMs
+      ? "STALE"
+      : "FRESH";
+  return {
+    coverageState: sourceComplete === true && freshness === "FRESH"
+      ? "COMPLETE"
+      : evidence.latestOrdersRun === null ? "UNKNOWN" : "PARTIAL",
+    source: sourceComplete === true ? "SELLER_CENTER" : null,
+    sourceComplete,
+    observedAt,
+    freshness,
+  };
+}
+
 export function resolveDecisionPeriod(
   facts: readonly RiskOrderFact[],
   periodEnd: Date,
@@ -157,6 +205,7 @@ function toRiskFacts(rows: readonly RiskOrderFact[]): RiskOrderFact[] {
     totalValue: row.totalValue,
     ...(row.firstObservedAt === undefined ? {} : { firstObservedAt: row.firstObservedAt }),
     ...(row.lastObservedAt === undefined ? {} : { lastObservedAt: row.lastObservedAt }),
+    ...(row.deliverySource === undefined ? {} : { deliverySource: row.deliverySource }),
   }));
 }
 
@@ -273,13 +322,17 @@ export function createPersistedDecisionWorkflow(
         ...financeSnapshot,
         settlementCount: financeSummary.statementCount,
       };
-      const coverageProof = latestOrdersRun?.sourceCoverage;
+      const deliveryHealth = resolveDecisionDeliveryHealth({
+        evaluatedAt: effectiveAt,
+        freshnessWindowMs,
+        facts,
+        latestOrdersRun,
+      });
+      const coverageProof = SourceCoverageProofSchema.safeParse(latestOrdersRun?.sourceCoverage).data ?? null;
       const latestSuccessfulSyncAt = [latestOrdersRun?.finishedAt, latestFinanceRun?.finishedAt]
         .filter((value): value is Date => value !== null && value !== undefined)
         .sort((left, right) => right.getTime() - left.getTime())[0] ?? null;
-      const ordersSourceComplete = latestOrdersRun === null
-        ? null
-        : latestOrdersRun.sourceComplete === true && coverageProof?.completeWithinSourceWindow === true;
+      const ordersSourceComplete = deliveryHealth.sourceComplete;
       const financeRequiredSourceComplete = latestFinanceRun === null
         ? null
         : latestFinanceRun.sourceComplete === true &&
@@ -303,7 +356,7 @@ export function createPersistedDecisionWorkflow(
       const coverageSnapshot: DecisionCoverageSnapshot = {
         coverageState: dataCoverage,
         persistedMetricsWindow: "FULL_PERSISTED_HISTORY",
-        source: coverageProof?.source ?? null,
+        source: deliveryHealth.source,
         provenSourceWindow: coverageProof?.window ?? null,
         completeWithinSourceWindow: coverageProof?.completeWithinSourceWindow ?? null,
         lifetimeHistoryComplete: coverageProof?.lifetimeHistoryComplete ?? null,
@@ -312,6 +365,9 @@ export function createPersistedDecisionWorkflow(
         sourceReconciled: typedFinanceSnapshot.reasonTotalsReconcileToOfficialOnHold,
         latestSuccessfulSyncAt: latestSuccessfulSyncAt?.toISOString() ?? null,
         financeCapturedAt: provenFinanceCaptureAt?.toISOString() ?? null,
+        deliverySourceComplete: deliveryHealth.sourceComplete,
+        deliveryObservedAt: deliveryHealth.observedAt?.toISOString() ?? null,
+        deliveryFreshness: deliveryHealth.freshness,
         freshness,
         financeHealth: resolveDecisionFinanceHealth({
           evaluatedAt: effectiveAt,

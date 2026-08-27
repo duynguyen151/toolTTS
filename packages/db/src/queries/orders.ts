@@ -170,6 +170,19 @@ export interface RiskOrderFactRow {
   totalValue: string;
   firstObservedAt: Date;
   lastObservedAt: Date;
+  deliverySource?: "SELLER_CENTER" | null;
+}
+
+type PersistedRiskOrderFactRow = Omit<RiskOrderFactRow, "deliverySource"> & {
+  sourceSchemaVersions: string[];
+};
+
+function deliverySource(sourceSchemaVersions: readonly string[]): "SELLER_CENTER" | null {
+  return sourceSchemaVersions.length > 0 && sourceSchemaVersions.every((version) =>
+    version.startsWith("seller-center-") || version.startsWith("seller-center_"),
+  )
+    ? "SELLER_CENTER"
+    : null;
 }
 
 /**
@@ -180,17 +193,23 @@ export async function getFullPersistedRiskOrderFacts(
   db: DbExecutor,
   shopId: string
 ): Promise<RiskOrderFactRow[]> {
-  return db
+  const rows = await db
     .select({
       canonicalStatus: orders.canonicalStatus,
       currency: orders.currency,
       orderCount: sql<number>`count(*)::integer`,
       totalValue: sql<string>`sum(${orders.grandTotal})::text`,
       firstObservedAt: sql`min(${orders.firstSeenAt})`.mapWith(orders.firstSeenAt),
-      lastObservedAt: sql`max(${orders.lastSeenAt})`.mapWith(orders.lastSeenAt)
+      lastObservedAt: sql`max(${orders.lastSeenAt})`.mapWith(orders.lastSeenAt),
+      sourceSchemaVersions: sql<string[]>`array_agg(distinct ${orders.sourceSchemaVersion})`,
     })
     .from(orders)
     .where(eq(orders.shopId, shopId))
     .groupBy(orders.canonicalStatus, orders.currency)
-    .orderBy(orders.canonicalStatus, orders.currency);
+    .orderBy(orders.canonicalStatus, orders.currency) as unknown as PersistedRiskOrderFactRow[];
+  const source = deliverySource(rows.flatMap((row) => row.sourceSchemaVersions));
+  return rows.map(({ sourceSchemaVersions: _sourceSchemaVersions, ...row }) => ({
+    ...row,
+    deliverySource: source,
+  }));
 }

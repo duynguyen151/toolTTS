@@ -329,6 +329,98 @@ describe("decision workflow", () => {
     });
   });
 
+  test("permits an authoritative fresh Delivery-only PAUSE before Case creation", async () => {
+    const store = createStore();
+    store.loadReviewStartSource = async () => ({
+      ...source,
+      facts: [
+        { canonicalStatus: "AWAITING_SHIPMENT", currency: "USD", orderCount: 4, totalValue: "40.0000", lastObservedAt: now, deliverySource: "SELLER_CENTER" },
+        { canonicalStatus: "DELIVERED", currency: "USD", orderCount: 1, totalValue: "10.0000", lastObservedAt: now, deliverySource: "SELLER_CENTER" },
+      ] as typeof source.facts,
+      coverageSnapshot: {
+        coverageState: "PARTIAL",
+        persistedMetricsWindow: "FULL_PERSISTED_HISTORY",
+        source: "SELLER_CENTER",
+        provenSourceWindow: "ROLLING_12_MONTHS",
+        completeWithinSourceWindow: true,
+        lifetimeHistoryComplete: false,
+        ordersSourceComplete: true,
+        financeRequiredSourceComplete: true,
+        sourceReconciled: true,
+        latestSuccessfulSyncAt: now.toISOString(),
+        financeCapturedAt: now.toISOString(),
+        deliverySourceComplete: true,
+        deliveryObservedAt: now.toISOString(),
+        deliveryFreshness: "FRESH",
+        freshness: "FRESH",
+      },
+    });
+    const workflow = createDecisionWorkflow({
+      store,
+      aiClient: { recommend: async () => unavailableResult },
+      now: () => now,
+    });
+
+    await workflow.startReview({ profileNo: "DEMO-001" });
+
+    expect(store.created[0]).toMatchObject({
+      decisionCase: {
+        ruleDecision: "PAUSE",
+        ruleTriggers: ["DELIVERY_RATE"],
+        decisionContextSnapshot: expect.objectContaining({
+          targetRuleEvidence: expect.objectContaining({
+            deliveryRate: expect.objectContaining({ state: "TRIGGERED", source: "SELLER_CENTER", quality: "FRESH" }),
+          }),
+        }),
+      },
+    });
+  });
+
+  test("fails closed when delivery coverage is unknown despite persisted rate evidence", async () => {
+    const store = createStore();
+    store.loadReviewStartSource = async () => ({
+      ...source,
+      facts: [
+        { canonicalStatus: "AWAITING_SHIPMENT", currency: "USD", orderCount: 4, totalValue: "40.0000", lastObservedAt: now, deliverySource: null },
+        { canonicalStatus: "DELIVERED", currency: "USD", orderCount: 1, totalValue: "10.0000", lastObservedAt: now, deliverySource: null },
+      ] as typeof source.facts,
+      coverageSnapshot: {
+        coverageState: "UNKNOWN",
+        persistedMetricsWindow: "FULL_PERSISTED_HISTORY",
+        source: null,
+        provenSourceWindow: null,
+        completeWithinSourceWindow: null,
+        lifetimeHistoryComplete: null,
+        deliverySourceComplete: null,
+        deliveryObservedAt: null,
+        deliveryFreshness: "UNKNOWN",
+        freshness: "UNKNOWN",
+      },
+    });
+    const workflow = createDecisionWorkflow({
+      store,
+      aiClient: { recommend: async () => unavailableResult },
+      now: () => now,
+    });
+
+    await workflow.startReview({ profileNo: "DEMO-001" });
+
+    expect(store.created[0]).toMatchObject({
+      decisionCase: {
+        ruleDecision: "INSUFFICIENT_DATA",
+        ruleTriggers: [],
+        decisionContextSnapshot: expect.objectContaining({
+          targetRuleEvidence: expect.objectContaining({
+            deliveryRate: expect.objectContaining({
+              state: "NOT_EVALUATED",
+              unavailableReasons: expect.arrayContaining(["SOURCE_NOT_AUTHORITATIVE", "SOURCE_QUALITY_UNAVAILABLE"]),
+            }),
+          }),
+        }),
+      },
+    });
+  });
+
   test("evaluates a stale complete/reconciled Official-OH capture before Case creation", async () => {
     const store = createStore();
     store.loadReviewStartSource = async () => ({

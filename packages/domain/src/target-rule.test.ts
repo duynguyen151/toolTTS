@@ -113,6 +113,35 @@ describe("Official On-Hold target Rule", () => {
     })).decision).toBe(decision);
   });
 
+  it("does not let a non-Seller Center delivery source trigger the target Delivery condition", () => {
+    const result = evaluateOfficialOnHoldRule(input({
+      officialOnHold: {
+        amount: null,
+        currency: "USD",
+        capturedAt: null,
+        health: financeHealth({
+          health: "UNKNOWN",
+          completeness: "UNKNOWN",
+          reconciliation: "UNKNOWN",
+          officialOnHoldAvailability: "UNAVAILABLE",
+        }),
+      },
+      delivery: {
+        counts: [{ canonicalStatus: "AWAITING_SHIPMENT", count: 4 }, { canonicalStatus: "DELIVERED", count: 1 }],
+        observedAt: capturedAt,
+        source: null,
+        quality: "FRESH",
+      },
+    }));
+
+    expect(result.deliveryRate).toMatchObject({
+      state: "NOT_EVALUATED",
+      source: null,
+      unavailableReasons: expect.arrayContaining(["SOURCE_NOT_AUTHORITATIVE"]),
+    });
+    expect(result.decision).toBe("INSUFFICIENT_DATA");
+  });
+
   it("does not let COTIK supplementary Finance satisfy the Official OH condition", () => {
     const result = evaluateOfficialOnHoldRule(input({
       officialOnHold: {

@@ -136,6 +136,9 @@ export const DecisionCoverageSnapshotSchema = z
     sourceReconciled: z.boolean().nullable().optional(),
     latestSuccessfulSyncAt: z.string().datetime().nullable().optional(),
     financeCapturedAt: z.string().datetime().nullable().optional(),
+    deliverySourceComplete: z.boolean().nullable().optional(),
+    deliveryObservedAt: z.string().datetime().nullable().optional(),
+    deliveryFreshness: z.enum(["FRESH", "STALE", "UNKNOWN"]).optional(),
     freshness: z.enum(["FRESH", "STALE", "UNKNOWN"]).optional(),
     financeHealth: FinanceHealthSnapshotSchema.optional(),
   })

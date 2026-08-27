@@ -79,6 +79,7 @@ export interface RiskOrderFact {
   readonly totalValue: string;
   readonly firstObservedAt?: Date | null;
   readonly lastObservedAt?: Date | null;
+  readonly deliverySource?: "SELLER_CENTER" | null;
 }
 
 export const RiskControlDecisionSchema = z.object({

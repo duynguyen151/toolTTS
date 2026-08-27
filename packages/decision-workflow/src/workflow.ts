@@ -271,9 +271,14 @@ export function createDecisionWorkflow(dependencies: {
             canonicalStatus,
             count: orderCount,
           })),
-          observedAt: risk.lastSuccessfulObservationAt,
-          source: "SELLER_CENTER",
-          quality: coverageSnapshot.freshness ?? "UNKNOWN",
+          observedAt: coverageSnapshot.deliveryObservedAt === undefined || coverageSnapshot.deliveryObservedAt === null
+            ? risk.lastSuccessfulObservationAt
+            : new Date(coverageSnapshot.deliveryObservedAt),
+          source: coverageSnapshot.deliverySourceComplete === true &&
+            source.facts.length > 0 && source.facts.every((fact) => fact.deliverySource === "SELLER_CENTER")
+            ? "SELLER_CENTER"
+            : null,
+          quality: coverageSnapshot.deliveryFreshness ?? "UNKNOWN",
         },
       });
       const ruleDecision = targetRuleEvidence.decision;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { assessDecisionFreshness, isCompleteDecisionCoverage, resolveDecisionFinanceHealth, resolveDecisionPeriod, resolveFinanceCaptureAt, resolveVerifiedFinanceCaptureAt } from "./persisted.js";
+import { assessDecisionFreshness, isCompleteDecisionCoverage, resolveDecisionDeliveryHealth, resolveDecisionFinanceHealth, resolveDecisionPeriod, resolveFinanceCaptureAt, resolveVerifiedFinanceCaptureAt } from "./persisted.js";
 
 describe("assessDecisionFreshness", () => {
   it("requires Orders sync, Finance sync, and Finance capture all within the window", () => {
@@ -22,6 +22,61 @@ describe("assessDecisionFreshness", () => {
       financeSyncAt: null,
       financeCapturedAt: null,
     })).toBe("UNKNOWN");
+  });
+});
+
+describe("resolveDecisionDeliveryHealth", () => {
+  const evaluatedAt = new Date("2026-08-15T12:00:00.000Z");
+  const completeSellerCenterRun = {
+    sourceCoverage: {
+      source: "SELLER_CENTER" as const,
+      window: "ROLLING_12_MONTHS" as const,
+      completeWithinSourceWindow: true,
+      lifetimeHistoryComplete: false as const,
+    },
+    sourceComplete: true,
+    sourceCapturedAt: new Date("2026-08-15T11:00:00.000Z"),
+    finishedAt: new Date("2026-08-15T11:30:00.000Z"),
+  };
+  const sellerCenterFacts = [{
+    canonicalStatus: "DELIVERED" as const,
+    currency: "USD",
+    orderCount: 1,
+    totalValue: "10.0000",
+    deliverySource: "SELLER_CENTER" as const,
+  }] as const;
+
+  it("accepts a complete fresh Seller Center Orders population independently of Finance", () => {
+    expect(resolveDecisionDeliveryHealth({
+      evaluatedAt,
+      freshnessWindowMs: 86_400_000,
+      facts: sellerCenterFacts,
+      latestOrdersRun: completeSellerCenterRun,
+    })).toMatchObject({
+      coverageState: "COMPLETE",
+      source: "SELLER_CENTER",
+      sourceComplete: true,
+      observedAt: completeSellerCenterRun.sourceCapturedAt,
+      freshness: "FRESH",
+    });
+  });
+
+  it("keeps complete Seller Center Orders evidence stale instead of making it unknown", () => {
+    expect(resolveDecisionDeliveryHealth({
+      evaluatedAt: new Date("2026-08-17T12:00:00.000Z"),
+      freshnessWindowMs: 86_400_000,
+      facts: sellerCenterFacts,
+      latestOrdersRun: completeSellerCenterRun,
+    })).toMatchObject({ coverageState: "PARTIAL", source: "SELLER_CENTER", freshness: "STALE" });
+  });
+
+  it("fails closed for mixed or unknown persisted order provenance", () => {
+    expect(resolveDecisionDeliveryHealth({
+      evaluatedAt,
+      freshnessWindowMs: 86_400_000,
+      facts: [{ ...sellerCenterFacts[0], deliverySource: null }],
+      latestOrdersRun: completeSellerCenterRun,
+    })).toMatchObject({ source: null, sourceComplete: false, freshness: "UNKNOWN" });
   });
 });
 

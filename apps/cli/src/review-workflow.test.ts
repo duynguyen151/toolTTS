@@ -106,6 +106,90 @@ describe("review workflow DB mapping", () => {
     });
   });
 
+  test("maps the latest successful complete Seller Center Orders run into Delivery coverage", async () => {
+    const finishedAt = new Date("2026-08-15T11:30:00.000Z");
+    const capturedAt = new Date("2026-08-15T11:00:00.000Z");
+    db.findShopByProfileNo.mockResolvedValue({
+      id: "shop-1", profileId: "profile-1", profileNo: "957", tiktokShopId: "seller-957",
+      displayName: "Shop 957", currency: "USD", dataOrigin: "LIVE", lastOrdersSyncedAt: finishedAt, lastFinanceSyncedAt: null,
+    });
+    db.getFullPersistedRiskOrderFacts.mockResolvedValue([{
+      canonicalStatus: "DELIVERED", currency: "USD", orderCount: 1, totalValue: "10.0000",
+      firstObservedAt: capturedAt, lastObservedAt: capturedAt, deliverySource: "SELLER_CENTER",
+    }]);
+    db.getFinanceSummary.mockResolvedValue({ proofStatus: "PROOF_UNAVAILABLE", statementCount: 0, onHoldCount: 0 });
+    db.findEnabledShopProviderBinding.mockResolvedValue(null);
+    db.findLatestSuccessfulSyncRun.mockImplementation(async (_db: unknown, _shopId: string, mode?: string) => {
+      if (mode === "ORDERS") {
+        return {
+          id: "orders-run", mode: "ORDERS", status: "SUCCEEDED", finishedAt, sourceCapturedAt: capturedAt,
+          sourceComplete: true,
+          sourceCoverage: { source: "SELLER_CENTER", window: "ROLLING_12_MONTHS", completeWithinSourceWindow: true, lifetimeHistoryComplete: false },
+        };
+      }
+      return null;
+    });
+    db.listSyncRuns.mockResolvedValue([]);
+    db.getRiskControlState.mockResolvedValue(null);
+    db.getLatestDecisionContext.mockResolvedValue(null);
+    db.getEffectiveRiskPolicy.mockResolvedValue({ version: "policy.v1" });
+
+    const source = await createDbDecisionWorkflowStore({} as never).loadReviewStartSource(
+      "957",
+      new Date("2026-08-15T12:00:00.000Z"),
+    );
+
+    expect(db.findLatestSuccessfulSyncRun).toHaveBeenCalledWith(expect.anything(), "shop-1", "ORDERS");
+    expect(source.coverageSnapshot).toMatchObject({
+      source: "SELLER_CENTER",
+      provenSourceWindow: "ROLLING_12_MONTHS",
+      completeWithinSourceWindow: true,
+      ordersSourceComplete: true,
+      latestSuccessfulSyncAt: finishedAt.toISOString(),
+      freshness: "FRESH",
+      deliverySourceComplete: true,
+      deliveryObservedAt: capturedAt.toISOString(),
+      deliveryFreshness: "FRESH",
+    });
+  });
+
+  test("fails closed when a complete Seller Center Orders run covers mixed persisted order provenance", async () => {
+    const capturedAt = new Date("2026-08-15T11:00:00.000Z");
+    db.findShopByProfileNo.mockResolvedValue({
+      id: "shop-1", profileId: "profile-1", profileNo: "957", tiktokShopId: "seller-957",
+      displayName: "Shop 957", currency: "USD", dataOrigin: "LIVE", lastOrdersSyncedAt: capturedAt, lastFinanceSyncedAt: null,
+    });
+    db.getFullPersistedRiskOrderFacts.mockResolvedValue([{
+      canonicalStatus: "DELIVERED", currency: "USD", orderCount: 1, totalValue: "10.0000",
+      firstObservedAt: capturedAt, lastObservedAt: capturedAt, deliverySource: null,
+    }]);
+    db.getFinanceSummary.mockResolvedValue({ proofStatus: "PROOF_UNAVAILABLE", statementCount: 0, onHoldCount: 0 });
+    db.findEnabledShopProviderBinding.mockResolvedValue(null);
+    db.findLatestSuccessfulSyncRun.mockImplementation(async (_db: unknown, _shopId: string, mode?: string) => mode === "ORDERS"
+      ? {
+          id: "orders-run", mode: "ORDERS", status: "SUCCEEDED", finishedAt: capturedAt, sourceCapturedAt: capturedAt,
+          sourceComplete: true,
+          sourceCoverage: { source: "SELLER_CENTER", window: "ROLLING_12_MONTHS", completeWithinSourceWindow: true, lifetimeHistoryComplete: false },
+        }
+      : null);
+    db.listSyncRuns.mockResolvedValue([]);
+    db.getRiskControlState.mockResolvedValue(null);
+    db.getLatestDecisionContext.mockResolvedValue(null);
+    db.getEffectiveRiskPolicy.mockResolvedValue({ version: "policy.v1" });
+
+    const source = await createDbDecisionWorkflowStore({} as never).loadReviewStartSource(
+      "957",
+      new Date("2026-08-15T12:00:00.000Z"),
+    );
+
+    expect(source.coverageSnapshot).toMatchObject({
+      coverageState: "PARTIAL",
+      source: null,
+      deliverySourceComplete: false,
+      deliveryFreshness: "UNKNOWN",
+    });
+  });
+
   test("uses the earliest persisted fact even when it predates shop creation", () => {
     const periodEnd = new Date("2026-08-14T08:30:00.000Z");
     const period = resolveFullHistoryPeriod([
@@ -148,6 +232,7 @@ describe("review workflow DB mapping", () => {
       currency: "USD",
       orderCount: 2,
       totalValue: "10.0000",
+      deliverySource: "SELLER_CENTER",
       firstObservedAt: "2026-08-01T08:30:00.000Z" as unknown as Date,
       lastObservedAt: "2026-08-14T08:30:00.000Z" as unknown as Date,
     }]);

@@ -234,24 +234,99 @@ describe("baseline AI technical failures", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("returns unavailable without calling the provider when the frozen context is stale", async () => {
-    const fetchMock = vi.fn<typeof fetch>();
+  it("invokes the provider for stale complete/reconciled Official-OH evidence", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      model: "deepseek-v4-flash-free",
+      choices: [{ message: { content: JSON.stringify({
+        recommendation: "WATCH", riskLevel: "MEDIUM", confidence: 0.5,
+        reasonCodes: ["DATA_INCOMPLETE"], supportingFactors: ["Stale Finance evidence."],
+        riskFactors: ["Finance is stale."], whatWouldChangeDecision: ["Fresh Finance evidence."],
+        reason: "Stale Finance limits this advisory.", humanReviewRequired: true,
+      }) } }],
+    }), { status: 200 }));
     const client = createBaselineAiClientFromConfig(config(), { fetch: fetchMock });
     const staleContext = {
       ...frozenContext,
+      metrics: {
+        ...frozenContext.metrics,
+        finance: { ...frozenContext.metrics.finance, capturedAt: "2026-08-13T00:00:00.000Z" },
+      },
       dataQuality: {
         ...frozenContext.dataQuality,
         freshness: "STALE" as const,
+        financeCapturedAt: "2026-08-13T00:00:00.000Z",
+        blockers: ["FRESHNESS_STALE"],
+      },
+    };
+
+    const result = await client.recommend({
+      ...validInput,
+      financeSnapshot: { ...validInput.financeSnapshot, capturedAt: "2026-08-13T00:00:00.000Z" },
+      coverageSnapshot: { ...validInput.coverageSnapshot, freshness: "STALE", financeCapturedAt: "2026-08-13T00:00:00.000Z" },
+      decisionContextSnapshot: staleContext,
+    });
+    if (result.status !== "AVAILABLE") throw new Error(result.errorCode);
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing Official On Hold", {
+      finance: { officialOnHoldAmount: null, officialFinanceOnHold: null },
+      coverage: {},
+      blockers: ["FRESHNESS_STALE"],
+    }],
+    ["incomplete Finance capture", {
+      finance: {},
+      coverage: { financeRequiredSourceComplete: false },
+      blockers: ["FINANCE_SOURCE_INCOMPLETE", "FRESHNESS_STALE"],
+    }],
+    ["unreconciled Finance capture", {
+      finance: {},
+      coverage: { sourceReconciled: false },
+      blockers: ["FINANCE_NOT_RECONCILED", "FRESHNESS_STALE"],
+    }],
+  ] as const)("rejects stale %s without invoking the provider", async (_label, mutation) => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const client = createBaselineAiClientFromConfig(config(), { fetch: fetchMock });
+    const coverageSnapshot = {
+      ...validInput.coverageSnapshot,
+      ...mutation.coverage,
+      freshness: "STALE" as const,
+      financeCapturedAt: "2026-08-13T00:00:00.000Z",
+    };
+    const financeSnapshot = {
+      ...validInput.financeSnapshot,
+      ...mutation.finance,
+      capturedAt: "2026-08-13T00:00:00.000Z",
+    };
+    const context = {
+      ...frozenContext,
+      metrics: {
+        ...frozenContext.metrics,
+        finance: {
+          ...frozenContext.metrics.finance,
+          ...mutation.finance,
+          officialFinanceOnHold: mutation.finance.officialOnHoldAmount === null
+            ? null
+            : mutation.finance.officialFinanceOnHold ?? frozenContext.metrics.finance.officialFinanceOnHold,
+          capturedAt: "2026-08-13T00:00:00.000Z",
+        },
+      },
+      dataQuality: {
+        ...frozenContext.dataQuality,
+        ...mutation.coverage,
+        freshness: "STALE" as const,
+        financeCapturedAt: "2026-08-13T00:00:00.000Z",
+        blockers: mutation.blockers,
       },
     };
 
     await expect(client.recommend({
       ...validInput,
-      decisionContextSnapshot: staleContext,
-    })).resolves.toMatchObject({
-      status: "UNAVAILABLE",
-      errorCode: "INVALID_RESPONSE",
-    });
+      financeSnapshot,
+      coverageSnapshot,
+      decisionContextSnapshot: context,
+    })).resolves.toMatchObject({ status: "UNAVAILABLE", errorCode: "INVALID_RESPONSE" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

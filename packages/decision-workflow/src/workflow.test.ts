@@ -195,6 +195,19 @@ function createStore(): DecisionWorkflowStore & {
     async getDecisionAiInput() {
       return persistedAiInput;
     },
+    async resolveRequestedAiTask() {
+      return {
+        taskId: "SHOP_HEALTH_REVIEWER",
+        taskConfigRevisionId: null,
+        taskConfigSource: "ENVIRONMENT",
+        provider: "9router",
+        requestedModel: "oc/deepseek-v4-flash-free",
+        secretRef: "TOOL_AI_API_KEY",
+        promptVersion: "decision-ai-prompt.v2",
+        aiPolicyVersion: "decision-ai-policy.v1",
+        outputSchemaVersion: "decision-ai-output.v1",
+      };
+    },
     async createDecisionCase(input) {
       this.created.push(input);
       return { caseId };
@@ -321,7 +334,7 @@ describe("decision workflow", () => {
           operationalOrderCount: 10,
         },
         decisionContextSnapshot: expect.objectContaining({
-          schemaVersion: "ai-decision-context.v1",
+          schemaVersion: "ai-decision-context.v2",
           comparisons: expect.any(Array),
           trends: expect.any(Array),
         }),
@@ -475,6 +488,10 @@ describe("decision workflow", () => {
         ruleDecision: "PAUSE",
         ruleTriggers: ["ONHOLD_VALUE"],
         decisionContextSnapshot: expect.objectContaining({
+          metrics: expect.objectContaining({
+            decision: expect.objectContaining({ operationalExposure: "4400.0000" }),
+          }),
+          risk: expect.objectContaining({ operationalExposure: "4400.0000" }),
           targetRuleEvidence: expect.objectContaining({
             schemaVersion: "official-on-hold-rule.v1",
             decision: "PAUSE",
@@ -489,6 +506,73 @@ describe("decision workflow", () => {
         }),
       },
     });
+  });
+
+  test("resolves and freezes requested AI task metadata before persisting the Case", async () => {
+    const store = createStore();
+    const requestedAiTask = {
+      taskId: "SHOP_HEALTH_REVIEWER",
+      taskConfigRevisionId: "a1e4b00f-7a8a-4fe9-b182-0b32b4c0db44",
+      taskConfigSource: "PERSISTED",
+      provider: "openai-compatible",
+      requestedModel: "reviewer-model-v1",
+      secretRef: "TOOL_REVIEWER_KEY",
+      promptVersion: "decision-ai-prompt.v2",
+      aiPolicyVersion: "decision-ai-policy.v1",
+      outputSchemaVersion: "decision-ai-output.v1",
+    } as const;
+    let casePersisted = false;
+    const createCase = store.createDecisionCase;
+    store.createDecisionCase = async (input) => {
+      casePersisted = true;
+      return createCase.call(store, input);
+    };
+    store.resolveRequestedAiTask = async (effectiveAt) => {
+      expect(effectiveAt).toEqual(now);
+      expect(casePersisted).toBe(false);
+      return requestedAiTask;
+    };
+    const workflow = createDecisionWorkflow({
+      store,
+      aiClient: { recommend: async () => unavailableResult },
+      now: () => now,
+    });
+
+    await workflow.startReview({ profileNo: "DEMO-001" });
+
+    expect(store.created[0]).toMatchObject({
+      decisionCase: {
+        decisionContextSnapshot: expect.objectContaining({
+          schemaVersion: "ai-decision-context.v2",
+          requestedAiTask,
+        }),
+      },
+    });
+  });
+
+  test("selects the AI client from the persisted Case after Case creation", async () => {
+    const store = createStore();
+    let casePersisted = false;
+    const createCase = store.createDecisionCase;
+    store.createDecisionCase = async (input) => {
+      casePersisted = true;
+      return createCase.call(store, input);
+    };
+    const caseClients: string[] = [];
+    const workflow = createDecisionWorkflow({
+      store,
+      aiClient: { recommend: async () => { throw new Error("default AI client must not be used"); } },
+      aiClientForCase: async (persistedCaseId) => {
+        expect(casePersisted).toBe(true);
+        caseClients.push(persistedCaseId);
+        return { recommend: async () => unavailableResult };
+      },
+      now: () => now,
+    });
+
+    await workflow.startReview({ profileNo: "DEMO-001" });
+
+    expect(caseClients).toEqual([caseId]);
   });
 
   test("freezes the versioned Official-OH Rule before creating a new Case", async () => {

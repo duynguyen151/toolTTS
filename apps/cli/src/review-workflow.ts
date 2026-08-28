@@ -10,6 +10,8 @@ import {
   getDecisionReviewByRequestId,
   getFinanceSummary,
   getFullPersistedRiskOrderFacts,
+  getCurrentAiTaskConfig,
+  getAiTaskConfigByRevision,
   getRiskControlState,
   getEffectiveRiskPolicy,
   listDecisionHistory,
@@ -25,7 +27,10 @@ import {
 } from "@shop-health/domain";
 import {
   createBaselineAiClientFromConfig,
+  createBaselineAiClientForTask,
   readBaselineAiConfig,
+  resolveAiTaskConfig,
+  matchesFrozenAiTaskRequest,
   type BaselineAiClient,
   type BaselineAiInput,
   type BaselineAiResult,
@@ -185,6 +190,7 @@ function notFound(kind: "shop" | "case", value: string): CliError {
 export function createDbDecisionWorkflowStore(
   db: Database,
   now: () => Date = () => new Date(),
+  environment: NodeJS.ProcessEnv = process.env,
 ): DecisionWorkflowStore {
   return {
     async getDecisionReviewByRequestId(requestId) {
@@ -201,6 +207,25 @@ export function createDbDecisionWorkflowStore(
         });
       }
       return input as BaselineAiInput;
+    },
+    async resolveRequestedAiTask(effectiveAt) {
+      const current = await getCurrentAiTaskConfig(db, {
+        taskId: "SHOP_HEALTH_REVIEWER",
+        effectiveAt,
+      });
+      const config = resolveAiTaskConfig("SHOP_HEALTH_REVIEWER", current, environment);
+      if (config.source === "UNSET") throw new Error("SHOP_HEALTH_REVIEWER configuration is unavailable");
+      return {
+        taskId: "SHOP_HEALTH_REVIEWER" as const,
+        taskConfigRevisionId: config.revisionId,
+        taskConfigSource: config.source,
+        provider: config.provider,
+        requestedModel: config.model,
+        secretRef: config.secretRef,
+        promptVersion: "decision-ai-prompt.v2",
+        aiPolicyVersion: "decision-ai-policy.v1",
+        outputSchemaVersion: "decision-ai-output.v1",
+      };
     },
 
     async loadReviewStartSource(profileNo, effectiveAt) {
@@ -383,12 +408,37 @@ export function createCliDecisionWorkflow(
 ): DecisionWorkflow {
   const environment = dependencies.environment ?? process.env;
   const now = dependencies.now ?? (() => new Date());
+  const aiClientForCase = async (db: Database, caseId: string): Promise<BaselineAiClient> => {
+    const input = await getDecisionAiInput(db, caseId);
+    if (input === null) throw notFound("case", caseId);
+    const context = input.decisionContextSnapshot;
+    const source = context?.schemaVersion === "ai-decision-context.v2"
+      ? context.requestedAiTask.taskConfigSource
+      : null;
+    const revisionId = context?.schemaVersion === "ai-decision-context.v2"
+      ? context.requestedAiTask.taskConfigRevisionId
+      : null;
+    const current = source === "ENVIRONMENT"
+      ? null
+      : revisionId === null
+      ? await getCurrentAiTaskConfig(db, { taskId: "SHOP_HEALTH_REVIEWER", effectiveAt: now() })
+      : await getAiTaskConfigByRevision(db, revisionId);
+    if (source === "PERSISTED" && current === null) throw new Error("Frozen AI task revision is unavailable");
+    const config = resolveAiTaskConfig("SHOP_HEALTH_REVIEWER", current, environment);
+    return createBaselineAiClientForTask(
+      context?.schemaVersion === "ai-decision-context.v2" && !matchesFrozenAiTaskRequest(config, context.requestedAiTask)
+        ? { ...config, enabled: false, status: "DISABLED" }
+        : config,
+      { environment },
+    );
+  };
   const run = <T>(
     aiClient: BaselineAiClient,
     operation: (workflow: DecisionWorkflow) => Promise<T>,
   ): Promise<T> => withDatabase(runtime, ({ db }) => operation(createDecisionWorkflow({
-    store: createDbDecisionWorkflowStore(db, now),
+    store: createDbDecisionWorkflowStore(db, now, environment),
     aiClient,
+    aiClientForCase: (caseId) => aiClientForCase(db, caseId),
     now,
   })));
 

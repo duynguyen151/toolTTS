@@ -236,6 +236,10 @@ describe("createDashboardOperationsRuntime", () => {
     });
     await operations.updateData("957", (event) => { events.push(event); });
 
+    expect(runtimeMocks.createPersistedDecisionWorkflow).toHaveBeenCalledWith(expect.objectContaining({
+      environment: { DATABASE_URL: "postgres://dashboard-test" },
+    }));
+
     expect(calls).toEqual([
       "list-profiles",
       "list-active-profiles",

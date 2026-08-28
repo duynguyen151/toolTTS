@@ -185,6 +185,7 @@ export {
 export {
   appendAiTaskConfigRevision,
   getCurrentAiTaskConfig,
+  getAiTaskConfigByRevision,
   type AppendAiTaskConfigRevisionInput,
   type GetCurrentAiTaskConfigInput,
 } from "./queries/ai-task-configs.js";

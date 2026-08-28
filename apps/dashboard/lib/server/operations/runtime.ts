@@ -194,6 +194,7 @@ export function createDashboardOperationsRuntime(
       const workflow = createPersistedDecisionWorkflow({
         context,
         aiClient: createBaselineAiClientFromConfig(readBaselineAiConfig(environment as NodeJS.ProcessEnv)),
+        environment: environment as NodeJS.ProcessEnv,
       });
       const review = await workflow.startReview({ profileNo });
       return review.coverageSnapshot;

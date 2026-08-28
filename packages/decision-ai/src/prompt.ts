@@ -27,6 +27,7 @@ export function buildDecisionAiMessages(input: BaselineAiInput) {
         "The deterministic Rule Result is immutable and must not be rewritten.",
         "Do not fabricate unavailable metrics. Unknown is not zero.",
         "Incomplete source coverage requires cautious confidence and human review.",
+        "If Finance quality is STALE, state the stale age/limitation explicitly; do not present it as current.",
         "A complete rolling source window does not prove lifetime history completeness.",
         "Official Finance On Hold and operational order exposure are separate metrics.",
         "Provide concise rationale and evidence, not hidden chain-of-thought.",

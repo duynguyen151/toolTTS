@@ -1,5 +1,5 @@
 import { Decimal } from "decimal.js";
-import { assertFrozenDecisionContext } from "@shop-health/domain";
+import { AiDecisionContextSchema, assertFrozenDecisionContext } from "@shop-health/domain";
 import type {
   AiDecisionContext,
   DecisionCoverageSnapshot,
@@ -8,6 +8,7 @@ import type {
   DecisionRiskSnapshot,
   DecisionRuleResult,
   DecisionRuleTrigger,
+  FrozenAiTaskRequest,
   OfficialOnHoldRuleEvidence,
   MetricComparison,
   TrendName,
@@ -33,6 +34,7 @@ export interface DecisionIntelligenceInput {
   readonly ruleDecision: DecisionRuleResult;
   readonly ruleTriggers: readonly DecisionRuleTrigger[];
   readonly targetRuleEvidence?: OfficialOnHoldRuleEvidence;
+  readonly requestedAiTask?: FrozenAiTaskRequest;
   readonly previous: AiDecisionContext | null;
   readonly trendPolicy?: TrendPolicy;
 }
@@ -146,9 +148,10 @@ export function buildDecisionIntelligence(input: DecisionIntelligenceInput): { r
   ];
   const exposureFailed = input.risk.stopByOnHoldValue;
   const rateFailed = input.risk.stopByDeliveryRate;
-  const context: AiDecisionContext = {
-    schemaVersion: "ai-decision-context.v1",
+  const context = AiDecisionContextSchema.parse({
+    schemaVersion: input.requestedAiTask === undefined ? "ai-decision-context.v1" : "ai-decision-context.v2",
     ...(input.targetRuleEvidence === undefined ? {} : { targetRuleEvidence: input.targetRuleEvidence }),
+    ...(input.requestedAiTask === undefined ? {} : { requestedAiTask: input.requestedAiTask }),
     profile: input.profile,
     shop: input.shop,
     metrics: {
@@ -196,9 +199,12 @@ export function buildDecisionIntelligence(input: DecisionIntelligenceInput): { r
     },
     rule: {
       result: input.ruleDecision, policyVersion: input.risk.policyVersion,
-      checks: [
+      checks: targetRule === undefined ? [
         { metric: "operationalExposure", observedValue: exposure, threshold: input.risk.stopOnHoldValueAt, operator: "GTE", result: exposure === null ? "NOT_EVALUATED" : exposureFailed ? "FAIL" : "PASS", triggeredReason: exposureFailed ? "OPERATIONAL_EXPOSURE_LIMIT_REACHED" : null },
         { metric: "deliveryRate", observedValue: input.metrics.deliveryRate, threshold: input.risk.stopDeliveryRateBelow, operator: "LT", result: input.metrics.deliveryRate === null || !input.risk.dataSufficient ? "NOT_EVALUATED" : rateFailed ? "FAIL" : "PASS", triggeredReason: rateFailed ? "DELIVERY_RATE_BELOW_LIMIT" : null },
+      ] : [
+        { metric: "officialFinanceOnHold", observedValue: targetRule.officialOnHold.observedValue, threshold: targetRule.officialOnHold.threshold, operator: "GTE", result: targetRule.officialOnHold.state === "TRIGGERED" ? "FAIL" : targetRule.officialOnHold.state === "CLEAR" ? "PASS" : "NOT_EVALUATED", triggeredReason: targetRule.officialOnHold.state === "TRIGGERED" ? "OFFICIAL_ON_HOLD_LIMIT_REACHED" : null },
+        { metric: "deliveryRate", observedValue: targetRule.deliveryRate.observedValue, threshold: targetRule.deliveryRate.threshold, operator: "LT", result: targetRule.deliveryRate.state === "TRIGGERED" ? "FAIL" : targetRule.deliveryRate.state === "CLEAR" ? "PASS" : "NOT_EVALUATED", triggeredReason: targetRule.deliveryRate.state === "TRIGGERED" ? "DELIVERY_RATE_BELOW_LIMIT" : null },
       ],
       triggers: targetRule === undefined
         ? [...(exposureFailed ? ["OPERATIONAL_EXPOSURE" as const] : []), ...(rateFailed ? ["DELIVERY_RATE" as const] : [])]
@@ -217,7 +223,7 @@ export function buildDecisionIntelligence(input: DecisionIntelligenceInput): { r
       },
     },
     policyVersions: { metricDefinitionVersion: "decision-metrics.v1", riskPolicyVersion: input.risk.policyVersion, trendPolicyVersion: input.trendPolicy?.version ?? null },
-  };
+  });
   return {
     context: assertFrozenDecisionContext({
       context,

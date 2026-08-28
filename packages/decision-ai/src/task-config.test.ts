@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   AI_TASK_IDS,
   AiTaskConfigInputSchema,
+  matchesFrozenAiTaskRequest,
   resolveAiTaskConfig,
   type PersistedAiTaskConfig,
 } from "./task-config.js";
@@ -159,6 +160,30 @@ describe("AI task registry contract", () => {
 });
 
 describe("AI task resolution safety", () => {
+  it("rejects a retry when frozen requested metadata no longer matches its source", () => {
+    const environmentRequest = {
+      taskId: "SHOP_HEALTH_REVIEWER",
+      taskConfigRevisionId: null,
+      taskConfigSource: "ENVIRONMENT",
+      provider: "9router",
+      requestedModel: "oc/deepseek-v4-flash-free",
+      secretRef: "TOOL_AI_API_KEY",
+      promptVersion: "decision-ai-prompt.v2",
+      aiPolicyVersion: "decision-ai-policy.v1",
+      outputSchemaVersion: "decision-ai-output.v1",
+    } as const;
+    const persistedRequest = {
+      ...environmentRequest,
+      taskConfigSource: "PERSISTED" as const,
+      taskConfigRevisionId: current.revisionId,
+    };
+
+    expect(matchesFrozenAiTaskRequest(resolveAiTaskConfig("SHOP_HEALTH_REVIEWER", null, environment()), environmentRequest)).toBe(true);
+    expect(matchesFrozenAiTaskRequest(resolveAiTaskConfig("SHOP_HEALTH_REVIEWER", null, environment({ TOOL_AI_DEFAULT_MODEL: "oc/big-pickle" })), environmentRequest)).toBe(false);
+    expect(matchesFrozenAiTaskRequest(resolveAiTaskConfig("SHOP_HEALTH_REVIEWER", current, environment()), persistedRequest)).toBe(true);
+    expect(matchesFrozenAiTaskRequest(resolveAiTaskConfig("SHOP_HEALTH_REVIEWER", { ...current, secretRef: "TOOL_REVIEWER_KEY" }, environment()), persistedRequest)).toBe(false);
+  });
+
   it("rejects invalid persisted metadata before resolution", () => {
     expect(() => resolveAiTaskConfig("SHOP_HEALTH_REVIEWER", { ...current, model: "oc/unverified-free" }, environment())).toThrow();
   });

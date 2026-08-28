@@ -11,6 +11,8 @@ import {
   getDecisionReviewByRequestId,
   getFinanceSummary,
   getFullPersistedRiskOrderFacts,
+  getCurrentAiTaskConfig,
+  getAiTaskConfigByRevision,
   getRiskControlState,
   getEffectiveRiskPolicy,
   listDecisionHistory,
@@ -19,7 +21,14 @@ import {
   recordDryRunExecution,
   type DatabaseContext,
 } from "@shop-health/db";
-import type { BaselineAiClient, BaselineAiInputRecord, BaselineAiResult } from "@shop-health/decision-ai";
+import {
+  resolveAiTaskConfig,
+  matchesFrozenAiTaskRequest,
+  createBaselineAiClientForTask,
+  type BaselineAiClient,
+  type BaselineAiInputRecord,
+  type BaselineAiResult,
+} from "@shop-health/decision-ai";
 import {
   resolveFinanceHealth,
   SELLER_CENTER_OFFICIAL_ON_HOLD_PROOF,
@@ -38,6 +47,7 @@ import { createDecisionWorkflow } from "./workflow.js";
 export interface PersistedDecisionWorkflowOptions {
   readonly context: DatabaseContext;
   readonly aiClient: BaselineAiClient;
+  readonly environment?: NodeJS.ProcessEnv;
   readonly now?: () => Date;
   readonly randomUuid?: () => string;
   readonly freshnessWindowMs?: number;
@@ -124,6 +134,10 @@ export function isCompleteDecisionCoverage(
     evidence.financeSourceComplete === true &&
     evidence.financeSnapshotCapturedAt !== null &&
     evidence.sourceReconciled === true;
+}
+
+export function resolveDecisionDataCoverage(complete: boolean): "COMPLETE" | "PARTIAL" {
+  return complete ? "COMPLETE" : "PARTIAL";
 }
 
 export function assessDecisionFreshness(
@@ -271,6 +285,16 @@ export function createPersistedDecisionWorkflow(
 ) {
   const freshnessWindowMs = options.freshnessWindowMs ?? 86_400_000;
   const db = options.context.db;
+  const environment = options.environment ?? process.env;
+  const resolveConfig = async (revisionId: string | null, effectiveAt: Date, source: "PERSISTED" | "ENVIRONMENT" | null) => {
+    const current = source === "ENVIRONMENT"
+      ? null
+      : revisionId === null
+      ? await getCurrentAiTaskConfig(db, { taskId: "SHOP_HEALTH_REVIEWER", effectiveAt })
+      : await getAiTaskConfigByRevision(db, revisionId);
+    if (source === "PERSISTED" && current === null) throw new Error("Frozen AI task revision is unavailable");
+    return resolveAiTaskConfig("SHOP_HEALTH_REVIEWER", current, environment);
+  };
   const store: DecisionWorkflowStore = {
     async getDecisionReviewByRequestId(requestId): Promise<PersistedDecisionReview | null> {
       return (await getDecisionReviewByRequestId(db, requestId)) as PersistedDecisionReview | null;
@@ -279,6 +303,25 @@ export function createPersistedDecisionWorkflow(
       const input = await getDecisionAiInput(db, caseId);
       if (input === null) throw new Error(`Decision case not found: ${caseId}`);
       return input satisfies BaselineAiInputRecord;
+    },
+    async resolveRequestedAiTask(effectiveAt) {
+      const current = await getCurrentAiTaskConfig(db, {
+        taskId: "SHOP_HEALTH_REVIEWER",
+        effectiveAt,
+      });
+      const config = resolveAiTaskConfig("SHOP_HEALTH_REVIEWER", current, environment);
+      if (config.source === "UNSET") throw new Error("SHOP_HEALTH_REVIEWER configuration is unavailable");
+      return {
+        taskId: "SHOP_HEALTH_REVIEWER" as const,
+        taskConfigRevisionId: config.revisionId,
+        taskConfigSource: config.source,
+        provider: config.provider,
+        requestedModel: config.model,
+        secretRef: config.secretRef,
+        promptVersion: "decision-ai-prompt.v2",
+        aiPolicyVersion: "decision-ai-policy.v1",
+        outputSchemaVersion: "decision-ai-output.v1",
+      };
     },
     async loadReviewStartSource(profileNo, effectiveAt): Promise<ReviewStartSource> {
       const shop = await findShopByProfileNo(db, profileNo);
@@ -352,7 +395,7 @@ export function createPersistedDecisionWorkflow(
         financeSyncAt: latestFinanceRun?.finishedAt ?? null,
         financeCapturedAt: provenFinanceCaptureAt,
       });
-      const dataCoverage = complete && freshness === "FRESH" ? "COMPLETE" as const : "PARTIAL" as const;
+      const dataCoverage = resolveDecisionDataCoverage(complete);
       const coverageSnapshot: DecisionCoverageSnapshot = {
         coverageState: dataCoverage,
         persistedMetricsWindow: "FULL_PERSISTED_HISTORY",
@@ -458,6 +501,21 @@ export function createPersistedDecisionWorkflow(
   return createDecisionWorkflow({
     store,
     aiClient: options.aiClient,
+    aiClientForCase: async (caseId) => {
+      const input = await getDecisionAiInput(db, caseId);
+      const context = input?.decisionContextSnapshot;
+      const source = context?.schemaVersion === "ai-decision-context.v2"
+        ? context.requestedAiTask.taskConfigSource
+        : null;
+      const revisionId = context?.schemaVersion === "ai-decision-context.v2"
+        ? context.requestedAiTask.taskConfigRevisionId
+        : null;
+      const config = await resolveConfig(revisionId, options.now?.() ?? new Date(), source);
+      if (context?.schemaVersion === "ai-decision-context.v2" && !matchesFrozenAiTaskRequest(config, context.requestedAiTask)) {
+        return createBaselineAiClientForTask({ ...config, enabled: false, status: "DISABLED" }, { environment });
+      }
+      return createBaselineAiClientForTask(config, { environment });
+    },
     ...(options.now === undefined ? {} : { now: options.now }),
     ...(options.randomUuid === undefined ? {} : { randomUuid: options.randomUuid }),
   });

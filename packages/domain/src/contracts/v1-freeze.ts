@@ -182,7 +182,26 @@ export const RuleEvaluationSchema = z.object({
   evaluatedAt: TimestampSchema,
 }).strict();
 
-export const AiDecisionContextSchema = z.object({
+export const FrozenAiTaskRequestSchema = z.object({
+  taskId: z.literal("SHOP_HEALTH_REVIEWER"),
+  taskConfigRevisionId: z.string().uuid().nullable(),
+  taskConfigSource: z.enum(["PERSISTED", "ENVIRONMENT"]),
+  provider: z.enum(["9router", "openai-compatible", "huggingface-hosted"]).nullable(),
+  requestedModel: z.string().trim().min(1).max(256).nullable(),
+  secretRef: z.string().trim().regex(/^[A-Z][A-Z0-9_]{0,127}$/).nullable(),
+  promptVersion: z.literal("decision-ai-prompt.v2"),
+  aiPolicyVersion: z.literal("decision-ai-policy.v1"),
+  outputSchemaVersion: z.literal("decision-ai-output.v1"),
+}).strict().superRefine((request, context) => {
+  if (request.taskConfigSource === "PERSISTED" && request.taskConfigRevisionId === null) {
+    context.addIssue({ code: "custom", path: ["taskConfigRevisionId"], message: "persisted AI task requests require a revision ID" });
+  }
+  if (request.taskConfigSource === "ENVIRONMENT" && request.taskConfigRevisionId !== null) {
+    context.addIssue({ code: "custom", path: ["taskConfigRevisionId"], message: "environment AI task requests must not carry a revision ID" });
+  }
+});
+
+const AiDecisionContextV1Schema = z.object({
   schemaVersion: z.literal("ai-decision-context.v1"),
   targetRuleEvidence: OfficialOnHoldRuleEvidenceSchema.optional(),
   profile: z.object({
@@ -212,6 +231,14 @@ export const AiDecisionContextSchema = z.object({
     trendPolicyVersion: z.string().trim().min(1).nullable(),
   }).strict(),
 }).strict();
+
+export const AiDecisionContextSchema = z.union([
+  AiDecisionContextV1Schema,
+  AiDecisionContextV1Schema.extend({
+    schemaVersion: z.literal("ai-decision-context.v2"),
+    requestedAiTask: FrozenAiTaskRequestSchema,
+  }).strict(),
+]);
 
 // Existing AI persistence contract already contains availability, advice, and provenance.
 export const AiAnalysisSchema = AiDecisionInputSchema;
@@ -293,6 +320,7 @@ export type TrendSignal = z.infer<typeof TrendSignalSchema>;
 export type RuleCheck = z.infer<typeof RuleCheckSchema>;
 export type RuleTriggerForV1 = z.infer<typeof RuleTriggerForV1Schema>;
 export type RuleEvaluation = z.infer<typeof RuleEvaluationSchema>;
+export type FrozenAiTaskRequest = z.infer<typeof FrozenAiTaskRequestSchema>;
 export type AiDecisionContext = z.infer<typeof AiDecisionContextSchema>;
 export type AiAnalysis = z.infer<typeof AiAnalysisSchema>;
 export type ReviewQueueReason = z.infer<typeof ReviewQueueReasonSchema>;

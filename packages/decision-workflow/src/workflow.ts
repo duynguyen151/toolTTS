@@ -11,6 +11,7 @@ import {
   type DecisionMetricsSnapshot,
   type DecisionRiskSnapshot,
   type DecisionRuleTrigger,
+  type FrozenAiTaskRequest,
   type OfficialOnHoldRuleEvidence,
   type TargetRuleConditionState,
   type RiskOrderFact,
@@ -59,6 +60,7 @@ export interface ReviewStartSource {
 export interface DecisionWorkflowStore {
   getDecisionReviewByRequestId(requestId: string): Promise<PersistedDecisionReview | null>;
   getDecisionAiInput(caseId: string): Promise<BaselineAiInputRecord>;
+  resolveRequestedAiTask(effectiveAt: Date): Promise<FrozenAiTaskRequest>;
   loadReviewStartSource(profileNo: string, effectiveAt: Date): Promise<ReviewStartSource>;
   createDecisionCase(input: {
     readonly requestId: string;
@@ -170,6 +172,7 @@ function targetRuleCoverage(
 export function createDecisionWorkflow(dependencies: {
   readonly store: DecisionWorkflowStore;
   readonly aiClient: BaselineAiClient;
+  readonly aiClientForCase?: (caseId: string) => Promise<BaselineAiClient>;
   readonly now?: () => Date;
   readonly randomUuid?: () => string;
 }): DecisionWorkflow {
@@ -177,7 +180,10 @@ export function createDecisionWorkflow(dependencies: {
   const newRequestId = dependencies.randomUuid ?? randomUUID;
   const completeAi = async (caseId: string, requestId: string): Promise<DecisionReviewView> => {
     const aiInput = await dependencies.store.getDecisionAiInput(caseId);
-    const aiResult = await dependencies.aiClient.recommend(aiInput);
+    const aiClient = dependencies.aiClientForCase === undefined
+      ? dependencies.aiClient
+      : await dependencies.aiClientForCase(caseId);
+    const aiResult = await aiClient.recommend(aiInput);
     await dependencies.store.recordAiDecision({
       requestId,
       decisionCaseId: caseId,
@@ -205,6 +211,7 @@ export function createDecisionWorkflow(dependencies: {
       const observedAt = now();
       const source = await dependencies.store.loadReviewStartSource(input.profileNo, observedAt);
       const requestId = input.requestId ?? newRequestId();
+      const requestedAiTask = await dependencies.store.resolveRequestedAiTask(observedAt);
       const risk = evaluateRiskControlFacts({
         facts: source.facts,
         policy: toRiskControlPolicy(source.resolvedPolicySnapshot),
@@ -283,7 +290,6 @@ export function createDecisionWorkflow(dependencies: {
       });
       const ruleDecision = targetRuleEvidence.decision;
       const triggers = targetRuleTriggers(targetRuleEvidence);
-      const targetRiskSnapshot = legacyRuleContext(riskSnapshot, targetRuleEvidence);
       const decisionContextSnapshot = buildDecisionIntelligence({
         observedAt,
         profile: { profileId: source.decisionIdentity.profileId, profileNo: source.shop.profileNo },
@@ -298,10 +304,11 @@ export function createDecisionWorkflow(dependencies: {
         metrics: metricsSnapshot,
         finance: source.financeSnapshot,
         coverage: coverageSnapshot,
-        risk: targetRiskSnapshot,
+        risk: riskSnapshot,
         ruleDecision,
         ruleTriggers: triggers,
         targetRuleEvidence,
+        requestedAiTask,
         previous: source.previousDecisionContext,
       }).context;
       const created = await dependencies.store.createDecisionCase({
@@ -311,7 +318,7 @@ export function createDecisionWorkflow(dependencies: {
           shopId: source.shop.id,
           observedAt,
           metricsSnapshot,
-          riskSnapshot: targetRiskSnapshot,
+          riskSnapshot,
           financeSnapshot: source.financeSnapshot,
           coverageSnapshot,
           ruleDecision,

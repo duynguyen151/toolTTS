@@ -64,3 +64,12 @@ export async function getCurrentAiTaskConfig(
   )).orderBy(desc(aiTaskConfigs.effectiveFrom), desc(aiTaskConfigs.sequence)).limit(1);
   return row === undefined ? null : toPersisted(row);
 }
+
+export async function getAiTaskConfigByRevision(
+  db: Database,
+  revisionId: string,
+): Promise<PersistedAiTaskConfig | null> {
+  const id = z.string().uuid().parse(revisionId);
+  const [row] = await db.select().from(aiTaskConfigs).where(eq(aiTaskConfigs.revisionId, id)).limit(1);
+  return row === undefined ? null : toPersisted(row);
+}

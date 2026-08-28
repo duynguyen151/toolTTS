@@ -433,14 +433,16 @@ describe("decision workflow persistence boundaries", () => {
       },
       risk: {
         ...baseContext.risk,
-        operationalExposure: "5000.0000",
-        stopByOnHoldValue: true,
       },
       rule: {
         ...baseContext.rule,
         result: "PAUSE" as const,
         triggers: ["OFFICIAL_ON_HOLD" as const],
         expression: targetRuleEvidence.expression,
+        checks: [
+          { metric: "officialFinanceOnHold", observedValue: "5000.0000", threshold: "3500.0000", operator: "GTE" as const, result: "FAIL" as const, triggeredReason: "OFFICIAL_ON_HOLD_LIMIT_REACHED" as const },
+          { metric: "deliveryRate", observedValue: 0.84, threshold: 0.7, operator: "LT" as const, result: "PASS" as const, triggeredReason: null },
+        ],
       },
     };
     const caseInput = {
@@ -450,8 +452,6 @@ describe("decision workflow persistence boundaries", () => {
       financeSnapshot: { ...input.decisionCase.financeSnapshot, officialOnHoldAmount: "5000.0000" },
       riskSnapshot: {
         ...input.decisionCase.riskSnapshot,
-        onHoldValue: "5000.0000",
-        stopByOnHoldValue: true,
       },
       ruleDecision: "PAUSE" as const,
       ruleTriggers: ["ONHOLD_VALUE" as const],
@@ -502,14 +502,23 @@ describe("decision workflow persistence boundaries", () => {
       ...baseContext,
       targetRuleEvidence,
       metrics: { ...baseContext.metrics, finance: { ...baseContext.metrics.finance, officialFinanceOnHold: "5000.0000" } },
-      risk: { ...baseContext.risk, operationalExposure: "5000.0000", stopByOnHoldValue: true },
-      rule: { ...baseContext.rule, result: "PAUSE" as const, triggers: ["OFFICIAL_ON_HOLD" as const], expression: targetRuleEvidence.expression },
+      risk: { ...baseContext.risk },
+      rule: {
+        ...baseContext.rule,
+        result: "PAUSE" as const,
+        triggers: ["OFFICIAL_ON_HOLD" as const],
+        expression: targetRuleEvidence.expression,
+        checks: [
+          { metric: "officialFinanceOnHold", observedValue: "5000.0000", threshold: "3500.0000", operator: "GTE" as const, result: "FAIL" as const, triggeredReason: "OFFICIAL_ON_HOLD_LIMIT_REACHED" as const },
+          { metric: "deliveryRate", observedValue: 0.84, threshold: 0.7, operator: "LT" as const, result: "PASS" as const, triggeredReason: null },
+        ],
+      },
     };
     const decisionCase = {
       ...input.decisionCase,
       caseOrigin: "LIVE" as const,
       financeSnapshot: { ...input.decisionCase.financeSnapshot, officialOnHoldAmount: "5000.0000" },
-      riskSnapshot: { ...input.decisionCase.riskSnapshot, onHoldValue: "5000.0000", stopByOnHoldValue: true },
+      riskSnapshot: { ...input.decisionCase.riskSnapshot },
       ruleDecision: "PAUSE" as const,
       ruleTriggers: ["ONHOLD_VALUE" as const],
       decisionContextSnapshot: context,
@@ -628,6 +637,10 @@ describe("decision workflow persistence boundaries", () => {
         ...decisionContextSnapshot.rule,
         expression: targetRuleEvidence.expression,
         triggers: [],
+        checks: [
+          { metric: "officialFinanceOnHold", observedValue: "1200.0000", threshold: "3500.0000", operator: "GTE" as const, result: "PASS" as const, triggeredReason: null },
+          { metric: "deliveryRate", observedValue: 0.84, threshold: 0.7, operator: "LT" as const, result: "PASS" as const, triggeredReason: null },
+        ],
       },
     };
     const db = {

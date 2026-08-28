@@ -86,6 +86,13 @@ export function createBaselineAiClientFromProvider(
       if (!config.enabled) return unavailable("FEATURE_DISABLED");
       if (config.authMode === "CONFIG_MISSING") return unavailable("CONFIG_MISSING");
       const quality = parsedInput.coverageSnapshot;
+      const staleAdvisoryAllowed = quality.freshness === "STALE"
+        && quality.source === "SELLER_CENTER"
+        && quality.coverageState === "COMPLETE"
+        && quality.ordersSourceComplete === true
+        && quality.financeRequiredSourceComplete === true
+        && quality.sourceReconciled === true
+        && parsedInput.financeSnapshot.officialOnHoldAmount !== null;
       if (
         quality.coverageState !== "COMPLETE" ||
         quality.source !== "SELLER_CENTER" ||
@@ -99,7 +106,7 @@ export function createBaselineAiClientFromProvider(
         quality.latestSuccessfulSyncAt === undefined ||
         quality.financeCapturedAt === null ||
         quality.financeCapturedAt === undefined ||
-        quality.freshness !== "FRESH"
+        (quality.freshness !== "FRESH" && !staleAdvisoryAllowed)
       ) {
         return unavailable("INVALID_RESPONSE");
       }

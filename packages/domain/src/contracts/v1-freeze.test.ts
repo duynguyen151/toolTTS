@@ -4,6 +4,7 @@ import {
   AiDecisionContextSchema,
   BaDecisionRevisionSchema,
   BaReviewCommandSchema,
+  FrozenAiTaskRequestSchema,
   MetricComparisonSchema,
   ReviewQueueReasonSchema,
   ShopHealthSnapshotSchema,
@@ -155,8 +156,35 @@ describe("V1 shared contracts", () => {
     }).status).toBe("NOT_EVALUATED");
   });
 
+  it("freezes the source used to resolve the requested AI task", () => {
+    const request = {
+      taskId: "SHOP_HEALTH_REVIEWER",
+      taskConfigRevisionId: null,
+      taskConfigSource: "ENVIRONMENT",
+      provider: "9router",
+      requestedModel: "oc/deepseek-v4-flash-free",
+      secretRef: "TOOL_AI_API_KEY",
+      promptVersion: "decision-ai-prompt.v2",
+      aiPolicyVersion: "decision-ai-policy.v1",
+      outputSchemaVersion: "decision-ai-output.v1",
+    };
+
+    expect(FrozenAiTaskRequestSchema.safeParse(request).success).toBe(true);
+    const { taskConfigSource: _taskConfigSource, ...withoutSource } = request;
+    expect(FrozenAiTaskRequestSchema.safeParse(withoutSource).success).toBe(false);
+    expect(FrozenAiTaskRequestSchema.safeParse({
+      ...request,
+      taskConfigSource: "PERSISTED",
+    }).success).toBe(false);
+    expect(FrozenAiTaskRequestSchema.safeParse({
+      ...request,
+      taskConfigSource: "ENVIRONMENT",
+      taskConfigRevisionId: "00000000-0000-4000-8000-000000000001",
+    }).success).toBe(false);
+  });
+
   it("requires the AI context to retain deterministic audit inputs", () => {
-    expect(AiDecisionContextSchema.shape).toMatchObject({
+    expect(AiDecisionContextSchema.options[0]?.shape).toMatchObject({
       schemaVersion: expect.anything(),
       profile: expect.anything(),
       shop: expect.anything(),

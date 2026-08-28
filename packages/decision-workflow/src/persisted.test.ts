@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { assessDecisionFreshness, isCompleteDecisionCoverage, resolveDecisionDeliveryHealth, resolveDecisionFinanceHealth, resolveDecisionPeriod, resolveFinanceCaptureAt, resolveVerifiedFinanceCaptureAt } from "./persisted.js";
+import { assessDecisionFreshness, isCompleteDecisionCoverage, resolveDecisionDataCoverage, resolveDecisionDeliveryHealth, resolveDecisionFinanceHealth, resolveDecisionPeriod, resolveFinanceCaptureAt, resolveVerifiedFinanceCaptureAt } from "./persisted.js";
 
 describe("assessDecisionFreshness", () => {
   it("requires Orders sync, Finance sync, and Finance capture all within the window", () => {
@@ -199,6 +199,11 @@ describe("resolveDecisionPeriod", () => {
 });
 
 describe("isCompleteDecisionCoverage", () => {
+  it("retains complete coverage when its captured evidence is stale", () => {
+    expect(resolveDecisionDataCoverage(true)).toBe("COMPLETE");
+    expect(resolveDecisionDataCoverage(false)).toBe("PARTIAL");
+  });
+
   it("requires the exact Seller Center rolling-window coverage proof", () => {
     expect(isCompleteDecisionCoverage({
       sourceCoverage: null,

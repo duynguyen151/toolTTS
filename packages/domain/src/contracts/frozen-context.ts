@@ -254,8 +254,8 @@ export function validateFrozenDecisionContext(input: FrozenContextValidationInpu
   if (!parsed.success) return { valid: false, issues: ["frozen context does not match the v1 schema"] };
   const context = parsed.data;
   const issues: string[] = [];
-  if (input.targetRuleEvidence !== undefined) {
-    const target = input.targetRuleEvidence;
+  const target = input.targetRuleEvidence ?? context.targetRuleEvidence;
+  if (target !== undefined) {
     const contextTriggers = target.triggers.map((trigger) =>
       trigger === "OFFICIAL_ON_HOLD" ? "OFFICIAL_ON_HOLD" as const : "DELIVERY_RATE" as const,
     );
@@ -279,7 +279,6 @@ export function validateFrozenDecisionContext(input: FrozenContextValidationInpu
       if (input.owner.profileId !== undefined && context.profile.profileId !== input.owner.profileId) issues.push("context profile id is not owned by the decision case");
       if (input.owner.profileNo !== undefined && context.profile.profileNo !== input.owner.profileNo) issues.push("context profile number is not owned by the decision case");
     }
-    return issues.length === 0 ? { valid: true, context } : { valid: false, issues };
   }
   const contextMetrics = context.metrics.decision;
   const contextFinance = context.metrics.finance;
@@ -289,14 +288,16 @@ export function validateFrozenDecisionContext(input: FrozenContextValidationInpu
   const expectedStopByRate = input.metrics.deliveryRate !== null
     && input.risk.dataSufficient
     && input.metrics.deliveryRate < input.risk.stopDeliveryRateBelow;
-  const expectedRuleDecision: DecisionRuleResult = expectedStopByExposure || expectedStopByRate
+  const expectedRuleDecision: DecisionRuleResult = target?.decision ?? (expectedStopByExposure || expectedStopByRate
     ? "PAUSE"
-    : input.risk.dataSufficient ? "CONTINUE" : "INSUFFICIENT_DATA";
-  const expectedRuleTriggers: DecisionRuleTrigger[] = [
-    ...(expectedStopByExposure ? ["ONHOLD_VALUE" as const] : []),
-    ...(expectedStopByRate ? ["DELIVERY_RATE" as const] : []),
-  ];
-  const expectedChecks = [
+    : input.risk.dataSufficient ? "CONTINUE" : "INSUFFICIENT_DATA");
+  const expectedRuleTriggers: DecisionRuleTrigger[] = target === undefined
+    ? [
+        ...(expectedStopByExposure ? ["ONHOLD_VALUE" as const] : []),
+        ...(expectedStopByRate ? ["DELIVERY_RATE" as const] : []),
+      ]
+    : target.triggers.map((trigger) => trigger === "OFFICIAL_ON_HOLD" ? "ONHOLD_VALUE" as const : "DELIVERY_RATE" as const);
+  const expectedChecks = target === undefined ? [
     {
       metric: "operationalExposure",
       observedValue: input.metrics.onHoldValue,
@@ -313,6 +314,23 @@ export function validateFrozenDecisionContext(input: FrozenContextValidationInpu
       result: input.metrics.deliveryRate === null || !input.risk.dataSufficient ? "NOT_EVALUATED" as const : expectedStopByRate ? "FAIL" as const : "PASS" as const,
       triggeredReason: expectedStopByRate ? "DELIVERY_RATE_BELOW_LIMIT" : null,
     },
+  ] : [
+    {
+      metric: "officialFinanceOnHold",
+      observedValue: target.officialOnHold.observedValue,
+      threshold: target.officialOnHold.threshold,
+      operator: "GTE" as const,
+      result: target.officialOnHold.state === "TRIGGERED" ? "FAIL" as const : target.officialOnHold.state === "CLEAR" ? "PASS" as const : "NOT_EVALUATED" as const,
+      triggeredReason: target.officialOnHold.state === "TRIGGERED" ? "OFFICIAL_ON_HOLD_LIMIT_REACHED" : null,
+    },
+    {
+      metric: "deliveryRate",
+      observedValue: target.deliveryRate.observedValue,
+      threshold: target.deliveryRate.threshold,
+      operator: "LT" as const,
+      result: target.deliveryRate.state === "TRIGGERED" ? "FAIL" as const : target.deliveryRate.state === "CLEAR" ? "PASS" as const : "NOT_EVALUATED" as const,
+      triggeredReason: target.deliveryRate.state === "TRIGGERED" ? "DELIVERY_RATE_BELOW_LIMIT" : null,
+    },
   ];
 
   if (input.owner !== undefined) {
@@ -328,10 +346,12 @@ export function validateFrozenDecisionContext(input: FrozenContextValidationInpu
   if (!equalDataQuality(context.dataQuality, quality)) issues.push("context data quality disagrees with canonical coverage");
   if (context.risk.policyVersion !== input.risk.policyVersion || context.risk.evaluatedAt !== input.risk.evaluatedAt || !equalValue(context.risk.operationalExposure, input.risk.onHoldValue) || !equalValue(context.risk.deliveryRate, input.risk.deliveryRate) || context.risk.stopByOnHoldValue !== expectedStopByExposure || context.risk.stopByDeliveryRate !== expectedStopByRate || context.risk.dataSufficient !== input.risk.dataSufficient || !equalValue(context.risk.stopOnHoldValueAt, input.risk.stopOnHoldValueAt) || context.risk.stopDeliveryRateBelow !== input.risk.stopDeliveryRateBelow || context.risk.minimumOrdersForRateRule !== input.risk.minimumOrdersForRateRule) issues.push("context risk disagrees with canonical risk");
   if (input.ruleDecision !== expectedRuleDecision || context.rule.result !== expectedRuleDecision || !equalArray(input.ruleTriggers, expectedRuleTriggers, (a, b) => a === b)) issues.push("rule result or triggers contradict canonical risk");
-  const expectedContextTriggers = expectedRuleTriggers.map((trigger) => trigger === "ONHOLD_VALUE" ? "OPERATIONAL_EXPOSURE" as const : "DELIVERY_RATE" as const);
+  const expectedContextTriggers = target === undefined
+    ? expectedRuleTriggers.map((trigger) => trigger === "ONHOLD_VALUE" ? "OPERATIONAL_EXPOSURE" as const : "DELIVERY_RATE" as const)
+    : target.triggers;
   if (!equalArray(context.rule.triggers, expectedContextTriggers, (a, b) => a === b)) issues.push("context rule triggers disagree with canonical risk");
   if (!equalArray(context.rule.checks, expectedChecks, (left, right) => left.metric === right.metric && equalValue(left.observedValue, right.observedValue) && equalValue(left.threshold, right.threshold) && left.operator === right.operator && left.result === right.result && left.triggeredReason === right.triggeredReason)) issues.push("context rule checks disagree with canonical thresholds");
-  const expectedExpression = `operationalExposure >= ${new Decimal(input.risk.stopOnHoldValueAt).toString()} ${input.metrics.currency} OR deliveryRate < ${new Decimal(input.risk.stopDeliveryRateBelow).times(100).toString()}%`;
+  const expectedExpression = target?.expression ?? `operationalExposure >= ${new Decimal(input.risk.stopOnHoldValueAt).toString()} ${input.metrics.currency} OR deliveryRate < ${new Decimal(input.risk.stopDeliveryRateBelow).times(100).toString()}%`;
   if (context.rule.policyVersion !== input.risk.policyVersion || context.rule.expression !== expectedExpression) issues.push("context rule policy or expression disagrees with canonical thresholds");
   if (context.policyVersions.metricDefinitionVersion !== "decision-metrics.v1" || context.policyVersions.riskPolicyVersion !== input.risk.policyVersion || (input.trendPolicy !== undefined && context.policyVersions.trendPolicyVersion !== input.trendPolicy.version)) issues.push("context policy versions disagree with canonical policy");
   if (input.trendPolicy === undefined && context.policyVersions.trendPolicyVersion !== null) issues.push("trend policy version cannot be verified without a canonical trend policy");

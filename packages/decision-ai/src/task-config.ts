@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { FrozenAiTaskRequest } from "@shop-health/domain";
 
 import { readBaselineAiConfig } from "./config.js";
 import { createToolAiModelRegistry, type ToolAiModelRegistry } from "./registry.js";
@@ -195,4 +196,17 @@ export function resolveAiTaskConfig(
     return persistedConfig(persisted);
   }
   return taskId === "SHOP_HEALTH_REVIEWER" ? environmentConfig(environment) : unsetConfig(taskId);
+}
+
+export function matchesFrozenAiTaskRequest(
+  config: ResolvedAiTaskConfig,
+  request: FrozenAiTaskRequest,
+): boolean {
+  return config.source !== "UNSET" &&
+    config.taskId === request.taskId &&
+    config.source === request.taskConfigSource &&
+    config.revisionId === request.taskConfigRevisionId &&
+    config.provider === request.provider &&
+    config.model === request.requestedModel &&
+    config.secretRef === request.secretRef;
 }

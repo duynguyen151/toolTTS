@@ -186,6 +186,7 @@ function decisionCenterFromReviews(
     decidedAt: displayTimestamp(ba.decidedAt),
     notes: ba.notes ?? ba.note ?? "No note provided.",
     evidence: evidence("BA_DECISION_REVISION", "BA_DECISION", ba.decidedAt),
+    plannedMethods: ba.plannedMethods ?? [],
   })));
 
   return {

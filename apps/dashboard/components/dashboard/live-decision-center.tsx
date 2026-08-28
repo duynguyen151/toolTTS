@@ -151,7 +151,7 @@ export function LiveDecisionCenter({ dataOrigin, center }: Props) {
         <p>Current decision: <strong>{view.ba.current}</strong></p>
         <p>{view.ba.currentDetail}</p>
         {view.caseId !== null && view.profileNo !== null ? <LiveBaForm caseId={view.caseId} profileNo={view.profileNo} /> : <p>LIVE BA submission is unavailable because no persisted decision case was returned.</p>}
-        <ol>{view.ba.history.map((entry, index) => <li key={`${entry.decidedAt}-${index}`}><time>{entry.decidedAt}</time> · {entry.decision} · {entry.reason} · {entry.actor}<p>{entry.notes}</p><Evidence {...entry.evidence} /></li>)}</ol>
+        <ol>{view.ba.history.map((entry, index) => <li key={`${entry.decidedAt}-${index}`}><time>{entry.decidedAt}</time> · {entry.decision} · {entry.reason} · {entry.actor}<p>{entry.notes}</p>{entry.plannedMethods.length === 0 ? null : <p>Planned methods (intent only): {entry.plannedMethods.join(", ")}</p>}<Evidence {...entry.evidence} /></li>)}</ol>
         {view.ba.history.length === 0 ? <p>No persisted BA history is available.</p> : null}
       </section>
 

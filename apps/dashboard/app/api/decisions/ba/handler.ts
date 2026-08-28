@@ -58,6 +58,7 @@ function historyRows(review: DecisionReviewRecord): Array<Record<string, unknown
     decision: revision.decision,
     reasonCode: revision.reasonCode,
     reasonCodes: revision.reasonCodes,
+    plannedMethods: revision.plannedMethods ?? [],
     actor: revision.actor,
     notes: revision.notes ?? revision.note,
     decidedAt: revision.decidedAt.toISOString(),

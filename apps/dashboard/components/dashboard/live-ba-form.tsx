@@ -3,7 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
-const DECISIONS = ["SCALE", "CONTINUE", "WATCH", "PAUSE"] as const;
+const DECISIONS = ["SCALE", "CONTINUE", "SLOW_SELL", "WATCH", "PAUSE"] as const;
+const PLANNED_METHODS = ["DISABLE_FLASH_SALE", "INCREASE_PRICE", "OTHER"] as const;
 const REASONS = [
   "HIGH_ABSOLUTE_EXPOSURE",
   "LOW_DELIVERY_RATE",
@@ -23,6 +24,7 @@ export function LiveBaForm({ caseId, profileNo }: { caseId: string; profileNo: s
   const router = useRouter();
   const [decision, setDecision] = useState<string>("");
   const [reasonCode, setReasonCode] = useState<string>("");
+  const [plannedMethods, setPlannedMethods] = useState<string[]>([]);
   const [notes, setNotes] = useState("");
   const [message, setMessage] = useState("A submission creates an append-only LIVE revision.");
   const [busy, setBusy] = useState(false);
@@ -31,6 +33,14 @@ export function LiveBaForm({ caseId, profileNo }: { caseId: string; profileNo: s
     event.preventDefault();
     if (!decision || !reasonCode) {
       setMessage("Decision and reason code are required.");
+      return;
+    }
+    if (decision === "SLOW_SELL" && plannedMethods.length === 0) {
+      setMessage("At least one planned method is required for SLOW_SELL.");
+      return;
+    }
+    if (decision === "SLOW_SELL" && plannedMethods.includes("OTHER") && !notes.trim()) {
+      setMessage("Notes are required when planned method OTHER is selected.");
       return;
     }
     if (reasonCode === "OTHER" && !notes.trim()) {
@@ -49,6 +59,7 @@ export function LiveBaForm({ caseId, profileNo }: { caseId: string; profileNo: s
           baDecision: {
             decision,
             reasonCode,
+            ...(decision === "SLOW_SELL" ? { plannedMethods } : {}),
             ...(notes.trim() === "" ? {} : { notes: notes.trim() }),
           },
         }),
@@ -61,6 +72,7 @@ export function LiveBaForm({ caseId, profileNo }: { caseId: string; profileNo: s
       setMessage("LIVE BA decision persisted. Reloading the current decision and full revision history.");
       setDecision("");
       setReasonCode("");
+      setPlannedMethods([]);
       setNotes("");
       router.refresh();
     } catch {
@@ -87,6 +99,10 @@ export function LiveBaForm({ caseId, profileNo }: { caseId: string; profileNo: s
             {value}
           </label>
         ))}
+      </fieldset>
+      <fieldset disabled={busy || decision !== "SLOW_SELL"} hidden={decision !== "SLOW_SELL"}>
+        <legend>Planned methods <strong>Required for SLOW_SELL</strong></legend>
+        {PLANNED_METHODS.map((method) => <label key={method}><input name="plannedMethods" type="checkbox" value={method} checked={plannedMethods.includes(method)} onChange={(event) => setPlannedMethods((current) => event.target.checked ? [...current, method] : current.filter((value) => value !== method))} />{method}</label>)}
       </fieldset>
       <label>
         Reason code <strong>Required</strong>

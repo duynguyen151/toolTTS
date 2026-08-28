@@ -86,4 +86,30 @@ describe("LiveDecisionCenter", () => {
       expect(html).toContain(state);
     }
   });
+
+  it("renders persisted SLOW_SELL methods as intent without an execution control", () => {
+    const html = renderToStaticMarkup(createElement(LiveDecisionCenter, {
+      dataOrigin: "LIVE",
+      center: {
+        ...center,
+        ba: {
+          ...center.ba,
+          current: "SLOW_SELL",
+          history: [{
+            decision: "SLOW_SELL",
+            reason: "LOW_DELIVERY_RATE",
+            actor: "operator",
+            decidedAt: "16 Aug 2026, 09:00 GMT+7",
+            notes: "Review a further operator-led method.",
+            plannedMethods: ["DISABLE_FLASH_SALE", "OTHER"],
+            evidence: center.ba.evidence,
+          }],
+        },
+      },
+    }));
+
+    expect(html).toContain("DISABLE_FLASH_SALE");
+    expect(html).toContain("OTHER");
+    expect(html).not.toContain("Execute SLOW_SELL");
+  });
 });

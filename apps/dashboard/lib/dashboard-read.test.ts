@@ -609,5 +609,6 @@ describe("loadDashboardPresentation", () => {
     expect(presentation.decisionCenter?.caseId).toBe("current-case");
     expect(history.map((entry) => entry.reason)).toEqual(["CURRENT_REASON", "CURRENT_PRIOR_REASON"]);
     expect(history.some((entry) => entry.reason === "OLDER_REASON")).toBe(false);
+    expect(history[0]?.plannedMethods).toEqual([]);
   });
 });

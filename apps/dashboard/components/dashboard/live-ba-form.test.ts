@@ -18,7 +18,9 @@ describe("LiveBaForm", () => {
     expect(html).toContain('value="CONTINUE"');
     expect(html).toContain('value="WATCH"');
     expect(html).toContain('value="PAUSE"');
+    expect(html).toContain('value="SLOW_SELL"');
     expect(html).toContain('value="OTHER"');
+    expect(html).toContain('name="plannedMethods"');
     expect(html).toContain('name="notes"');
     expect(html).not.toContain("fixture");
   });

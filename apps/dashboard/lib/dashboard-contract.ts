@@ -182,7 +182,7 @@ export interface DashboardBaEvidence {
   current: string;
   currentDetail: string;
   evidence: DashboardEvidenceMetadata;
-  history: Array<{ decision: string; reason: string; actor: string; decidedAt: string; notes: string; evidence: DashboardEvidenceMetadata }>;
+  history: Array<{ decision: string; reason: string; actor: string; decidedAt: string; notes: string; plannedMethods: string[]; evidence: DashboardEvidenceMetadata }>;
 }
 
 export interface DashboardExecutionEvidence {

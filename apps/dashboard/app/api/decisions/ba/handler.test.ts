@@ -49,6 +49,21 @@ describe("POST /api/decisions/ba", () => {
     expect(persistence).not.toHaveBeenCalled();
   });
 
+  it("requires notes when SLOW_SELL includes the OTHER planned method", async () => {
+    const persistence = vi.fn();
+    const response = await createBaDecisionHandler(store({ recordBaDecision: persistence }))(
+      request({ profileNo: "957", caseId, baDecision: {
+        decision: "SLOW_SELL",
+        reasonCode: "LOW_DELIVERY_RATE",
+        plannedMethods: ["OTHER"],
+      } }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+    expect(persistence).not.toHaveBeenCalled();
+  });
+
   it("fails closed when the BA actor is missing", async () => {
     const persistence = vi.fn();
     const response = await createBaDecisionHandler(store({ recordBaDecision: persistence }), { actor: "" })(
@@ -85,6 +100,52 @@ describe("POST /api/decisions/ba", () => {
       baDecision: expect.objectContaining({ decision: "WATCH", reasonCode: "DATA_INCOMPLETE", notes: "Review coverage" }),
     }));
     expect(await response.json()).toMatchObject({ ok: true, caseId, history: [{ id: "ba-2" }, { id: "ba-1" }] });
+  });
+
+  it("persists SLOW_SELL methods and returns them from the immutable revision history", async () => {
+    const slowSell = {
+      id: "ba-slow-sell",
+      decision: "SLOW_SELL" as const,
+      reasonCode: "LOW_DELIVERY_RATE" as const,
+      reasonCodes: ["LOW_DELIVERY_RATE" as const],
+      plannedMethods: ["DISABLE_FLASH_SALE" as const, "OTHER" as const],
+      actor: "TOOL_BA_ACTOR",
+      notes: "Operator will assess a different slow-sell option.",
+      note: "Operator will assess a different slow-sell option.",
+      confidence: null,
+      decidedAt: new Date("2026-08-16T02:00:00.000Z"),
+    };
+    const initial = {
+      case: { id: caseId, origin: "LIVE" as const, observedAt: new Date(), createdAt: new Date() },
+      shop: { id: "shop-1", profileNo: "957", displayName: "Live shop", currency: "USD", dataOrigin: "LIVE" as const, dataCoverage: "COMPLETE" as const, lastSyncAt: null },
+      ba: null,
+      baHistory: [],
+    };
+    const getDecisionReview = vi.fn()
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce({ ...initial, ba: slowSell, baHistory: [slowSell] });
+    const recordBaDecision = vi.fn().mockResolvedValue(undefined);
+
+    const response = await createBaDecisionHandler(store({ getDecisionReview, recordBaDecision }), { actor: "TOOL_BA_ACTOR" })(
+      request({
+        profileNo: "957",
+        caseId,
+        baDecision: {
+          decision: "SLOW_SELL",
+          reasonCode: "LOW_DELIVERY_RATE",
+          plannedMethods: ["DISABLE_FLASH_SALE", "OTHER"],
+          notes: "Operator will assess a different slow-sell option.",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(recordBaDecision).toHaveBeenCalledWith(expect.objectContaining({
+      baDecision: expect.objectContaining({ plannedMethods: ["DISABLE_FLASH_SALE", "OTHER"] }),
+    }));
+    expect(await response.json()).toMatchObject({
+      history: [{ decision: "SLOW_SELL", plannedMethods: ["DISABLE_FLASH_SALE", "OTHER"] }],
+    });
   });
 
   it("rejects a LIVE decision case when its profile is no longer READY", async () => {

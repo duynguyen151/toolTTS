@@ -797,7 +797,7 @@ export function ShopDetailClient({ initialDetail, initialTab }: Props) {
 
               {baTab.activeCaseId ? (
                 <div className={styles.formContainer}>
-                  <LiveBaForm caseId={baTab.activeCaseId} profileNo={shop.profileNo} styles={styles} />
+                  <LiveBaForm caseId={baTab.activeCaseId} profileNo={shop.profileNo} />
                 </div>
               ) : (
                 <div className={styles.emptyNotice}>

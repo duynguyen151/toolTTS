@@ -86,12 +86,9 @@ const presentation: DashboardPresentation = {
   },
   orderHealth: {
     total: "9",
-    pending: "0",
     awaiting: "5",
-    inTransit: "0",
     delivered: "3",
     canceled: "1",
-    other: "0",
   },
   decisionTrace: [
     {

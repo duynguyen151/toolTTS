@@ -10,8 +10,8 @@ import {
 } from "./dashboard-operations.js";
 
 const profiles: AdsPowerProfileSummary[] = [
-  { profileId: "internal-957", profileNo: "957", groupName: "Operators", state: "CLOSED" },
-  { profileId: "internal-958", profileNo: "958", groupName: null, state: "OPEN" },
+  { profileId: "internal-957", profileNo: "957", groupName: "Operators", tags: [], state: "CLOSED" },
+  { profileId: "internal-958", profileNo: "958", groupName: null, tags: [], state: "OPEN" },
 ];
 
 const shops: DashboardOperationsShop[] = [
@@ -89,6 +89,102 @@ async function collectUpdate(
 }
 
 describe("DashboardOperations", () => {
+  it("syncSelected invokes COTIK normal path and does not call AdsPower or Seller Center", async () => {
+    const calls: string[] = [];
+    const result = await createDashboardOperations(adapters({
+      ensureAdsPowerReady: async () => { calls.push("ensureAdsPowerReady"); },
+      openReady: async () => { calls.push("openReady"); },
+      checkSellerCenterHealth: async () => {
+        calls.push("checkSellerCenterHealth");
+        return { status: "HEALTHY", checkedAt: new Date(), detail: null };
+      },
+      runSync: async (_profileNo, kind) => {
+        calls.push(`runSync:${kind}`);
+        return completeSync(kind);
+      },
+      syncCotik: async (profileNo) => {
+        calls.push(`syncCotik:${profileNo}`);
+        return {
+          status: "SUCCEEDED",
+          orders: { status: "SUCCEEDED", rowsWritten: 10 },
+          finance: { status: "SUCCEEDED", rowsWritten: 3 },
+        };
+      },
+    })).syncSelected(["957"]);
+
+    expect(calls).toEqual(["syncCotik:957"]);
+    expect(result).toEqual([{ profileNo: "957", status: "SUCCEEDED", error: null }]);
+  });
+
+  it("syncSelected fails closed when COTIK sync result is SKIPPED or fails and does not invoke AdsPower", async () => {
+    const calls: string[] = [];
+    const result = await createDashboardOperations(adapters({
+      openReady: async () => { calls.push("openReady"); },
+      runSync: async () => { calls.push("runSync"); return completeSync("orders"); },
+      syncCotik: async (profileNo) => {
+        calls.push(`syncCotik:${profileNo}`);
+        return {
+          status: "SKIPPED",
+          skipReason: "COTIK_BINDING_INACTIVE",
+          orders: null,
+          finance: null,
+        };
+      },
+    })).syncSelected(["957"]);
+
+    expect(calls).toEqual(["syncCotik:957"]);
+    expect(result).toEqual([
+      { profileNo: "957", status: "FAILED", error: "COTIK synchronization skipped: COTIK_BINDING_INACTIVE" },
+    ]);
+  });
+
+  it("syncAllEligible uses bound COTIK shops without calling AdsPower openReady or Seller Center runSync", async () => {
+    const calls: string[] = [];
+    const result = await createDashboardOperations(adapters({
+      listEligibleShops: async () => shops,
+      openReady: async () => { calls.push("openReady"); },
+      runSync: async () => { calls.push("runSync"); return completeSync("orders"); },
+      syncCotik: async (profileNo) => {
+        calls.push(`syncCotik:${profileNo}`);
+        return {
+          status: "SUCCEEDED",
+          orders: { status: "SUCCEEDED", rowsWritten: 5 },
+          finance: { status: "SUCCEEDED", rowsWritten: 2 },
+        };
+      },
+    })).syncAllEligible();
+
+    expect(calls).toEqual(["syncCotik:957"]);
+    expect(result).toEqual([{ profileNo: "957", status: "SUCCEEDED", error: null }]);
+  });
+
+  it("explicit updateData still runs the authoritative Seller Center path via AdsPower", async () => {
+    const calls: string[] = [];
+    const events = await collectUpdate(createDashboardOperations(adapters({
+      listAdsPowerProfiles: async () => [
+        { profileId: "internal-957", profileNo: "957", groupName: "Operators", tags: [], state: "OPEN" },
+      ],
+      ensureAdsPowerReady: async () => { calls.push("ensureAdsPowerReady"); },
+      openReady: async () => { calls.push("openReady"); },
+      checkSellerCenterHealth: async () => {
+        calls.push("checkSellerCenterHealth");
+        return { status: "HEALTHY", checkedAt: new Date(), detail: null };
+      },
+      runSync: async (_profileNo, kind) => {
+        calls.push(`runSync:${kind}`);
+        return completeSync(kind);
+      },
+      syncCotik: async () => {
+        calls.push("syncCotik");
+        return { status: "SUCCEEDED", orders: null, finance: null };
+      },
+    })));
+
+    expect(calls).toEqual(["openReady", "checkSellerCenterHealth", "runSync:orders", "runSync:finance"]);
+    expect(events.at(-1)).toMatchObject({ state: "SUCCESS" });
+    expect(calls).not.toContain("syncCotik");
+  });
+
   it("verifies only the explicitly selected profile", async () => {
     const verified: string[] = [];
     const result = await createDashboardOperations(adapters({
@@ -105,19 +201,23 @@ describe("DashboardOperations", () => {
   it("runs selected profiles sequentially and continues after a failure", async () => {
     const calls: string[] = [];
     const result = await createDashboardOperations(adapters({
-      runSync: async (profileNo, kind) => {
-        calls.push(`${profileNo}:${kind}`);
-        if (profileNo === "957" && calls.filter((call) => call.endsWith(":orders")).length === 2) {
-          throw new Error("profile unavailable");
+      syncCotik: async (profileNo) => {
+        calls.push(`${profileNo}:cotik`);
+        if (profileNo === "957" && calls.filter((call) => call === "957:cotik").length === 2) {
+          throw new Error("COTIK sync failed");
         }
-        return completeSync(kind);
+        return {
+          status: "SUCCEEDED" as const,
+          orders: { status: "SUCCEEDED" as const, rowsWritten: 5 },
+          finance: { status: "SUCCEEDED" as const, rowsWritten: 2 },
+        };
       },
     })).syncSelected(["957", "957", "957"]);
 
-    expect(calls).toEqual(["957:orders", "957:finance", "957:orders", "957:orders", "957:finance"]);
+    expect(calls).toEqual(["957:cotik", "957:cotik", "957:cotik"]);
     expect(result).toEqual([
       { profileNo: "957", status: "SUCCEEDED", error: null },
-      { profileNo: "957", status: "FAILED", error: "Seller Center synchronization failed." },
+      { profileNo: "957", status: "FAILED", error: "COTIK sync failed" },
       { profileNo: "957", status: "SUCCEEDED", error: null },
     ]);
   });
@@ -579,6 +679,22 @@ describe("DashboardOperations", () => {
     expect(events.at(-1)).toMatchObject({
       state: "ERROR",
       terminal: true,
+      error: { code: "LAYOUT_CHANGED" },
+    });
+  });
+
+  it("presents an API schema change as a paused Seller Center source contract", async () => {
+    const events = await collectUpdate(createDashboardOperations(adapters({
+      runSync: async (_profileNo, kind) => {
+        if (kind === "finance") throw new SellerCenterError("API_SCHEMA_CHANGED", "private upstream detail");
+        return completeSync(kind);
+      },
+    })));
+
+    expect(events.at(-1)).toMatchObject({
+      state: "PARTIAL",
+      terminal: true,
+      completedKinds: ["orders"],
       error: { code: "LAYOUT_CHANGED" },
     });
   });

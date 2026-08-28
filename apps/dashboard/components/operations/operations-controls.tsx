@@ -12,18 +12,18 @@ import styles from "./operations.module.css";
 import { useDashboardOperations } from "./operations-provider.js";
 
 const updateLabels = {
-  READY: "Update data",
+  READY: "Update data (Seller Center)",
   OPENING_PROFILE: "Opening profile",
   CONNECTING: "Connecting",
   SYNCING_ORDERS: "Syncing orders",
   SYNCING_FINANCE: "Syncing finance",
   RECONCILING: "Reconciling",
-  SUCCESS: "Update data",
-  PARTIAL: "Update data",
-  ERROR: "Update data",
-  LOGIN_REQUIRED: "Update data",
-  SECURITY_CHECK_REQUIRED: "Update data",
-  HUMAN_ACTION_REQUIRED: "Retry update",
+  SUCCESS: "Update data (Seller Center)",
+  PARTIAL: "Update data (Seller Center)",
+  ERROR: "Update data (Seller Center)",
+  LOGIN_REQUIRED: "Update data (Seller Center)",
+  SECURITY_CHECK_REQUIRED: "Update data (Seller Center)",
+  HUMAN_ACTION_REQUIRED: "Retry update (Seller Center)",
 } as const;
 
 export function OperationsControls({ generatedAtLabel }: { generatedAtLabel: string }) {
@@ -88,10 +88,10 @@ export function OperationsControls({ generatedAtLabel }: { generatedAtLabel: str
           {updateLabels[operations.operationState]}
         </PrimaryButton>
         <SecondaryButton disabled={!canSyncSelected} onClick={() => void operations.syncSelected()}>
-          Sync selected
+          Sync selected (COTIK)
         </SecondaryButton>
         <SecondaryButton disabled={!operations.liveOperationsEnabled || operations.isBusy} onClick={() => void operations.syncAllEligible()}>
-          Sync all eligible
+          Sync all eligible (COTIK)
         </SecondaryButton>
         <SecondaryButton
           aria-controls="operation-realtime-log"

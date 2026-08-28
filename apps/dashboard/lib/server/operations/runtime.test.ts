@@ -12,26 +12,46 @@ const runtimeMocks = vi.hoisted(() => ({
   createPersistedDecisionWorkflow: vi.fn(),
   createDatabase: vi.fn(),
   createSellerCenterDataSource: vi.fn(),
+  createCotikClient: vi.fn(),
   evaluateAndStoreRiskControl: vi.fn(),
+  findEnabledShopProviderBinding: vi.fn(),
   findShopByProfileNo: vi.fn(),
   listShops: vi.fn(),
   listReadyAdsPowerProfileShops: vi.fn(),
   runShopSync: vi.fn(),
   runAuthoritativeFinanceRefresh: vi.fn(),
+  runCotikOrdersSync: vi.fn(),
+  runCotikSupplementaryFinanceSync: vi.fn(),
   readBaselineAiConfig: vi.fn(),
   verifyAdsPowerBrowserConnection: vi.fn(),
 }));
 
-vi.mock("@shop-health/db", () => runtimeMocks);
+vi.mock("@shop-health/db", () => ({
+  closeDatabase: runtimeMocks.closeDatabase,
+  createDatabase: runtimeMocks.createDatabase,
+  findEnabledShopProviderBinding: runtimeMocks.findEnabledShopProviderBinding,
+  findShopByProfileNo: runtimeMocks.findShopByProfileNo,
+  listShops: runtimeMocks.listShops,
+  listReadyAdsPowerProfileShops: runtimeMocks.listReadyAdsPowerProfileShops,
+}));
+vi.mock("@shop-health/cotik", () => ({
+  createCotikClient: runtimeMocks.createCotikClient,
+}));
 vi.mock("@shop-health/seller-center/browser-source", () => ({
   createSellerCenterDataSource: runtimeMocks.createSellerCenterDataSource,
   verifyAdsPowerBrowserConnection: runtimeMocks.verifyAdsPowerBrowserConnection,
 }));
-vi.mock("@shop-health/sync", () => ({
-  evaluateAndStoreRiskControl: runtimeMocks.evaluateAndStoreRiskControl,
-  runAuthoritativeFinanceRefresh: runtimeMocks.runAuthoritativeFinanceRefresh,
-  runShopSync: runtimeMocks.runShopSync,
-}));
+vi.mock("@shop-health/sync", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@shop-health/sync")>();
+  return {
+    ...actual,
+    evaluateAndStoreRiskControl: runtimeMocks.evaluateAndStoreRiskControl,
+    runAuthoritativeFinanceRefresh: runtimeMocks.runAuthoritativeFinanceRefresh,
+    runShopSync: runtimeMocks.runShopSync,
+    runCotikOrdersSync: runtimeMocks.runCotikOrdersSync,
+    runCotikSupplementaryFinanceSync: runtimeMocks.runCotikSupplementaryFinanceSync,
+  };
+});
 vi.mock("@shop-health/decision-ai", () => ({
   createBaselineAiClientFromConfig: runtimeMocks.createBaselineAiClientFromConfig,
   readBaselineAiConfig: runtimeMocks.readBaselineAiConfig,
@@ -445,5 +465,100 @@ describe("createDashboardOperationsRuntime", () => {
       state: "HUMAN_ACTION_REQUIRED",
       error: { code: "LOGIN_REQUIRED" },
     });
+  });
+
+  it("syncSelected invokes COTIK normal sync with exact providerShopId and fails closed when token is missing", async () => {
+    const linkedShop = {
+      id: "shop-957",
+      profileId: "internal-profile-id",
+      profileNo: "957",
+      displayName: "Tool TTS Shop",
+    };
+    runtimeMocks.createDatabase.mockReturnValue({ db: {} });
+    runtimeMocks.closeDatabase.mockResolvedValue(undefined);
+    runtimeMocks.listShops.mockResolvedValue([linkedShop]);
+    runtimeMocks.findShopByProfileNo.mockResolvedValue(linkedShop);
+    runtimeMocks.findEnabledShopProviderBinding.mockResolvedValue({
+      id: "binding-cotik-957",
+      shopId: "shop-957",
+      provider: "COTIK",
+      providerShopId: "cotik-shop-exact-id-957",
+      enabled: true,
+      provenance: { source: "COTIK", capabilities: ["ORDERS", "SUPPLEMENTARY_FINANCE"] },
+      checkpoint: null,
+    });
+
+    // Case 1: Missing COTIK token fails closed
+    const runtimeNoToken = createDashboardOperationsRuntime({
+      environment: { DATABASE_URL: "postgres://dashboard-test" },
+    });
+    const resultNoToken = await runtimeNoToken.syncSelected(["957"]);
+    expect(resultNoToken).toEqual([
+      { profileNo: "957", status: "FAILED", error: "COTIK_TOKEN or COTIK_API_KEY environment variable is required for COTIK sync." },
+    ]);
+    expect(runtimeMocks.runShopSync).not.toHaveBeenCalled();
+
+    // Case 2: Present COTIK token passes through exact provider binding and does not call AdsPower or Seller Center
+    runtimeMocks.createCotikClient.mockReturnValue({ fakeCotikClient: true });
+    runtimeMocks.runCotikOrdersSync.mockResolvedValue({
+      status: "SUCCEEDED",
+      rowsWritten: 12,
+    });
+    runtimeMocks.runCotikSupplementaryFinanceSync.mockResolvedValue({
+      status: "SUCCEEDED",
+      rowsWritten: 4,
+      classification: "SUPPLEMENTARY_FINANCE",
+      officialOnHoldCapabilityStatus: "OFFICIAL_ON_HOLD_UNPROVEN",
+    });
+
+    const runtimeWithToken = createDashboardOperationsRuntime({
+      environment: {
+        DATABASE_URL: "postgres://dashboard-test",
+        COTIK_TOKEN: "valid-secret-token",
+      },
+    });
+
+    const resultWithToken = await runtimeWithToken.syncSelected(["957"]);
+    expect(resultWithToken).toEqual([
+      { profileNo: "957", status: "SUCCEEDED", error: null },
+    ]);
+    expect(runtimeMocks.createCotikClient).toHaveBeenCalledWith(expect.objectContaining({
+      token: "valid-secret-token",
+    }));
+    expect(runtimeMocks.runCotikOrdersSync).toHaveBeenCalledWith(expect.objectContaining({
+      shop: linkedShop,
+    }));
+    expect(runtimeMocks.runCotikSupplementaryFinanceSync).toHaveBeenCalledWith(expect.objectContaining({
+      shop: linkedShop,
+    }));
+    expect(runtimeMocks.runShopSync).not.toHaveBeenCalled();
+    expect(runtimeMocks.runAuthoritativeFinanceRefresh).not.toHaveBeenCalled();
+  });
+
+  it("syncSelected fails closed when COTIK binding is disabled or missing and does not fallback to AdsPower", async () => {
+    const linkedShop = {
+      id: "shop-957",
+      profileId: "internal-profile-id",
+      profileNo: "957",
+      displayName: "Tool TTS Shop",
+    };
+    runtimeMocks.createDatabase.mockReturnValue({ db: {} });
+    runtimeMocks.closeDatabase.mockResolvedValue(undefined);
+    runtimeMocks.listShops.mockResolvedValue([linkedShop]);
+    runtimeMocks.findShopByProfileNo.mockResolvedValue(linkedShop);
+    runtimeMocks.findEnabledShopProviderBinding.mockResolvedValue(null);
+
+    const runtime = createDashboardOperationsRuntime({
+      environment: {
+        DATABASE_URL: "postgres://dashboard-test",
+        COTIK_TOKEN: "valid-secret-token",
+      },
+    });
+
+    const result = await runtime.syncSelected(["957"]);
+    expect(result).toEqual([
+      { profileNo: "957", status: "FAILED", error: "COTIK synchronization skipped: COTIK_BINDING_INACTIVE" },
+    ]);
+    expect(runtimeMocks.runShopSync).not.toHaveBeenCalled();
   });
 });

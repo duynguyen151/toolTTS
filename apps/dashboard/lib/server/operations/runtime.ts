@@ -178,6 +178,64 @@ export function createDashboardOperationsRuntime(
         ...(result.financeProof === undefined ? {} : { financeProof: result.financeProof }),
       };
     }),
+    syncCotik: (profileNo) => withDatabase(databaseUrl, async (context) => {
+      const token = environment.COTIK_TOKEN?.trim() || environment.COTIK_API_KEY?.trim();
+      if (!token) {
+        throw new Error("COTIK_TOKEN or COTIK_API_KEY environment variable is required for COTIK sync.");
+      }
+
+      const shop = await findShopByProfileNo(context.db, profileNo);
+      if (shop === null) throw new Error("Linked shop was not found");
+
+      const [
+        { findEnabledShopProviderBinding },
+        { createCotikClient },
+        { runCotikOrdersSync, runCotikSupplementaryFinanceSync, evaluateAndStoreRiskControl },
+      ] = await Promise.all([
+        import("@shop-health/db"),
+        import("@shop-health/cotik"),
+        import("@shop-health/sync"),
+      ]);
+
+      const binding = await findEnabledShopProviderBinding(context.db, shop.id, "COTIK");
+      if (binding === null) {
+        return {
+          status: "SKIPPED" as const,
+          skipReason: "COTIK_BINDING_INACTIVE",
+          orders: null,
+          finance: null,
+        };
+      }
+
+      const client = createCotikClient({
+        baseUrl: environment.COTIK_BASE_URL ?? "https://cotik.app/api",
+        token,
+      });
+
+      const ordersResult = await runCotikOrdersSync({ context, shop, client });
+      if (ordersResult.status === "SKIPPED") {
+        return {
+          status: "SKIPPED" as const,
+          skipReason: ordersResult.skipReason ?? "COTIK_BINDING_INACTIVE",
+          orders: ordersResult,
+          finance: null,
+        };
+      }
+
+      let financeResult: Awaited<ReturnType<typeof runCotikSupplementaryFinanceSync>> | null = null;
+      if (binding.provenance.capabilities.includes("SUPPLEMENTARY_FINANCE")) {
+        financeResult = await runCotikSupplementaryFinanceSync({ context, shop, client });
+      }
+
+      // Re-evaluate deterministic risk control facts from updated order population
+      await evaluateAndStoreRiskControl(context, shop);
+
+      return {
+        status: "SUCCEEDED" as const,
+        orders: ordersResult,
+        finance: financeResult,
+      };
+    }),
     evaluateRisk: (profileNo) => withDatabase(databaseUrl, async (context) => {
       const shop = await findShopByProfileNo(context.db, profileNo);
       if (shop === null) throw new Error("Linked shop was not found");

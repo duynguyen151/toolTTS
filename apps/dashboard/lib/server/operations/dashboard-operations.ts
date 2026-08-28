@@ -28,6 +28,13 @@ export interface DashboardOperationsShop {
   readonly displayName: string;
 }
 
+export interface CotikSyncSummary {
+  readonly status: "SUCCEEDED" | "SKIPPED";
+  readonly skipReason?: string | null;
+  readonly orders?: { status: "SUCCEEDED" | "SKIPPED"; rowsWritten?: number } | null;
+  readonly finance?: { status: "SUCCEEDED" | "SKIPPED"; rowsWritten?: number } | null;
+}
+
 export interface DashboardOperationsAdapters {
   listAdsPowerProfiles(): Promise<readonly AdsPowerProfileSummary[]>;
   listShops(): Promise<readonly DashboardOperationsShop[]>;
@@ -41,6 +48,7 @@ export interface DashboardOperationsAdapters {
     kind: "orders" | "finance",
   ): Promise<Pick<SyncResult, "status" | "complete" | "sourceCoverage" | "financeProof">>;
   evaluateRisk(profileNo: string): Promise<DecisionCoverageSnapshot | undefined>;
+  syncCotik?(profileNo: string): Promise<CotikSyncSummary>;
   /** Verifies one explicitly selected profile; never called for inventory listing. */
   verifyProfile?(profile: AdsPowerProfileSummary): Promise<Pick<ProfileVerificationResult, "verificationState"> & {
     readonly shop: DashboardOperationsShop | null;
@@ -137,7 +145,7 @@ function syncFailure(cause: unknown): { state: UpdateDataState; error: Operation
       message: "The selected profile proxy did not respond. Check the profile proxy and retry.",
     };
   }
-  if (failureType === "LAYOUT_CHANGED") {
+  if (isSourceContractFailure(failureType)) {
     return {
       state: "ERROR",
       error: error("LAYOUT_CHANGED", "Seller Center layout verification failed."),
@@ -161,6 +169,15 @@ function syncResultIsComplete(
     result.sourceCoverage.window === "ROLLING_12_MONTHS" &&
     result.sourceCoverage.completeWithinSourceWindow === true &&
     result.sourceCoverage.lifetimeHistoryComplete === false;
+}
+
+function isSourceContractFailure(failureType: string | undefined): boolean {
+  return failureType === "LAYOUT_CHANGED"
+    || failureType === "ROUTE_CHANGED"
+    || failureType === "ENDPOINT_NOT_OBSERVED"
+    || failureType === "API_SCHEMA_CHANGED"
+    || failureType === "API_REJECTED"
+    || failureType === "INCOMPLETE_RESPONSE";
 }
 
 function decisionCoverageIsComplete(coverage: DecisionCoverageSnapshot | undefined): boolean {
@@ -528,6 +545,21 @@ export function createDashboardOperations(adapters: DashboardOperationsAdapters)
     async syncSelected(profileNos) {
       return serializeSync(() => syncContext.run({}, () =>
         runSequentialProfileQueue(profileNos, async (profileNo) => {
+          if (adapters.syncCotik !== undefined) {
+            const cotikResult = await adapters.syncCotik(profileNo);
+            if (cotikResult.status === "SKIPPED") {
+              throw new Error(
+                cotikResult.skipReason
+                  ? `COTIK synchronization skipped: ${cotikResult.skipReason}`
+                  : "COTIK synchronization skipped: no enabled binding or lock busy",
+              );
+            }
+            if (cotikResult.status !== "SUCCEEDED") {
+              throw new Error("COTIK synchronization failed");
+            }
+            return;
+          }
+
           const profilePresentation = await operations.listProfiles(profileNo);
           const profile = profilePresentation.profiles.find((candidate) => candidate.profileNo === profileNo);
           if (profile === undefined) throw new Error("The selected AdsPower profile was not found.");

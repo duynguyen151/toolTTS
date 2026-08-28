@@ -223,29 +223,27 @@ export function OperationsProvider({
 
   const syncAllEligible = useCallback(async () => {
     if (!liveOperationsEnabled) return;
-    reportOperation("CONNECTING", "Synchronizing all eligible profiles.");
+    reportOperation("CONNECTING", "Synchronizing all eligible shops via COTIK API.");
     try {
       const response = await fetch("/api/sync/all-eligible", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profileNo: "all" }) });
       const result = await response.json() as readonly { status: string }[];
       const failed = result.filter((item) => item.status === "FAILED").length;
-      reportOperation(failed === 0 ? "READY" : "PARTIAL", `Eligible profile sync completed: ${result.length - failed} succeeded, ${failed} failed.`);
+      reportOperation(failed === 0 ? "READY" : "PARTIAL", `COTIK sync completed: ${result.length - failed} succeeded, ${failed} failed.`);
       router.refresh();
-    } catch { reportOperation("ERROR", "Eligible profile sync could not be completed."); }
+    } catch { reportOperation("ERROR", "COTIK sync could not be completed."); }
   }, [liveOperationsEnabled, reportOperation, router]);
 
   const syncSelected = useCallback(async () => {
     if (!liveOperationsEnabled || !profileSelectionAligned || selectedProfileNo === null) return;
-    reportOperation("CONNECTING", selectedProfile?.linkState === "UNLINKED"
-      ? `Connecting profile ${selectedProfileNo}, verifying its Seller Center identity, then collecting data.`
-      : `Connecting profile ${selectedProfileNo} for synchronization.`);
+    reportOperation("CONNECTING", `Synchronizing profile ${selectedProfileNo} via COTIK API.`);
     try {
       const response = await fetch("/api/sync/selected", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profileNo: selectedProfileNo }) });
       const result = await response.json() as readonly { status: string; error: string | null }[];
       const failed = result.filter((item) => item.status === "FAILED").length;
-      reportOperation(failed === 0 ? "READY" : "ERROR", failed === 0 ? `Profile ${selectedProfileNo} sync completed.` : result.find((item) => item.error !== null)?.error ?? "Profile sync failed.");
+      reportOperation(failed === 0 ? "READY" : "ERROR", failed === 0 ? `Profile ${selectedProfileNo} COTIK sync completed.` : result.find((item) => item.error !== null)?.error ?? "Profile COTIK sync failed.");
       if (failed === 0) router.refresh();
-    } catch { reportOperation("ERROR", "Selected profile sync could not be completed."); }
-  }, [liveOperationsEnabled, profileSelectionAligned, reportOperation, router, selectedProfile, selectedProfileNo]);
+    } catch { reportOperation("ERROR", "Selected profile COTIK sync could not be completed."); }
+  }, [liveOperationsEnabled, profileSelectionAligned, reportOperation, router, selectedProfileNo]);
 
   const value = useMemo<OperationsContextValue>(() => ({
     presentationStatus: initialPresentation.status,

@@ -1,6 +1,7 @@
 import {
   ArrowPathRoundedSquareIcon,
   BuildingStorefrontIcon,
+  Cog6ToothIcon,
   HomeIcon,
   ShieldCheckIcon,
 } from "@heroicons/react/24/outline";
@@ -22,6 +23,7 @@ const navigation: NavigationItem[] = [
     icon: BuildingStorefrontIcon,
     label: "Shops",
   },
+  { href: "/settings", icon: Cog6ToothIcon, label: "Settings" },
   {
     href: "/dashboard#decision-trace",
     icon: ShieldCheckIcon,

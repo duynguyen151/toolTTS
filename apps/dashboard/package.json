@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",
+    "@shop-health/cotik": "workspace:*",
     "@shop-health/db": "workspace:*",
     "@shop-health/decision-ai": "workspace:*",
     "@shop-health/decision-workflow": "workspace:*",

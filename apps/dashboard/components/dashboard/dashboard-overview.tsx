@@ -2,6 +2,7 @@ import type { DashboardPresentation } from "../../lib/dashboard-contract";
 import Link from "next/link";
 import { OperationsControls } from "../operations/operations-controls";
 import { StatusBadge } from "../ui/status-badge";
+import { PortfolioOverview } from "./portfolio-overview";
 import { DataQualityPanel } from "./data-quality-panel";
 import { DecisionTrace } from "./decision-trace";
 import { KpiBand } from "./kpi-band";
@@ -66,31 +67,43 @@ export function DashboardOverview({ presentation, operatorProfileNo }: Dashboard
         <OperationsControls generatedAtLabel={generatedAtLabel} />
       </header>
 
-      <div className={styles.primaryGrid}>
-        <KpiBand kpis={presentation.kpis} />
-        <OperationalPanel profile={presentation.profile} sync={presentation.sync} />
-      </div>
+      {/* Main Portfolio Overview for Boss/Portfolio triage */}
+      {presentation.portfolio ? (
+        <PortfolioOverview portfolio={presentation.portfolio} />
+      ) : (
+        <>
+          <div className={styles.primaryGrid}>
+            <KpiBand kpis={presentation.kpis} />
+            <OperationalPanel profile={presentation.profile} sync={presentation.sync} />
+          </div>
 
-      <nav aria-label="Linked LIVE shops">
-        <p>Decision Center shop</p>
-        <ul>
-          {presentation.shops.map((shop) => (
-            <li key={shop.id}>
-              <Link href={`/dashboard?shop=${encodeURIComponent(shop.profileNo)}`} aria-current={shop.selected ? "page" : undefined}>
-                {shop.displayName} · Profile {shop.profileNo}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </nav>
+          <nav aria-label="Linked LIVE shops">
+            <p>Decision Center shop</p>
+            <ul>
+              {presentation.shops.map((shop) => (
+                <li key={shop.id}>
+                  <Link href={`/dashboard?shop=${encodeURIComponent(shop.profileNo)}`} aria-current={shop.selected ? "page" : undefined}>
+                    {shop.displayName} · Profile {shop.profileNo}
+                  </Link>
+                  {" ("}
+                  <Link href={`/shops/${encodeURIComponent(shop.profileNo)}`} aria-label={`Chi tiết ${shop.displayName}`}>
+                    Chi tiết
+                  </Link>
+                  {")"}
+                </li>
+              ))}
+            </ul>
+          </nav>
 
-      <div className={styles.secondaryGrid}>
-        <OrderHealth health={presentation.orderHealth} profileNo={presentation.selectedShop.profileNo} />
-        <DataQualityPanel coverage={presentation.coverage} freshness={presentation.freshness} />
-        <DecisionTrace stages={presentation.decisionTrace} />
-      </div>
+          <div className={styles.secondaryGrid}>
+            <OrderHealth health={presentation.orderHealth} profileNo={presentation.selectedShop.profileNo} />
+            <DataQualityPanel coverage={presentation.coverage} freshness={presentation.freshness} />
+            <DecisionTrace stages={presentation.decisionTrace} />
+          </div>
 
-      <LiveDecisionCenter dataOrigin={presentation.dataOrigin} center={presentation.decisionCenter} />
+          <LiveDecisionCenter dataOrigin={presentation.dataOrigin} center={presentation.decisionCenter} />
+        </>
+      )}
     </div>
   );
 }

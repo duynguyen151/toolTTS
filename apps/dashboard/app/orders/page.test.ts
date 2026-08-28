@@ -25,6 +25,8 @@ describe("OrderExplorerPage", () => {
     expect(html).toContain("Persisted coverage: 2026-01-01 to 2026-01-31 (not a lifetime-history claim)");
     expect(html).toContain("Order detail");
     expect(html).toContain("TRACK-1");
+    expect(html).toContain('href="/shops/957"');
+    expect(html).toContain("Quay lại Chi tiết Cửa hàng / Shop Detail (Profile #957)");
     expect(html).not.toMatch(/recipient|buyer|phone|address/i);
   });
 });

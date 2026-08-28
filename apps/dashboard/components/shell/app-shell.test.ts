@@ -3,6 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { AppShell } from "./app-shell";
+import { NavigationList } from "./navigation";
+import { ProductMark } from "./sidebar";
 
 describe("AppShell", () => {
   it("renders the dashboard landmark structure and accessible navigation", () => {
@@ -29,4 +31,22 @@ describe("AppShell", () => {
     expect(html).toContain('aria-label="Search shops and profiles"');
     expect(html).toContain('type="search"');
   });
+
+  it("renders only top-level navigation items (Dashboard, Shops, Settings) without page-internal hash anchors", () => {
+    const html = renderToStaticMarkup(createElement(NavigationList));
+
+    expect(html).toContain('href="/dashboard"');
+    expect(html).toContain('href="/shops"');
+    expect(html).toContain('href="/settings"');
+    expect(html).not.toContain('/dashboard#decision-trace');
+    expect(html).not.toContain('/dashboard#sync-state');
+    expect(html).not.toContain('/dashboard#shops');
+  });
+
+  it("uses Next.js Link / valid anchors in ProductMark", () => {
+    const html = renderToStaticMarkup(createElement(ProductMark));
+
+    expect(html).toContain('href="/dashboard"');
+  });
 });
+

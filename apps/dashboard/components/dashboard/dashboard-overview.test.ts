@@ -86,9 +86,12 @@ const presentation: DashboardPresentation = {
   },
   orderHealth: {
     total: "9",
+    pending: "0",
     awaiting: "5",
+    inTransit: "0",
     delivered: "3",
     canceled: "1",
+    other: "0",
   },
   decisionTrace: [
     {
@@ -188,6 +191,7 @@ describe("DashboardOverview", () => {
     expect(html).toContain('id="sync-state"');
     expect(html).toContain("Order health");
     expect(html).toContain("/orders?profile=957");
+    expect(html).toContain("/shops/957");
     expect(html).toContain("Data coverage");
     expect(html).toContain("Paused: layout changed");
     expect(html).toContain("Live operations are disabled for sanitized demo data.");

@@ -218,3 +218,12 @@ Start a fresh Codex session by reading this checkpoint, the locked Master Plan D
 - Dashboard typecheck/build remain environment/WIP-pending only because unrelated shop-route WIP imports missing DB exports `unlinkShopByProfileNo` and `updateShopDisplayName`; this does not invalidate W19-T01 evidence. Live services remain unavailable.
 - READY frontier after W19-T01: `W16-T02B`, `W3-T02`, `W19-T02`, and `W18-T01` (all listed dependencies accepted). `W20-T01` remains the final barrier; `W10-T01` remains optional and non-gating.
 - Next scheduling choice: continue with the highest-value READY task under the locked DAG, preserving all existing Dashboard/DB/Seller Center/Sync WIP and avoiding historical re-audit.
+
+## Continuation checkpoint (2026-08-28, W18-T01 accepted)
+
+- Branch/HEAD: `codex/v1-boss-dashboard-merge` at `13a0c08` (`feat(cli): add composed v1 proof journey`). Preserve the dirty worktree and all unrelated WIP.
+- Accepted in this checkpoint: `W18-T01`. The CLI exposes `journey <profileNo>` for the composed V1 proof and `ai-task test <taskId>` for a safe, exact-effective-instant connection check. The journey composes existing provider/sync/policy/workflow seams without moving deterministic rules into CLI.
+- Evidence: 56 focused CLI command/workflow tests passed; CLI typecheck/build/help passed; scoped diff check passed; independent Terra CLI/E2E re-review returned APPROVE. Tests cover Official-OH `TRIGGERED` to `PAUSE`, `NOT_EVALUATED` to `INSUFFICIENT_DATA`, stale Finance disclosure, AI unavailable, SLOW_SELL BA data, immutable readback/history, and Finance-refresh fail-closed behavior.
+- The journey reports the Rule frozen in the immutable Case, not legacy Operational Exposure risk output. Policy and requested AI configuration resolve at the declared `--effective-at` instant. No journey step executes a Seller Center/COTIK business action.
+- Composed PostgreSQL E2E remains environment-pending because `TEST_DATABASE_URL` and `DATABASE_URL` are unset. Live AdsPower, Seller Center, COTIK, and AI-provider verification remain unavailable and are not claimed.
+- READY frontier after W18-T01: `W16-T02B`, `W3-T02`, and `W19-T02`. `W20-T01` remains the final barrier; `W10-T01` remains optional and non-gating.

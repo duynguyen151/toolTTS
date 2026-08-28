@@ -257,6 +257,8 @@ export {
   requestShopSync,
   setShopSyncState,
   setShopVerificationState,
+  updateShopDisplayName,
+  unlinkShopByProfileNo,
   type CreateShopInput,
   type SetShopVerificationStateInput,
   type ShopSyncState
@@ -279,6 +281,7 @@ export {
   disableShopProviderBinding,
   findEnabledShopProviderBinding,
   listEnabledShopProviderBindings,
+  listEnabledCotikBoundShops,
   upsertShopProviderBinding,
   type ShopProviderBindingRow,
   type UpsertShopProviderBindingInput

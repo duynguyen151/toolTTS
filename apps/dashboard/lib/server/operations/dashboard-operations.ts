@@ -40,6 +40,8 @@ export interface DashboardOperationsAdapters {
   listShops(): Promise<readonly DashboardOperationsShop[]>;
   /** Canonical READY/ELIGIBLE profile-and-shop inventory for all sync gates. */
   listEligibleShops(): Promise<readonly DashboardOperationsShop[]>;
+  /** Canonical enabled shops with active COTIK bindings for normal COTIK sync without AdsPower constraints. */
+  listCotikEligibleShops?(): Promise<readonly DashboardOperationsShop[]>;
   ensureAdsPowerReady(): Promise<void>;
   openReady(profileId: string): Promise<void>;
   checkSellerCenterHealth(shop: DashboardOperationsShop): Promise<SourceHealth>;
@@ -582,6 +584,10 @@ export function createDashboardOperations(adapters: DashboardOperationsAdapters)
     },
 
     async syncAllEligible() {
+      if (adapters.syncCotik !== undefined && adapters.listCotikEligibleShops !== undefined) {
+        const profileNos = (await adapters.listCotikEligibleShops()).map((shop) => shop.profileNo);
+        return operations.syncSelected(profileNos);
+      }
       const profileNos = (await adapters.listEligibleShops()).map((shop) => shop.profileNo);
       return operations.syncSelected(profileNos);
     },

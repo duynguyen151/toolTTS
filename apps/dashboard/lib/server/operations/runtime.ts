@@ -127,6 +127,14 @@ export function createDashboardOperationsRuntime(
         displayName: shop.displayName ?? shop.profileNo,
       })))
     )),
+    listCotikEligibleShops: () => withDatabase(databaseUrl, async ({ db }) => (
+      (await import("@shop-health/db")).listEnabledCotikBoundShops(db).then((shops) => shops.map((shop) => ({
+        id: shop.id,
+        profileId: shop.profileId,
+        profileNo: shop.profileNo,
+        displayName: shop.displayName ?? shop.profileNo,
+      })))
+    )),
     ensureAdsPowerReady: () => applicationLauncher.ensureReady(),
     openReady: async (profileId) => {
       const connection = await adsPower.openReady(profileId);

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { SourceProviderSchema, SourceProvenanceSchema } from "@shop-health/domain";
 
 import type { Database } from "../client.js";
-import { shopProviderBindings, type ShopProviderBindingRow } from "../schema.js";
+import { shopProviderBindings, shops, type ShopProviderBindingRow, type ShopRow } from "../schema.js";
 
 export type { ShopProviderBindingRow };
 
@@ -106,6 +106,28 @@ export async function listEnabledShopProviderBindings(
     .from(shopProviderBindings)
     .where(and(eq(shopProviderBindings.shopId, shopId), eq(shopProviderBindings.enabled, true)))
     .orderBy(asc(shopProviderBindings.provider));
+}
+
+/**
+ * Returns canonical enabled shops that have an active (enabled) COTIK provider binding,
+ * ordered by profileNo. This discovery does not require AdsPower profile readiness.
+ */
+export async function listEnabledCotikBoundShops(db: Database): Promise<ShopRow[]> {
+  const rows = await db
+    .select({ shop: shops })
+    .from(shops)
+    .innerJoin(
+      shopProviderBindings,
+      and(
+        eq(shopProviderBindings.shopId, shops.id),
+        eq(shopProviderBindings.provider, "COTIK"),
+        eq(shopProviderBindings.enabled, true),
+      ),
+    )
+    .where(and(eq(shops.enabled, true), eq(shops.syncState, "ACTIVE")))
+    .orderBy(asc(shops.profileNo));
+
+  return rows.map((row) => row.shop);
 }
 
 /** Disables one provider binding in place; canonical shop rows are never touched. */

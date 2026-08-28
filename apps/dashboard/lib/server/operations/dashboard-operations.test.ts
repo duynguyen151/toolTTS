@@ -140,8 +140,15 @@ describe("DashboardOperations", () => {
 
   it("syncAllEligible uses bound COTIK shops without calling AdsPower openReady or Seller Center runSync", async () => {
     const calls: string[] = [];
+    const nonReadyAdsPowerShop: DashboardOperationsShop = {
+      id: "shop-unverified-adspower",
+      profileId: "internal-unverified",
+      profileNo: "999",
+      displayName: "Non Ready AdsPower Shop",
+    };
     const result = await createDashboardOperations(adapters({
-      listEligibleShops: async () => shops,
+      listEligibleShops: async () => shops, // AdsPower READY only returns 957
+      listCotikEligibleShops: async () => [nonReadyAdsPowerShop], // COTIK bound includes 999
       openReady: async () => { calls.push("openReady"); },
       runSync: async () => { calls.push("runSync"); return completeSync("orders"); },
       syncCotik: async (profileNo) => {
@@ -154,8 +161,8 @@ describe("DashboardOperations", () => {
       },
     })).syncAllEligible();
 
-    expect(calls).toEqual(["syncCotik:957"]);
-    expect(result).toEqual([{ profileNo: "957", status: "SUCCEEDED", error: null }]);
+    expect(calls).toEqual(["syncCotik:999"]);
+    expect(result).toEqual([{ profileNo: "999", status: "SUCCEEDED", error: null }]);
   });
 
   it("explicit updateData still runs the authoritative Seller Center path via AdsPower", async () => {

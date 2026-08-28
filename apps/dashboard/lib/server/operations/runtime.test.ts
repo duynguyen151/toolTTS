@@ -18,6 +18,7 @@ const runtimeMocks = vi.hoisted(() => ({
   findShopByProfileNo: vi.fn(),
   listShops: vi.fn(),
   listReadyAdsPowerProfileShops: vi.fn(),
+  listEnabledCotikBoundShops: vi.fn(),
   runShopSync: vi.fn(),
   runAuthoritativeFinanceRefresh: vi.fn(),
   runCotikOrdersSync: vi.fn(),
@@ -33,6 +34,7 @@ vi.mock("@shop-health/db", () => ({
   findShopByProfileNo: runtimeMocks.findShopByProfileNo,
   listShops: runtimeMocks.listShops,
   listReadyAdsPowerProfileShops: runtimeMocks.listReadyAdsPowerProfileShops,
+  listEnabledCotikBoundShops: runtimeMocks.listEnabledCotikBoundShops,
 }));
 vi.mock("@shop-health/cotik", () => ({
   createCotikClient: runtimeMocks.createCotikClient,
@@ -560,5 +562,52 @@ describe("createDashboardOperationsRuntime", () => {
       { profileNo: "957", status: "FAILED", error: "COTIK synchronization skipped: COTIK_BINDING_INACTIVE" },
     ]);
     expect(runtimeMocks.runShopSync).not.toHaveBeenCalled();
+  });
+
+  it("syncAllEligible discovers candidates via listEnabledCotikBoundShops without AdsPower readiness constraints", async () => {
+    const boundShopWithNonReadyAdsPower = {
+      id: "shop-959",
+      profileId: "internal-profile-959",
+      profileNo: "959",
+      displayName: "Shop 959 Non Ready AdsPower",
+    };
+    runtimeMocks.createDatabase.mockReturnValue({ db: {} });
+    runtimeMocks.closeDatabase.mockResolvedValue(undefined);
+    runtimeMocks.listShops.mockResolvedValue([boundShopWithNonReadyAdsPower]);
+    runtimeMocks.findShopByProfileNo.mockResolvedValue(boundShopWithNonReadyAdsPower);
+    runtimeMocks.listReadyAdsPowerProfileShops.mockResolvedValue([]); // AdsPower returns 0 ready profiles
+    runtimeMocks.listEnabledCotikBoundShops.mockResolvedValue([boundShopWithNonReadyAdsPower]); // COTIK query returns 959
+    runtimeMocks.findEnabledShopProviderBinding.mockResolvedValue({
+      id: "binding-959",
+      shopId: "shop-959",
+      provider: "COTIK",
+      providerShopId: "cotik-exact-959",
+      enabled: true,
+      provenance: { source: "COTIK", capabilities: ["ORDERS"] },
+      checkpoint: null,
+    });
+    runtimeMocks.createCotikClient.mockReturnValue({});
+    runtimeMocks.runCotikOrdersSync.mockResolvedValue({
+      status: "SUCCEEDED",
+      rowsWritten: 7,
+    });
+
+    const runtime = createDashboardOperationsRuntime({
+      environment: {
+        DATABASE_URL: "postgres://dashboard-test",
+        COTIK_TOKEN: "valid-secret-token",
+      },
+    });
+
+    const result = await runtime.syncAllEligible();
+    expect(result).toEqual([
+      { profileNo: "959", status: "SUCCEEDED", error: null },
+    ]);
+    expect(runtimeMocks.listEnabledCotikBoundShops).toHaveBeenCalledTimes(1);
+    expect(runtimeMocks.runCotikOrdersSync).toHaveBeenCalledWith(expect.objectContaining({
+      shop: boundShopWithNonReadyAdsPower,
+    }));
+    expect(runtimeMocks.runShopSync).not.toHaveBeenCalled();
+    expect(runtimeMocks.verifyAdsPowerBrowserConnection).not.toHaveBeenCalled();
   });
 });

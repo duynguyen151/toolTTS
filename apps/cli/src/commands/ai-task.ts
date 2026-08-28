@@ -1,3 +1,9 @@
+import {
+  resolveAiTaskConfig,
+  testAiTaskConnection,
+  type AiConnectionResult,
+  type ResolvedAiTaskConfig,
+} from "@shop-health/decision-ai";
 import { appendAiTaskConfigRevision, getCurrentAiTaskConfig } from "@shop-health/db";
 import type { Command } from "commander";
 
@@ -10,6 +16,8 @@ const TASK_IDS = ["SHOP_HEALTH_REVIEWER", "FINANCE_SPECIALIST", "ORDER_ANOMALY_R
 type TaskId = typeof TASK_IDS[number];
 interface WriteOptions { readonly effectiveFrom: string; readonly payload: string; readonly json?: boolean; }
 interface ReadOptions { readonly effectiveAt: string; readonly json?: boolean; }
+
+interface TestOptions extends ReadOptions {}
 
 function parseTaskId(value: string): TaskId {
   if ((TASK_IDS as readonly string[]).includes(value)) return value as TaskId;
@@ -90,6 +98,44 @@ function outputRevision(revision: {
   ]);
 }
 
+function connectionConfiguration(
+  config: ResolvedAiTaskConfig,
+  current: { readonly revisionId: string } | null,
+): { readonly source: ResolvedAiTaskConfig["source"]; readonly revisionId: string | null } {
+  return {
+    source: config.source,
+    revisionId: config.source === "PERSISTED" ? current?.revisionId ?? null : null,
+  };
+}
+
+function outputConnectionTest(input: {
+  readonly taskId: TaskId;
+  readonly effectiveAt: Date;
+  readonly config: ResolvedAiTaskConfig;
+  readonly current: { readonly revisionId: string } | null;
+  readonly connection: AiConnectionResult;
+  readonly json: boolean | undefined;
+}): void {
+  const payload = {
+    schemaVersion: "ai-task-connection.v1" as const,
+    taskId: input.taskId,
+    effectiveAt: input.effectiveAt.toISOString(),
+    configuration: connectionConfiguration(input.config, input.current),
+    connection: input.connection,
+  };
+  if (input.json) {
+    printJson(payload);
+    return;
+  }
+  printKeyValues([
+    ["Task", payload.taskId],
+    ["Effective At", payload.effectiveAt],
+    ["Configuration Source", payload.configuration.source],
+    ["Connection", payload.connection.status],
+    ["Code", payload.connection.code],
+  ]);
+}
+
 export function registerAiTaskCommands(program: Command, runtime: CliRuntime): void {
   const task = program.command("ai-task").description("Manage immutable AI task configuration revisions");
   task.command("set <taskId>")
@@ -118,5 +164,26 @@ export function registerAiTaskCommands(program: Command, runtime: CliRuntime): v
         config: current === null ? null : serializeAiTaskConfig(current),
       });
       else printKeyValues([["Task", taskId], ["Current Revision", current?.revisionId ?? "-"], ["Status", current?.status ?? "UNSET"]]);
+    });
+  task.command("test <taskId>")
+    .requiredOption("--effective-at <timestamp>")
+    .option("--json")
+    .action(async (taskId: string, options: TestOptions) => {
+      const parsedTaskId = parseTaskId(taskId);
+      const effectiveAt = parseDate(options.effectiveAt, "--effective-at");
+      const current = await withDatabase(runtime, ({ db }) => getCurrentAiTaskConfig(db, {
+        taskId: parsedTaskId,
+        effectiveAt,
+      }));
+      const config = resolveAiTaskConfig(parsedTaskId, current, process.env);
+      const connection = await testAiTaskConnection(config, { environment: process.env });
+      outputConnectionTest({
+        taskId: parsedTaskId,
+        effectiveAt,
+        config,
+        current,
+        connection,
+        json: options.json,
+      });
     });
 }

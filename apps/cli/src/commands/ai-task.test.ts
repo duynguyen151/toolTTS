@@ -4,9 +4,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   appendAiTaskConfigRevision: vi.fn(),
   getCurrentAiTaskConfig: vi.fn(),
+  resolveAiTaskConfig: vi.fn(),
+  testAiTaskConnection: vi.fn(),
 }));
 
 vi.mock("@shop-health/db", () => mocks);
+vi.mock("@shop-health/decision-ai", () => ({
+  resolveAiTaskConfig: mocks.resolveAiTaskConfig,
+  testAiTaskConnection: mocks.testAiTaskConnection,
+}));
 vi.mock("../db-runtime.js", () => ({
   withDatabase: async (_runtime: unknown, operation: (context: { db: object }) => Promise<unknown>) => operation({ db: {} }),
 }));
@@ -45,6 +51,8 @@ describe("AI task commands", () => {
   beforeEach(() => {
     mocks.appendAiTaskConfigRevision.mockReset();
     mocks.getCurrentAiTaskConfig.mockReset();
+    mocks.resolveAiTaskConfig.mockReset();
+    mocks.testAiTaskConnection.mockReset();
     mocks.appendAiTaskConfigRevision.mockResolvedValue({
       revisionId: "00000000-0000-4000-8000-000000000001", sequence: 1n,
       taskId: "SHOP_HEALTH_REVIEWER", provider: "9router", baseUrl: "http://127.0.0.1:20128/v1", model: "oc/big-pickle",
@@ -52,6 +60,28 @@ describe("AI task commands", () => {
       effectiveFrom: new Date(effectiveFrom), createdAt: new Date(effectiveFrom),
     });
     mocks.getCurrentAiTaskConfig.mockResolvedValue(null);
+    mocks.resolveAiTaskConfig.mockReturnValue({
+      source: "PERSISTED",
+      taskId: "SHOP_HEALTH_REVIEWER",
+      provider: "9router",
+      baseUrl: "http://127.0.0.1:20128/v1",
+      model: "oc/big-pickle",
+      parameters: {},
+      secretRef: "TOOL_AI_API_KEY",
+      enabled: true,
+      status: "ENABLED",
+      registry: { defaultModel: "oc/big-pickle", allowedModels: ["oc/big-pickle"], fallbackModels: [] },
+    });
+    mocks.testAiTaskConnection.mockResolvedValue({
+      status: "SUCCESS",
+      code: "CONNECTED",
+      requested: {
+        provider: "9router",
+        baseUrl: "http://127.0.0.1:20128/v1",
+        model: "oc/big-pickle",
+      },
+      reported: { provider: null, model: "oc/big-pickle" },
+    });
   });
 
   it("appends reviewer metadata without a secret value", async () => {
@@ -112,5 +142,57 @@ describe("AI task commands", () => {
       "ai-task", "set", "SHOP_HEALTH_REVIEWER", "--effective-from", "2026-02-30T00:00:00Z", "--payload", JSON.stringify(payload),
     ])).rejects.toThrow("--effective-from must be an ISO timestamp with an explicit UTC or offset");
     expect(mocks.appendAiTaskConfigRevision).not.toHaveBeenCalled();
+  });
+
+  it("tests the exact effective task configuration with a safe stable JSON result", async () => {
+    const current = {
+      revisionId: "00000000-0000-4000-8000-000000000001",
+      sequence: 1n,
+      taskId: "SHOP_HEALTH_REVIEWER",
+      provider: "9router",
+      baseUrl: "http://127.0.0.1:20128/v1",
+      model: "oc/big-pickle",
+      parameters: {},
+      secretRef: "TOOL_AI_API_KEY",
+      enabled: true,
+      status: "ENABLED",
+      effectiveFrom: new Date(effectiveFrom),
+      createdAt: new Date(effectiveFrom),
+    };
+    mocks.getCurrentAiTaskConfig.mockResolvedValueOnce(current);
+
+    const output = await run([
+      "ai-task", "test", "SHOP_HEALTH_REVIEWER", "--effective-at", effectiveFrom, "--json",
+    ]);
+
+    expect(mocks.getCurrentAiTaskConfig).toHaveBeenCalledWith({}, {
+      taskId: "SHOP_HEALTH_REVIEWER",
+      effectiveAt: new Date(effectiveFrom),
+    });
+    expect(mocks.resolveAiTaskConfig).toHaveBeenCalledWith("SHOP_HEALTH_REVIEWER", current, process.env);
+    expect(mocks.testAiTaskConnection).toHaveBeenCalledWith(
+      expect.objectContaining({ source: "PERSISTED", taskId: "SHOP_HEALTH_REVIEWER" }),
+      { environment: process.env },
+    );
+    expect(JSON.parse(output)).toEqual({
+      schemaVersion: "ai-task-connection.v1",
+      taskId: "SHOP_HEALTH_REVIEWER",
+      effectiveAt: effectiveFrom,
+      configuration: {
+        source: "PERSISTED",
+        revisionId: "00000000-0000-4000-8000-000000000001",
+      },
+      connection: {
+        status: "SUCCESS",
+        code: "CONNECTED",
+        requested: {
+          provider: "9router",
+          baseUrl: "http://127.0.0.1:20128/v1",
+          model: "oc/big-pickle",
+        },
+        reported: { provider: null, model: "oc/big-pickle" },
+      },
+    });
+    expect(output).not.toContain("TOOL_AI_API_KEY");
   });
 });

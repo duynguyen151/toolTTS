@@ -1,6 +1,7 @@
 import { Command } from "commander";
 
 import { registerAiTaskCommands } from "./commands/ai-task.js";
+import { createDefaultJourneyRunner, registerJourneyCommands } from "./commands/journey.js";
 import { registerDataCommands } from "./commands/data.js";
 import { registerDoctorCommand } from "./commands/doctor.js";
 import { registerReviewCommands } from "./commands/review.js";
@@ -33,6 +34,7 @@ registerProfileCommands(program, runtime);
 registerPolicyCommands(program, runtime);
 registerRefreshSettingsCommands(program, runtime);
 registerAiTaskCommands(program, runtime);
+registerJourneyCommands(program, createDefaultJourneyRunner(runtime));
 registerDataCommands(program, runtime);
 registerSyncExecutionCommands(program, runtime);
 registerRiskCommands(program, runtime);

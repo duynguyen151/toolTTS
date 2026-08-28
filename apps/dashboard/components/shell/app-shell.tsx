@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 
-import { FloatingTaskBar } from "../operations/floating-task-bar";
 import { GlobalTaskProvider } from "../operations/global-task-context";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./top-bar";
@@ -22,7 +21,6 @@ export function AppShell({ children }: AppShellProps) {
         <main id="main-content" className="dashboard-main" tabIndex={-1}>
           {children}
         </main>
-        <FloatingTaskBar />
       </div>
     </GlobalTaskProvider>
   );

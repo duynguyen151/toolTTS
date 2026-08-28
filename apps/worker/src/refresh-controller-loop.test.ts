@@ -227,4 +227,30 @@ describe("executeClaimedRefreshAttempts", () => {
     expect(events).toEqual(["persist", "execute"]);
     expect(repository.completeRefreshAttempt).toHaveBeenCalledWith(expect.objectContaining({ outcome: "SUCCESS" }));
   });
+
+  it("persists the controller's typed manual-login reason instead of treating it as a success", async () => {
+    const repository = {
+      recordRefreshAttemptStarted: vi.fn(async () => ({ id: "attempt-1" })),
+      recordRefreshAttemptProxyPreflight: vi.fn(async () => true),
+      renewRefreshAttemptLease: vi.fn(async () => true),
+      releaseRefreshClaim: vi.fn(async () => true),
+      completeRefreshAttempt: vi.fn(async () => ({})),
+    };
+
+    await executeClaimedRefreshAttempts({
+      runs: [{ id: "run-1", shopId: "shop-1", claimToken: "token-1" }],
+      shops: [{ id: "shop-1", profileId: "profile-1" }],
+      now: new Date("2026-01-15T01:00:00.000Z"),
+      repository,
+      preflight: preflightFor(),
+      withExecutionLock: async (_shop, operation) => operation(),
+      // W8 must preserve actionable manual-bootstrap state in its refresh audit.
+      execute: async () => ({ success: false, failureMessage: "HUMAN_ACTION_REQUIRED:LOGIN_REQUIRED" } as never),
+    });
+
+    expect(repository.completeRefreshAttempt).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: "FAILURE",
+      failureMessage: "HUMAN_ACTION_REQUIRED:LOGIN_REQUIRED",
+    }));
+  });
 });

@@ -5,12 +5,14 @@ import {
   listShops,
   type DatabaseContext,
 } from "@shop-health/db";
-import type { SellerDataSource } from "@shop-health/domain";
+import type { ProxyPreflight, SellerDataSource } from "@shop-health/domain";
 import type { SellerCenterBrowserDataSource } from "@shop-health/seller-center";
+import { SellerCenterError } from "@shop-health/seller-center/errors";
 import {
   AdsPowerClient,
   type AdsPowerBrowserConnection,
 } from "@shop-health/seller-center/adspower";
+import { createAdsPowerProxyPreflight } from "@shop-health/seller-center/proxy-preflight";
 import {
   createAdsPowerApplicationLauncher,
   type AdsPowerApplicationLauncher,
@@ -27,6 +29,7 @@ export interface DashboardOperationsRuntimeOptions {
   readonly adsPower?: AdsPowerClient;
   readonly applicationLauncher?: AdsPowerApplicationLauncher;
   readonly source?: SellerDataSource;
+  readonly proxyPreflight?: ProxyPreflight;
   readonly verifyCdpConnection?: (connection: AdsPowerBrowserConnection) => Promise<void>;
 }
 
@@ -64,6 +67,10 @@ export function createDashboardOperationsRuntime(
   });
   const databaseUrl = environment.DATABASE_URL;
   let source: SellerDataSource | undefined = options.source;
+  const proxyPreflight = options.proxyPreflight ?? createAdsPowerProxyPreflight({
+    ...(environment.ADSPOWER_BASE_URL === undefined ? {} : { baseUrl: environment.ADSPOWER_BASE_URL }),
+    ...(environment.ADSPOWER_API_KEY === undefined ? {} : { apiKey: environment.ADSPOWER_API_KEY }),
+  });
 
   const verifyCdpConnection = options.verifyCdpConnection ?? (async (connection) => {
     const { verifyAdsPowerBrowserConnection } = await import("@shop-health/seller-center/browser-source");
@@ -138,10 +145,31 @@ export function createDashboardOperationsRuntime(
     runSync: (profileNo, kind) => withDatabase(databaseUrl, async (context) => {
       const shop = await findShopByProfileNo(context.db, profileNo);
       if (shop === null) throw new Error("Linked shop was not found");
-      const [{ runShopSync }, sellerCenterSource] = await Promise.all([
+      const [{ runAuthoritativeFinanceRefresh, runShopSync }, sellerCenterSource] = await Promise.all([
         import("@shop-health/sync"),
         getSource(),
       ]);
+      if (kind === "finance") {
+        const refresh = await runAuthoritativeFinanceRefresh({
+          context,
+          source: sellerCenterSource,
+          shop,
+          preflight: await proxyPreflight.preflight({ profileId: shop.profileId }),
+        });
+        if (refresh.status !== "SUCCEEDED") {
+          if (refresh.status === "HUMAN_ACTION_REQUIRED") {
+            throw new SellerCenterError(refresh.reason, "Seller Center requires operator action before Finance refresh");
+          }
+          throw new Error(`Authoritative Finance refresh requires attention: ${refresh.reason}`);
+        }
+        const result = refresh.sync;
+        return {
+          status: result.status,
+          complete: result.complete,
+          ...(result.sourceCoverage === undefined ? {} : { sourceCoverage: result.sourceCoverage }),
+          ...(result.financeProof === undefined ? {} : { financeProof: result.financeProof }),
+        };
+      }
       const result = await runShopSync({ context, source: sellerCenterSource, shop, kind });
       return {
         status: result.status,

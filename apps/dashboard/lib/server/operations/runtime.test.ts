@@ -17,6 +17,7 @@ const runtimeMocks = vi.hoisted(() => ({
   listShops: vi.fn(),
   listReadyAdsPowerProfileShops: vi.fn(),
   runShopSync: vi.fn(),
+  runAuthoritativeFinanceRefresh: vi.fn(),
   readBaselineAiConfig: vi.fn(),
   verifyAdsPowerBrowserConnection: vi.fn(),
 }));
@@ -28,6 +29,7 @@ vi.mock("@shop-health/seller-center/browser-source", () => ({
 }));
 vi.mock("@shop-health/sync", () => ({
   evaluateAndStoreRiskControl: runtimeMocks.evaluateAndStoreRiskControl,
+  runAuthoritativeFinanceRefresh: runtimeMocks.runAuthoritativeFinanceRefresh,
   runShopSync: runtimeMocks.runShopSync,
 }));
 vi.mock("@shop-health/decision-ai", () => ({
@@ -167,6 +169,25 @@ describe("createDashboardOperationsRuntime", () => {
             },
           };
     });
+    runtimeMocks.runAuthoritativeFinanceRefresh.mockResolvedValue({
+      status: "SUCCEEDED",
+      authoritativeProvider: "SELLER_CENTER",
+      sync: {
+        status: "SUCCEEDED",
+        complete: true,
+        sourceCoverage: undefined,
+        financeProof: {
+          capturedAt: new Date("2026-08-15T00:00:00.000Z"),
+          officialOnHoldAmount: "1200.0000",
+          reasonTotalsReconcileToOfficialOnHold: true,
+        },
+      },
+      financeProof: {
+        capturedAt: new Date("2026-08-15T00:00:00.000Z"),
+        officialOnHoldAmount: "1200.0000",
+        reasonTotalsReconcileToOfficialOnHold: true,
+      },
+    });
     runtimeMocks.evaluateAndStoreRiskControl.mockImplementation(async () => { calls.push("reconcile-risk"); });
     runtimeMocks.readBaselineAiConfig.mockReturnValue({ provider: "9router" });
     runtimeMocks.createBaselineAiClientFromConfig.mockReturnValue("baseline-ai-client");
@@ -203,6 +224,14 @@ describe("createDashboardOperationsRuntime", () => {
           return { status: "HEALTHY" as const, checkedAt: new Date(), detail: null };
         },
       },
+      proxyPreflight: {
+        preflight: async () => ({
+          status: "HEALTHY",
+          latencyMs: 10,
+          exitIp: null,
+          reasonClass: "OBSERVED_HEALTHY",
+        }),
+      },
       verifyCdpConnection: async () => { calls.push("verify-cdp"); },
     });
     await operations.updateData("957", (event) => { events.push(event); });
@@ -219,10 +248,10 @@ describe("createDashboardOperationsRuntime", () => {
       "verify-cdp",
       "authenticated-health",
       "orders-sync",
-      "finance-sync",
       "reconcile-risk",
       "persist-decision-case-and-ai",
     ]);
+    expect(runtimeMocks.runAuthoritativeFinanceRefresh).toHaveBeenCalledTimes(1);
     expect(events.map((event) => event.state)).toEqual([
       "OPENING_PROFILE",
       "CONNECTING",
@@ -359,5 +388,58 @@ describe("createDashboardOperationsRuntime", () => {
     expect(runtimeMocks.createPersistedDecisionWorkflow).not.toHaveBeenCalled();
     expect(runtimeMocks.createBaselineAiClientFromConfig).not.toHaveBeenCalled();
     expect(events.at(-1)).toMatchObject({ state: "PARTIAL", completedKinds: [] });
+  });
+
+  it("keeps a Finance login requirement actionable after the controller rejects manual completion", async () => {
+    const linkedShop = {
+      id: "shop-957",
+      profileId: "internal-profile-id",
+      profileNo: "957",
+      displayName: "Tool TTS Shop",
+    };
+    runtimeMocks.createDatabase.mockReturnValue({ db: {} });
+    runtimeMocks.closeDatabase.mockResolvedValue(undefined);
+    runtimeMocks.listShops.mockResolvedValue([linkedShop]);
+    runtimeMocks.listReadyAdsPowerProfileShops.mockResolvedValue([linkedShop]);
+    runtimeMocks.findShopByProfileNo.mockResolvedValue(linkedShop);
+    runtimeMocks.runShopSync.mockResolvedValue({
+      status: "SUCCEEDED",
+      complete: true,
+      sourceCoverage: {
+        source: "SELLER_CENTER",
+        window: "ROLLING_12_MONTHS",
+        completeWithinSourceWindow: true,
+        lifetimeHistoryComplete: false,
+      },
+    });
+    runtimeMocks.runAuthoritativeFinanceRefresh.mockResolvedValue({
+      status: "HUMAN_ACTION_REQUIRED",
+      authoritativeProvider: "SELLER_CENTER",
+      reason: "LOGIN_REQUIRED",
+    });
+    const operations = createDashboardOperationsRuntime({
+      environment: { DATABASE_URL: "postgres://dashboard-test" },
+      adsPower: adsPowerClient("OPEN"),
+      applicationLauncher: { ensureReady: async () => undefined },
+      source: healthySource,
+      proxyPreflight: {
+        preflight: async () => ({
+          status: "HEALTHY",
+          latencyMs: 10,
+          exitIp: null,
+          reasonClass: "OBSERVED_HEALTHY",
+        }),
+      },
+    });
+    const events: Array<{ state: string; error: { code: string } | null }> = [];
+
+    await operations.updateData("957", (event) => {
+      events.push({ state: event.state, error: event.error });
+    });
+
+    expect(events.at(-1)).toMatchObject({
+      state: "HUMAN_ACTION_REQUIRED",
+      error: { code: "LOGIN_REQUIRED" },
+    });
   });
 });

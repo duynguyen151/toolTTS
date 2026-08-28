@@ -36,6 +36,11 @@ import type { Logger } from "pino";
 
 export { runSequentialProfileQueue, type ProfileQueueResult } from "./profile-orchestration.js";
 export { verifySelectedProfile, type ProfileVerificationResult } from "./profile-verification.js";
+export {
+  runAuthoritativeFinanceRefresh,
+  type AuthoritativeRefreshResult,
+  type RunAuthoritativeFinanceRefreshInput,
+} from "./authoritative-refresh-controller.js";
 
 export type SyncKind = "orders" | "finance";
 

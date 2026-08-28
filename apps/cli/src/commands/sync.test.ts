@@ -10,7 +10,10 @@ import type { CliRuntime } from "../runtime.js";
 import { registerSyncExecutionCommands } from "./sync.js";
 
 const mocks = vi.hoisted(() => ({
+  createAdsPowerProxyPreflight: vi.fn(),
+  createSellerCenterDataSource: vi.fn(),
   findShopByProfileNo: vi.fn(),
+  runAuthoritativeFinanceRefresh: vi.fn(),
   runShopSync: vi.fn(),
 }));
 
@@ -21,10 +24,17 @@ vi.mock("@shop-health/db", () => ({
 
 vi.mock("@shop-health/seller-center", () => ({
   captureSellerCenterNetworkInventory: vi.fn(),
-  createSellerCenterDataSource: vi.fn(),
+  createSellerCenterDataSource: mocks.createSellerCenterDataSource,
 }));
 
-vi.mock("@shop-health/sync", () => ({ runShopSync: mocks.runShopSync }));
+vi.mock("@shop-health/seller-center/proxy-preflight", () => ({
+  createAdsPowerProxyPreflight: mocks.createAdsPowerProxyPreflight,
+}));
+
+vi.mock("@shop-health/sync", () => ({
+  runAuthoritativeFinanceRefresh: mocks.runAuthoritativeFinanceRefresh,
+  runShopSync: mocks.runShopSync,
+}));
 
 vi.mock("../db-runtime.js", () => ({
   withDatabase: async (_runtime: unknown, operation: (context: { db: object }) => Promise<unknown>) =>
@@ -100,6 +110,9 @@ describe("sync discover command", () => {
   beforeEach(() => {
     mocks.findShopByProfileNo.mockReset();
     mocks.findShopByProfileNo.mockResolvedValue(liveShop);
+    mocks.createAdsPowerProxyPreflight.mockReset();
+    mocks.createSellerCenterDataSource.mockReset();
+    mocks.runAuthoritativeFinanceRefresh.mockReset();
     mocks.runShopSync.mockReset();
   });
 
@@ -194,6 +207,57 @@ describe("sync discover command", () => {
       "sync", "discover", "957", "--json",
     ])).rejects.toThrow("LIVE");
     expect(capture).not.toHaveBeenCalled();
+  });
+});
+
+describe("sync finance command", () => {
+  beforeEach(() => {
+    mocks.findShopByProfileNo.mockResolvedValue(liveShop);
+    mocks.createSellerCenterDataSource.mockReturnValue("seller-center-source");
+    mocks.createAdsPowerProxyPreflight.mockReturnValue({
+      preflight: vi.fn().mockResolvedValue({
+        status: "HEALTHY",
+        latencyMs: 10,
+        exitIp: null,
+        reasonClass: "OBSERVED_HEALTHY",
+      }),
+    });
+    mocks.runAuthoritativeFinanceRefresh.mockResolvedValue({
+      status: "SUCCEEDED",
+      authoritativeProvider: "SELLER_CENTER",
+      sync: {
+        status: "SUCCEEDED",
+        syncRunId: "finance-run-1",
+        rowsRead: 2,
+        rowsWritten: 2,
+        checkpoint: null,
+        complete: true,
+      },
+      financeProof: {
+        capturedAt: new Date("2026-08-28T00:00:00.000Z"),
+        officialOnHoldAmount: "1200.0000",
+        reasonTotalsReconcileToOfficialOnHold: true,
+      },
+    });
+  });
+
+  test("uses the authoritative controller rather than bypassing manual finance safety gates", async () => {
+    const output = await captureStdout(() => run(vi.fn<Capture>(), [
+      "sync", "finance", "957", "--json",
+    ]));
+
+    expect(mocks.runAuthoritativeFinanceRefresh).toHaveBeenCalledWith(expect.objectContaining({
+      source: "seller-center-source",
+      shop: liveShop,
+      preflight: expect.objectContaining({ status: "HEALTHY" }),
+    }));
+    expect(mocks.runShopSync).not.toHaveBeenCalled();
+    expect(JSON.parse(output)).toMatchObject({
+      schemaVersion: "sync-result.v1",
+      kind: "finance",
+      status: "SUCCEEDED",
+      complete: true,
+    });
   });
 });
 

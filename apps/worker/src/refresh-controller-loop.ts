@@ -36,6 +36,12 @@ export interface RefreshAttemptRepository {
   }) => Promise<unknown>;
 }
 
+/** Controller failures are already classified; keep their safe reason in the refresh audit. */
+export interface RefreshExecutionResult {
+  readonly success: boolean;
+  readonly failureMessage?: string;
+}
+
 export interface ExecuteClaimedRefreshAttemptsInput<TShop extends { readonly id: string }> {
   readonly runs: readonly Pick<RefreshCheckpointRunRecord, "id" | "shopId" | "claimToken">[];
   readonly shops: readonly TShop[];
@@ -43,13 +49,12 @@ export interface ExecuteClaimedRefreshAttemptsInput<TShop extends { readonly id:
   readonly repository: RefreshAttemptRepository;
   readonly preflight: (shop: TShop) => Promise<ProxyPreflightResult>;
   readonly withExecutionLock: (shop: TShop, operation: () => Promise<boolean>) => Promise<boolean | null>;
-  readonly execute: (shop: TShop) => Promise<boolean>;
+  readonly execute: (shop: TShop, preflight: ProxyPreflightResult) => Promise<boolean | RefreshExecutionResult>;
 }
 
 /**
- * Thin W6 boundary: claim persistence is DB-owned; browser/source execution stays
- * with the existing worker path until W8 composes the full refresh controller.
- * Sequential iteration preserves the existing no-parallel-profile guarantee.
+ * Claim persistence remains DB-owned while W8 injects the authoritative refresh
+ * controller. Sequential iteration preserves the no-parallel-profile guarantee.
  */
 export async function executeClaimedRefreshAttempts<TShop extends { readonly id: string }>(
   input: ExecuteClaimedRefreshAttemptsInput<TShop>,
@@ -101,8 +106,10 @@ export async function executeClaimedRefreshAttempts<TShop extends { readonly id:
             outcome = "FAILURE";
             failureMessage = `Proxy preflight ${preflight.status}`;
           } else {
-            outcome = (await input.execute(shop)) ? "SUCCESS" : "FAILURE";
-            if (outcome === "FAILURE") failureMessage = "Refresh execution returned unsuccessful";
+            const execution = await input.execute(shop, preflight);
+            const result = typeof execution === "boolean" ? { success: execution } : execution;
+            outcome = result.success ? "SUCCESS" : "FAILURE";
+            if (outcome === "FAILURE") failureMessage = result.failureMessage ?? "Refresh execution returned unsuccessful";
           }
         }
       } catch (error) {

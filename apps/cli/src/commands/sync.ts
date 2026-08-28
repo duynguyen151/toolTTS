@@ -7,7 +7,8 @@ import {
   createSellerCenterDataSource,
   type NetworkInventoryReport,
 } from "@shop-health/seller-center";
-import { runShopSync, type SyncKind } from "@shop-health/sync";
+import { createAdsPowerProxyPreflight } from "@shop-health/seller-center/proxy-preflight";
+import { runAuthoritativeFinanceRefresh, runShopSync, type SyncKind } from "@shop-health/sync";
 import Table from "cli-table3";
 import { InvalidArgumentError, type Command } from "commander";
 
@@ -111,7 +112,22 @@ function registerLiveSync(
         const source = createSellerCenterDataSource(runtime.config.ADSPOWER_API_KEY === undefined
           ? sourceOptions
           : { ...sourceOptions, apiKey: runtime.config.ADSPOWER_API_KEY });
-        return runShopSync({ context, source, shop, kind, mode, logger: runtime.logger });
+        if (kind !== "finance") return runShopSync({ context, source, shop, kind, mode, logger: runtime.logger });
+        const proxyPreflight = createAdsPowerProxyPreflight(runtime.config.ADSPOWER_API_KEY === undefined
+          ? { baseUrl: runtime.config.ADSPOWER_BASE_URL }
+          : { baseUrl: runtime.config.ADSPOWER_BASE_URL, apiKey: runtime.config.ADSPOWER_API_KEY });
+        const refresh = await runAuthoritativeFinanceRefresh({
+          context,
+          source,
+          shop,
+          preflight: await proxyPreflight.preflight({ profileId: shop.profileId }),
+          logger: runtime.logger,
+        });
+        if (refresh.status === "SUCCEEDED") return refresh.sync;
+        throw new CliError({
+          failureType: refresh.status,
+          message: `Authoritative Finance refresh requires attention: ${refresh.reason}`,
+        });
       });
       if (options.json === true) printJson({ schemaVersion: "sync-result.v1", profileNo, kind, mode, ...result });
       else if (kind === "orders" && result.sourceCoverage !== undefined) {

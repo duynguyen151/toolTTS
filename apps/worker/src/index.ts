@@ -17,7 +17,12 @@ import {
 } from "@shop-health/db";
 import { createSellerCenterDataSource } from "@shop-health/seller-center";
 import { createAdsPowerProxyPreflight } from "@shop-health/seller-center/proxy-preflight";
-import { evaluateAndStoreRiskControl, runShopSync, type SyncKind } from "@shop-health/sync";
+import {
+  evaluateAndStoreRiskControl,
+  runAuthoritativeFinanceRefresh,
+  runShopSync,
+  type SyncKind,
+} from "@shop-health/sync";
 import pino from "pino";
 
 import { loadWorkerConfig } from "./config.js";
@@ -90,10 +95,17 @@ async function runClaimedRefreshAttempts(shops: readonly ShopRow[], now: Date): 
     },
     preflight: async (shop) => proxyPreflight.preflight({ profileId: shop.profileId }),
     withExecutionLock: (shop, operation) => withRefreshProfileExecutionLock(context, shop.profileId, operation),
-    execute: async (shop) => {
-      // W6 owns durable scheduling only. W8 will replace this with its health-aware
-      // authoritative Finance refresh controller; existing manual/direct sync paths stay untouched.
-      return syncShop(shop, "finance");
+    execute: async (shop, preflight) => {
+      const result = await runAuthoritativeFinanceRefresh({
+        context,
+        source,
+        shop,
+        preflight,
+        logger,
+      });
+      return result.status === "SUCCEEDED"
+        ? { success: true }
+        : { success: false, failureMessage: `${result.status}:${result.reason}` };
     },
   });
 }

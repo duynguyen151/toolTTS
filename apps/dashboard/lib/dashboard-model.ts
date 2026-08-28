@@ -40,16 +40,38 @@ function formatTimestamp(value: Date | null): string {
   }).format(value);
 }
 
-function formatCount(value: number | null): string {
-  return value === null ? "Unavailable" : value.toLocaleString("en-US");
+function formatObservationTimestamp(value: Date | null | undefined): string {
+  return value === null || value === undefined ? "Unavailable" : formatTimestamp(value);
+}
+
+function formatCount(value: number | null | undefined): string {
+  return value === null || value === undefined ? "Unavailable" : value.toLocaleString("en-US");
 }
 
 function unavailableDecisionCenter(): DashboardDecisionCenter {
+  const caseEvidence = { owner: "IMMUTABLE_DECISION_CASE" as const, source: "DECISION_CASE", observedAt: "Unavailable" };
   return {
     status: "UNAVAILABLE",
     message: "No persisted LIVE decision case is available for this shop.",
     caseId: null,
     profileNo: null,
+    reviewSnapshot: {
+      owner: "IMMUTABLE_DECISION_CASE",
+      source: "DECISION_CASE",
+      businessTimeZone: DISPLAY_TIME_ZONE,
+      observedAt: "Unavailable",
+    },
+    effectivePolicy: {
+      owner: "IMMUTABLE_DECISION_CASE",
+      source: "DECISION_CASE",
+      observedAt: "Unavailable",
+      policyVersion: "Unavailable",
+      effectiveAt: "Unavailable",
+      stopOnHoldValueAt: "Unavailable",
+      stopOnHoldValueAtSource: "Unavailable",
+      stopDeliveryRateBelow: "Unavailable",
+      stopDeliveryRateBelowSource: "Unavailable",
+    },
     financeHealth: null,
     coverage: {
       status: "UNAVAILABLE",
@@ -62,6 +84,7 @@ function unavailableDecisionCenter(): DashboardDecisionCenter {
       staleDisclosure: null,
       completeWithinWindow: "Unavailable",
       lifetimeHistory: "Not verified",
+      evidence: { owner: "IMMUTABLE_DECISION_CASE", source: "DECISION_CASE", observedAt: "Unavailable" },
     },
     metrics: [],
     comparisons: [],
@@ -73,6 +96,11 @@ function unavailableDecisionCenter(): DashboardDecisionCenter {
       evaluatedAt: "Unavailable",
       triggers: [],
       checks: [],
+      conditions: {
+        officialOnHold: { state: "NOT_EVALUATED", source: null, observedValue: "Unavailable", observedAt: "Unavailable", ageMs: null, quality: "UNKNOWN", threshold: "Unavailable", evidence: caseEvidence },
+        deliveryRate: { state: "NOT_EVALUATED", source: null, observedValue: "Unavailable", observedAt: "Unavailable", ageMs: null, quality: "UNKNOWN", threshold: "Unavailable", evidence: caseEvidence },
+      },
+      evidence: caseEvidence,
     },
     ai: {
       status: "UNAVAILABLE",
@@ -95,14 +123,16 @@ function unavailableDecisionCenter(): DashboardDecisionCenter {
       promptVersion: "Unavailable",
       outputSchemaVersion: "Unavailable",
       failureCode: "NOT_RECORDED",
+      evidence: { owner: "AI_DECISION", source: "AI_DECISION", observedAt: "Unavailable" },
     },
-    ba: { current: "NOT_REVIEWED", currentDetail: "No BA decision is recorded.", history: [] },
+    ba: { current: "NOT_REVIEWED", currentDetail: "No BA decision is recorded.", evidence: { owner: "BA_DECISION_REVISION", source: "BA_DECISION", observedAt: "Unavailable" }, history: [] },
     execution: {
       status: "NOT_REQUESTED",
       requestedAction: "None",
       mode: "DRY_RUN only",
       sellerCenterCalled: "No",
       executedAt: "Not executed",
+      evidence: { owner: "DRY_RUN_EXECUTION", source: "DECISION_EXECUTION", observedAt: "Unavailable" },
     },
     reviewQueue: [],
   };
@@ -139,7 +169,7 @@ function profileStatusView(status: DashboardProfileState): DashboardStatusView {
 function buildKpis(source: DashboardSource): DashboardKpi[] {
   const { selected } = source;
   const deliveryValue = selected.deliveryRate.status === "AVAILABLE"
-    ? new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 0 }).format(selected.deliveryRate.value)
+    ? new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 1 }).format(selected.deliveryRate.value)
     : "Not verified";
   const deliveryDetail = selected.deliveryRate.status === "AVAILABLE"
     ? `${new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 0 }).format(selected.deliveryRate.coverage)} of orders are delivery-eligible`
@@ -237,8 +267,15 @@ export function buildDashboardPresentation(source: DashboardSource): DashboardPr
   const profileView = profileStatusView(source.selected.profileState);
 
   return {
+    schemaVersion: "dashboard-read.v2",
     generatedAt: source.generatedAt.toISOString(),
     dataOrigin: selectedShop.dataOrigin,
+    currentOperational: {
+      owner: "CURRENT_OPERATIONAL_FACTS",
+      source: "PERSISTED_SHOP_READ_MODEL",
+      businessTimeZone: DISPLAY_TIME_ZONE,
+      observedAt: formatObservationTimestamp(source.selected.latestSync.startedAt),
+    },
     shops: source.shops.map((shop) => ({
       id: shop.id,
       profileNo: shop.profileNo,

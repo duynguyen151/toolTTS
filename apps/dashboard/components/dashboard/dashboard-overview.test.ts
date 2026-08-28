@@ -227,4 +227,10 @@ describe("DashboardOverview", () => {
     expect(html).toContain("GMT+7");
     expect(html).not.toContain(">Generated 2026-08-14T16:02:04.716Z</time>");
   });
+
+  it("labels the operational dashboard surface separately from immutable decision evidence", () => {
+    const html = renderDashboard("LIVE");
+
+    expect(html).toContain("Current operational facts · persisted shop read model · GMT+07");
+  });
 });

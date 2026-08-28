@@ -391,6 +391,33 @@ describe("loadDashboardPresentation", () => {
           },
         },
         rule: { decision: "CONTINUE", triggers: [], policyVersion: "risk-policy.v1" },
+        resolvedPolicySnapshot: {
+          policyVersion: "risk-policy.v1",
+          currency: "USD",
+          effectiveAt: "2026-08-15T00:00:00.000Z",
+          thresholds: {
+            stopOnHoldValueAt: "3500.0000",
+            stopDeliveryRateBelow: 0.7,
+            minimumOrdersForRateRule: 10,
+            resumeOnHoldValueBelow: "1000.0000",
+            resumeDeliveryRateAt: 0.8,
+            stableCyclesBeforeResume: 2,
+          },
+          caution: { onHoldValue: "WARN", deliveryRate: "WARN" },
+          globalRevisionId: "global-policy-1",
+          shopOverrideRevisionId: "shop-policy-1",
+          sources: {
+            thresholds: {
+              stopOnHoldValueAt: "SHOP",
+              stopDeliveryRateBelow: "GLOBAL",
+              minimumOrdersForRateRule: "GLOBAL",
+              resumeOnHoldValueBelow: "GLOBAL",
+              resumeDeliveryRateAt: "GLOBAL",
+              stableCyclesBeforeResume: "GLOBAL",
+            },
+            caution: { onHoldValue: "SHOP", deliveryRate: "GLOBAL" },
+          },
+        },
         metrics: { totalOrders: 10, onHoldValue: "100", deliveredCount: 9, deliveryRate: 0.9, cancellationRate: 0, refundRate: 0, currency: "USD" },
         ai: {
           status: "AVAILABLE",
@@ -407,6 +434,7 @@ describe("loadDashboardPresentation", () => {
           actualModelUsed: "actual",
           reason: "Healthy evidence supports continuation.",
           policyVersion: "ai-policy.v1",
+          createdAt: new Date("2026-08-16T00:30:00.000Z"),
         },
         decisionContextSnapshot: {
           comparisons: [{ metric: "deliveryRate", previous: 0.8, current: 0.9, absoluteDelta: 0.1, relativeDelta: 0.125, direction: "INCREASED" }],
@@ -415,6 +443,16 @@ describe("loadDashboardPresentation", () => {
             expression: "exposure >= 3500 OR deliveryRate < 0.7",
             evaluatedAt: "2026-08-16T00:00:00.000Z",
             checks: [{ metric: "deliveryRate", observedValue: 0.9, threshold: 0.7, operator: "LT", result: "PASS", triggeredReason: null }],
+          },
+          targetRuleEvidence: {
+            schemaVersion: "official-on-hold-rule.v1",
+            policyVersion: "risk-policy.v1",
+            evaluatedAt: "2026-08-16T00:00:00.000Z",
+            decision: "PAUSE",
+            triggers: ["OFFICIAL_ON_HOLD"],
+            expression: "officialFinanceOnHold >= 3500 USD OR deliveryRate < 70%",
+            officialOnHold: { state: "TRIGGERED", source: "SELLER_CENTER", observedValue: "4000", observedAt: "2026-08-16T00:00:00.000Z", ageMs: 0, quality: "FRESH", completeness: "COMPLETE", reconciliation: "RECONCILED", refreshState: "SUCCEEDED", threshold: "3500" },
+            deliveryRate: { state: "CLEAR", source: "SELLER_CENTER", observedValue: 0.9, observedAt: "2026-08-16T00:00:00.000Z", ageMs: 0, quality: "FRESH", deliveredCount: 9, totalCount: 10, threshold: 0.7, unavailableReasons: [] },
           },
         },
         ba: null,
@@ -436,11 +474,27 @@ describe("loadDashboardPresentation", () => {
     expect(center.coverage.financeCapturedAt).toBe("2026-08-16T00:00:00.000Z");
     expect(center.coverage.financeAgeMs).toBe(3_600_000);
     expect(center.coverage.staleDisclosure).toBe("STALE: Finance evidence is advisory only and is not current.");
+    expect(center.reviewSnapshot).toEqual({
+      owner: "IMMUTABLE_DECISION_CASE",
+      source: "DECISION_CASE",
+      businessTimeZone: "Asia/Bangkok",
+      observedAt: "Unavailable",
+    });
+    expect(center.effectivePolicy).toMatchObject({
+      owner: "IMMUTABLE_DECISION_CASE",
+      policyVersion: "risk-policy.v1",
+      effectiveAt: "15 Aug 2026, 07:00 GMT+7",
+      stopOnHoldValueAt: "3500.0000 USD",
+      stopOnHoldValueAtSource: "SHOP",
+    });
+    expect(center.rule.conditions.officialOnHold).toMatchObject({ state: "TRIGGERED", source: "SELLER_CENTER", observedValue: "4000", threshold: "3500" });
+    expect(center.rule.conditions.deliveryRate).toMatchObject({ state: "CLEAR", source: "SELLER_CENTER", observedValue: "0.9", threshold: "0.7" });
     expect(center.comparisons[0]).toMatchObject({ relativeDelta: "0.125", previous: "0.8", current: "0.9" });
     expect(center.rule.checks[0]).toMatchObject({ operator: "LT", result: "PASS" });
     expect(center.ai.reason).toBe("Healthy evidence supports continuation.");
     expect(center.ai.ruleAgreement).toBe("AI differs from deterministic Rule");
     expect(center.ai.policyVersion).toBe("ai-policy.v1");
+    expect(center.ai.evidence).toEqual({ owner: "AI_DECISION", source: "AI_DECISION", observedAt: "16 Aug 2026, 07:30 GMT+7" });
   });
 
   it("uses the requested linked LIVE shop for server-backed dashboard selection", async () => {

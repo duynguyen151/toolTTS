@@ -68,4 +68,46 @@ describe("buildDashboardPresentation", () => {
     expect(view.kpis.find((item) => item.id === "on-hold")?.value).toBe("Unavailable");
     expect(view.kpis.find((item) => item.id === "delivery")?.value).toBe("Not verified");
   });
+
+  it("formats authoritative delivery rate 0.571428 as 57.1%", () => {
+    const view = buildDashboardPresentation({
+      ...source,
+      selected: {
+        ...source.selected,
+        deliveryRate: { status: "AVAILABLE", value: 0.571428, coverage: 1 },
+      },
+    });
+
+    expect(view.kpis.find((item) => item.id === "delivery")?.value).toBe("57.1%");
+  });
+
+  it("uses the persisted operational observation rather than read generation time", () => {
+    const view = buildDashboardPresentation({
+      ...source,
+      generatedAt: new Date("2026-08-16T09:00:00.000Z"),
+      selected: {
+        ...source.selected,
+        latestSync: { ...source.selected.latestSync, startedAt: new Date("2026-08-16T01:00:00.000Z") },
+      },
+    });
+
+    expect(view.currentOperational).toMatchObject({
+      owner: "CURRENT_OPERATIONAL_FACTS",
+      source: "PERSISTED_SHOP_READ_MODEL",
+      observedAt: "16 Aug 2026, 08:00 GMT+7",
+    });
+    expect(view.currentOperational?.observedAt).not.toBe(view.generatedAt);
+  });
+
+  it("labels current operational facts with their owner, source, and Bangkok timebase", () => {
+    const view = buildDashboardPresentation(source);
+    const currentOperational = view.currentOperational;
+
+    expect(currentOperational).toEqual({
+      owner: "CURRENT_OPERATIONAL_FACTS",
+      source: "PERSISTED_SHOP_READ_MODEL",
+      businessTimeZone: "Asia/Bangkok",
+      observedAt: "14 Aug 2026, 20:56 GMT+7",
+    });
+  });
 });

@@ -16,6 +16,7 @@ import {
 
 import type {
   DashboardDecisionCenter,
+  DashboardEvidenceMetadata,
   DashboardPresentation,
   DashboardShopSource,
   DashboardSource,
@@ -48,6 +49,23 @@ function displayTimestamp(value: Date | string | null | undefined): string {
   }).format(timestamp);
 }
 
+function evidence(owner: DashboardEvidenceMetadata["owner"], source: string, observedAt: Date | string | null | undefined): DashboardEvidenceMetadata {
+  return { owner, source, observedAt: displayTimestamp(observedAt) };
+}
+
+function unavailableCondition(owner: DashboardEvidenceMetadata["owner"], observedAt: Date | string | null | undefined) {
+  return {
+    state: "NOT_EVALUATED" as const,
+    source: null,
+    observedValue: "Unavailable",
+    observedAt: "Unavailable",
+    ageMs: null,
+    quality: "UNKNOWN",
+    threshold: "Unavailable",
+    evidence: evidence(owner, "DECISION_CASE", observedAt),
+  };
+}
+
 function decisionQueueReasons(review: DecisionReviewRecord): string[] {
   const reasons: string[] = [];
   if (review.rule.decision === "PAUSE") reasons.push("RULE_PAUSE");
@@ -76,6 +94,23 @@ function decisionCenterFromReviews(
       message: "No persisted LIVE decision case is available for this shop.",
       caseId: null,
       profileNo: null,
+      reviewSnapshot: {
+        owner: "IMMUTABLE_DECISION_CASE",
+        source: "DECISION_CASE",
+        businessTimeZone: "Asia/Bangkok",
+        observedAt: "Unavailable",
+      },
+      effectivePolicy: {
+        owner: "IMMUTABLE_DECISION_CASE",
+        source: "DECISION_CASE",
+        observedAt: "Unavailable",
+        policyVersion: "Unavailable",
+        effectiveAt: "Unavailable",
+        stopOnHoldValueAt: "Unavailable",
+        stopOnHoldValueAtSource: "Unavailable",
+        stopDeliveryRateBelow: "Unavailable",
+        stopDeliveryRateBelowSource: "Unavailable",
+      },
       financeHealth: null,
       coverage: {
         status: "UNAVAILABLE",
@@ -88,11 +123,16 @@ function decisionCenterFromReviews(
         staleDisclosure: null,
         completeWithinWindow: "Unavailable",
         lifetimeHistory: "Not verified",
+        evidence: evidence("IMMUTABLE_DECISION_CASE", "DECISION_CASE", null),
       },
       metrics: [],
       comparisons: [],
       trends: [],
-      rule: { result: "UNAVAILABLE", policyVersion: "Unavailable", expression: "Unavailable", evaluatedAt: "Unavailable", triggers: [], checks: [] },
+      rule: {
+        result: "UNAVAILABLE", policyVersion: "Unavailable", expression: "Unavailable", evaluatedAt: "Unavailable", triggers: [], checks: [],
+        conditions: { officialOnHold: unavailableCondition("IMMUTABLE_DECISION_CASE", null), deliveryRate: unavailableCondition("IMMUTABLE_DECISION_CASE", null) },
+        evidence: evidence("IMMUTABLE_DECISION_CASE", "DECISION_CASE", null),
+      },
       ai: {
         status: "UNAVAILABLE",
         recommendation: "Unavailable",
@@ -112,14 +152,15 @@ function decisionCenterFromReviews(
         actualModel: "Unavailable",
         authMode: "Unavailable",
         promptVersion: "Unavailable",
-        outputSchemaVersion: "Unavailable",
-        failureCode: "NOT_RECORDED",
-      },
-      ba: { current: "NOT_REVIEWED", currentDetail: "No BA decision is recorded.", history: [] },
-      execution: { status: "NOT_REQUESTED", requestedAction: "None", mode: "DRY_RUN only", sellerCenterCalled: "No", executedAt: "Not executed" },
+      outputSchemaVersion: "Unavailable",
+      failureCode: "NOT_RECORDED",
+      evidence: evidence("AI_DECISION", "AI_DECISION", null),
+    },
+      ba: { current: "NOT_REVIEWED", currentDetail: "No BA decision is recorded.", evidence: evidence("BA_DECISION_REVISION", "BA_DECISION", null), history: [] },
+      execution: { status: "NOT_REQUESTED", requestedAction: "None", mode: "DRY_RUN only", sellerCenterCalled: "No", executedAt: "Not executed", evidence: evidence("DRY_RUN_EXECUTION", "DECISION_EXECUTION", null) },
       reviewQueue: queueReviews.flatMap((item) => {
         const reasons = decisionQueueReasons(item);
-        return reasons.length === 0 ? [] : [{ profileNo: item.shop.profileNo, displayName: item.shop.displayName, reasons }];
+        return reasons.length === 0 ? [] : [{ profileNo: item.shop.profileNo, displayName: item.shop.displayName, reasons, evidence: evidence("IMMUTABLE_DECISION_CASE", "DECISION_CASE", item.case?.observedAt) }];
       }),
     };
   }
@@ -134,6 +175,9 @@ function decisionCenterFromReviews(
     freshness: "UNKNOWN",
   };
   const ai = review.ai;
+  const caseObservedAt = review.case?.observedAt;
+  const caseEvidence = evidence("IMMUTABLE_DECISION_CASE", "DECISION_CASE", caseObservedAt);
+  const targetRule = context?.targetRuleEvidence;
   const hasPersistedSourceWindow = coverage.source === "SELLER_CENTER" && coverage.provenSourceWindow !== null;
   const reviewHistory = history.flatMap((item) => (item.baHistory ?? (item.ba === null ? [] : [item.ba])).map((ba) => ({
     decision: ba.decision,
@@ -141,6 +185,7 @@ function decisionCenterFromReviews(
     actor: ba.actor,
     decidedAt: displayTimestamp(ba.decidedAt),
     notes: ba.notes ?? ba.note ?? "No note provided.",
+    evidence: evidence("BA_DECISION_REVISION", "BA_DECISION", ba.decidedAt),
   })));
 
   return {
@@ -148,6 +193,33 @@ function decisionCenterFromReviews(
     message: "Live read model from persisted decision history.",
     caseId: review.case?.id ?? null,
     profileNo: review.shop?.profileNo ?? null,
+    reviewSnapshot: {
+      owner: "IMMUTABLE_DECISION_CASE",
+      source: "DECISION_CASE",
+      businessTimeZone: "Asia/Bangkok",
+      observedAt: displayTimestamp(review.case?.observedAt),
+    },
+    effectivePolicy: review.resolvedPolicySnapshot == null ? {
+      owner: "IMMUTABLE_DECISION_CASE",
+      source: "DECISION_CASE",
+      observedAt: displayTimestamp(review.case?.observedAt),
+      policyVersion: "Unavailable",
+      effectiveAt: "Unavailable",
+      stopOnHoldValueAt: "Unavailable",
+      stopOnHoldValueAtSource: "Unavailable",
+      stopDeliveryRateBelow: "Unavailable",
+      stopDeliveryRateBelowSource: "Unavailable",
+    } : {
+      owner: "IMMUTABLE_DECISION_CASE",
+      source: "DECISION_CASE",
+      observedAt: displayTimestamp(review.case?.observedAt),
+      policyVersion: review.resolvedPolicySnapshot.policyVersion,
+      effectiveAt: displayTimestamp(review.resolvedPolicySnapshot.effectiveAt),
+      stopOnHoldValueAt: `${review.resolvedPolicySnapshot.thresholds.stopOnHoldValueAt} ${review.resolvedPolicySnapshot.currency}`,
+      stopOnHoldValueAtSource: review.resolvedPolicySnapshot.sources.thresholds.stopOnHoldValueAt,
+      stopDeliveryRateBelow: String(review.resolvedPolicySnapshot.thresholds.stopDeliveryRateBelow),
+      stopDeliveryRateBelowSource: review.resolvedPolicySnapshot.sources.thresholds.stopDeliveryRateBelow,
+    },
     financeHealth: coverage.financeHealth ?? null,
     coverage: {
       status: hasCompleteProvenSourceWindow(review) ? "COMPLETE" : "PARTIAL",
@@ -162,14 +234,15 @@ function decisionCenterFromReviews(
         : null,
       completeWithinWindow: coverage.completeWithinSourceWindow ? "Yes" : "No",
       lifetimeHistory: coverage.lifetimeHistoryComplete ? "Complete" : "Not verified",
+      evidence: caseEvidence,
     },
     metrics: [
-      { label: "Total orders", value: displayValue(review.metrics.totalOrders), detail: "Persisted decision-case snapshot" },
-      { label: "Operational exposure", value: displayValue(review.metrics.onHoldValue), detail: `Currency: ${review.metrics.currency}` },
-      { label: "Delivered count", value: displayValue(review.metrics.deliveredCount), detail: "Persisted decision-case snapshot" },
-      { label: "Delivery rate", value: displayValue(review.metrics.deliveryRate), detail: "Persisted decision-case snapshot" },
-      { label: "Cancellation rate", value: displayValue(review.metrics.cancellationRate), detail: "Persisted decision-case snapshot" },
-      { label: "Refund rate", value: displayValue(review.metrics.refundRate), detail: "Persisted decision-case snapshot" },
+      { label: "Total orders", value: displayValue(review.metrics.totalOrders), detail: "Persisted decision-case snapshot", evidence: caseEvidence },
+      { label: "Operational exposure", value: displayValue(review.metrics.onHoldValue), detail: `Currency: ${review.metrics.currency}`, evidence: caseEvidence },
+      { label: "Delivered count", value: displayValue(review.metrics.deliveredCount), detail: "Persisted decision-case snapshot", evidence: caseEvidence },
+      { label: "Delivery rate", value: displayValue(review.metrics.deliveryRate), detail: "Persisted decision-case snapshot", evidence: caseEvidence },
+      { label: "Cancellation rate", value: displayValue(review.metrics.cancellationRate), detail: "Persisted decision-case snapshot", evidence: caseEvidence },
+      { label: "Refund rate", value: displayValue(review.metrics.refundRate), detail: "Persisted decision-case snapshot", evidence: caseEvidence },
     ],
     comparisons: (context?.comparisons ?? []).map((comparison) => ({
       metric: comparison.metric,
@@ -178,11 +251,13 @@ function decisionCenterFromReviews(
       absoluteDelta: displayValue(comparison.absoluteDelta),
       relativeDelta: displayValue(comparison.relativeDelta),
       direction: comparison.direction,
+      evidence: caseEvidence,
     })),
     trends: (context?.trends ?? []).map((trend) => ({
       signal: trend.signal,
       status: trend.status,
       reason: trend.reasonCode ?? "None",
+      evidence: caseEvidence,
       comparisons: trend.comparisons.map((comparison) => ({
         metric: comparison.metric,
         current: displayValue(comparison.current),
@@ -190,6 +265,7 @@ function decisionCenterFromReviews(
         absoluteDelta: displayValue(comparison.absoluteDelta),
         relativeDelta: displayValue(comparison.relativeDelta),
         direction: comparison.direction,
+        evidence: caseEvidence,
       })),
     })),
     rule: {
@@ -205,7 +281,34 @@ function decisionCenterFromReviews(
         operator: check.operator,
         result: check.result,
         reason: check.triggeredReason ?? "None",
+        evidence: caseEvidence,
       })),
+      conditions: targetRule === undefined ? {
+        officialOnHold: unavailableCondition("IMMUTABLE_DECISION_CASE", caseObservedAt),
+        deliveryRate: unavailableCondition("IMMUTABLE_DECISION_CASE", caseObservedAt),
+      } : {
+        officialOnHold: {
+          state: targetRule.officialOnHold.state,
+          source: targetRule.officialOnHold.source,
+          observedValue: displayValue(targetRule.officialOnHold.observedValue),
+          observedAt: displayTimestamp(targetRule.officialOnHold.observedAt),
+          ageMs: targetRule.officialOnHold.ageMs,
+          quality: targetRule.officialOnHold.quality,
+          threshold: displayValue(targetRule.officialOnHold.threshold),
+          evidence: caseEvidence,
+        },
+        deliveryRate: {
+          state: targetRule.deliveryRate.state,
+          source: targetRule.deliveryRate.source,
+          observedValue: displayValue(targetRule.deliveryRate.observedValue),
+          observedAt: displayTimestamp(targetRule.deliveryRate.observedAt),
+          ageMs: targetRule.deliveryRate.ageMs,
+          quality: targetRule.deliveryRate.quality,
+          threshold: displayValue(targetRule.deliveryRate.threshold),
+          evidence: caseEvidence,
+        },
+      },
+      evidence: caseEvidence,
     },
     ai: ai === null ? {
       status: "UNAVAILABLE",
@@ -228,11 +331,17 @@ function decisionCenterFromReviews(
       promptVersion: "Unavailable",
       outputSchemaVersion: "Unavailable",
       failureCode: "NOT_RECORDED",
+      evidence: evidence("AI_DECISION", "AI_DECISION", null),
     } : {
       status: ai.status,
       recommendation: displayValue(ai.recommendation),
       riskLevel: displayValue(ai.riskLevel),
       confidence: displayValue(ai.confidence),
+      ruleAgreement: ai.ruleOverride === null
+        ? "Unavailable"
+        : ai.ruleOverride
+          ? "AI differs from deterministic Rule"
+          : "AI agrees with deterministic Rule",
       humanReviewRequired: ai.humanReviewRequired ? "Yes" : "No",
       reasonCodes: ai.reasonCodes ?? [],
       supportingFactors: ai.supportingFactors ?? [],
@@ -248,10 +357,12 @@ function decisionCenterFromReviews(
       promptVersion: ai.promptVersion,
       outputSchemaVersion: ai.outputSchemaVersion ?? "Not reported",
       failureCode: ai.status === "UNAVAILABLE" ? ai.failureCode : "None",
+      evidence: evidence("AI_DECISION", "AI_DECISION", ai.createdAt),
     },
     ba: {
       current: review.ba?.decision ?? "NOT_REVIEWED",
       currentDetail: review.ba === null ? "Business analyst review has not been completed." : `${review.ba.reasonCode} · ${review.ba.actor}`,
+      evidence: review.ba === null ? evidence("BA_DECISION_REVISION", "BA_DECISION", null) : evidence("BA_DECISION_REVISION", "BA_DECISION", review.ba.decidedAt),
       history: reviewHistory,
     },
     execution: review.execution === null ? {
@@ -260,18 +371,20 @@ function decisionCenterFromReviews(
       mode: "DRY_RUN only",
       sellerCenterCalled: "No",
       executedAt: "Not executed",
+      evidence: evidence("DRY_RUN_EXECUTION", "DECISION_EXECUTION", null),
     } : {
       status: review.execution.status,
       requestedAction: review.execution.requestedAction,
       mode: review.execution.mode,
       sellerCenterCalled: review.execution.sellerCenterCalled ? "Yes" : "No",
       executedAt: displayTimestamp(review.execution.executedAt),
+      evidence: evidence("DRY_RUN_EXECUTION", "DECISION_EXECUTION", review.execution.executedAt),
     },
     reviewQueue: queueReviews
       .filter((item, index, items) => items.findIndex((candidate) => candidate.shop.id === item.shop.id) === index)
       .flatMap((item) => {
         const reasons = decisionQueueReasons(item);
-        return reasons.length === 0 ? [] : [{ profileNo: item.shop.profileNo, displayName: item.shop.displayName, reasons }];
+        return reasons.length === 0 ? [] : [{ profileNo: item.shop.profileNo, displayName: item.shop.displayName, reasons, evidence: evidence("IMMUTABLE_DECISION_CASE", "DECISION_CASE", item.case?.observedAt) }];
       }),
   };
 }

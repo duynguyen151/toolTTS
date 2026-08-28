@@ -11,6 +11,17 @@ function List({ items, empty = "Unavailable" }: { items: string[]; empty?: strin
   return <ul>{items.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ul>;
 }
 
+function Evidence({ owner, source, observedAt }: { owner: string; source: string; observedAt: string }) {
+  const label = {
+    CURRENT_OPERATIONAL_FACTS: "Current operational facts",
+    IMMUTABLE_DECISION_CASE: "Immutable Decision Case",
+    AI_DECISION: "Linked AI Decision",
+    BA_DECISION_REVISION: "BA decision revision",
+    DRY_RUN_EXECUTION: "Dry-run execution",
+  }[owner] ?? owner;
+  return <p><small>{label} · {source} · observed {observedAt} · GMT+07</small></p>;
+}
+
 export function LiveDecisionCenter({ dataOrigin, center }: Props) {
   if (dataOrigin !== "LIVE") {
     return (
@@ -39,6 +50,7 @@ export function LiveDecisionCenter({ dataOrigin, center }: Props) {
         <p>Live read model</p>
         <h2 id="decision-center-heading">Shop Decision Center</h2>
         <p>{view.message}</p>
+        <Evidence owner={view.reviewSnapshot?.owner ?? "IMMUTABLE_DECISION_CASE"} source={view.reviewSnapshot?.source ?? "DECISION_CASE"} observedAt={view.reviewSnapshot?.observedAt ?? "Unavailable"} />
       </header>
 
       <section aria-labelledby="decision-center-coverage">
@@ -54,18 +66,20 @@ export function LiveDecisionCenter({ dataOrigin, center }: Props) {
           <div><dt>Complete within window</dt><dd>{view.coverage.completeWithinWindow}</dd></div>
           <div><dt>Lifetime history</dt><dd>{view.coverage.lifetimeHistory}</dd></div>
         </dl>
+        <Evidence {...view.coverage.evidence} />
         {view.coverage.staleDisclosure === null ? null : <p>{view.coverage.staleDisclosure}</p>}
       </section>
 
       <section aria-labelledby="decision-center-metrics">
         <h3 id="decision-center-metrics">Verified metrics</h3>
         <dl>
-          {view.metrics.map((metric) => <div key={metric.label}><dt>{metric.label}</dt><dd>{metric.value}</dd><small>{metric.detail}</small></div>)}
+          {view.metrics.map((metric) => <div key={metric.label}><dt>{metric.label}</dt><dd>{metric.value}</dd><small>{metric.detail}</small><Evidence {...metric.evidence} /></div>)}
         </dl>
       </section>
 
       <section aria-labelledby="decision-center-trends">
         <h3 id="decision-center-trends">Trend comparisons</h3>
+        <Evidence {...view.rule.evidence} />
         <List items={view.comparisons.map((comparison) => `${comparison.metric}: previous ${comparison.previous} · current ${comparison.current} · absolute delta ${comparison.absoluteDelta} · relative delta ${comparison.relativeDelta} · ${comparison.direction}`)} />
         <h4>Trend signals</h4>
         {view.trends.length === 0 ? <p>Trend evidence unavailable or NOT_EVALUATED; no frozen trend signals were recorded.</p> : view.trends.map((trend) => (
@@ -82,9 +96,20 @@ export function LiveDecisionCenter({ dataOrigin, center }: Props) {
         <h3 id="decision-center-rule">Deterministic rule evidence</h3>
         <p>Result: <strong>{view.rule.result}</strong></p>
         <p>Policy: {view.rule.policyVersion}</p>
+        <p>Frozen effective policy: {view.effectivePolicy?.policyVersion ?? "Unavailable"} · effective {view.effectivePolicy?.effectiveAt ?? "Unavailable"}</p>
+        <p>Official On Hold threshold: {view.effectivePolicy?.stopOnHoldValueAt ?? "Unavailable"} ({view.effectivePolicy?.stopOnHoldValueAtSource ?? "Unavailable"})</p>
+        <p>Delivery threshold: {view.effectivePolicy?.stopDeliveryRateBelow ?? "Unavailable"} ({view.effectivePolicy?.stopDeliveryRateBelowSource ?? "Unavailable"})</p>
+        {view.effectivePolicy === undefined ? null : <Evidence {...view.effectivePolicy} />}
         <p>Expression: {view.rule.expression}</p>
         <p>Evaluated: {view.rule.evaluatedAt}</p>
         <p>Triggers: {view.rule.triggers.join(", ") || "None"}</p>
+        <Evidence {...view.rule.evidence} />
+        <h4>Official On Hold condition</h4>
+        <p>{view.rule.conditions.officialOnHold.state} · observed {view.rule.conditions.officialOnHold.observedValue} · threshold {view.rule.conditions.officialOnHold.threshold} · source {view.rule.conditions.officialOnHold.source ?? "Unavailable"} · at {view.rule.conditions.officialOnHold.observedAt}</p>
+        <Evidence {...view.rule.conditions.officialOnHold.evidence} />
+        <h4>Delivery rate condition</h4>
+        <p>{view.rule.conditions.deliveryRate.state} · observed {view.rule.conditions.deliveryRate.observedValue} · threshold {view.rule.conditions.deliveryRate.threshold} · source {view.rule.conditions.deliveryRate.source ?? "Unavailable"} · at {view.rule.conditions.deliveryRate.observedAt}</p>
+        <Evidence {...view.rule.conditions.deliveryRate.evidence} />
         <table>
           <caption>Rule checks</caption>
           <thead><tr><th>Metric</th><th>Observed</th><th>Threshold</th><th>Operator</th><th>Result</th><th>Reason</th></tr></thead>
@@ -94,7 +119,8 @@ export function LiveDecisionCenter({ dataOrigin, center }: Props) {
       </section>
 
       <section aria-labelledby="decision-center-ai">
-        <h3 id="decision-center-ai">AI provenance and advisory result</h3>
+        <h3 id="decision-center-ai">Linked AI Decision</h3>
+        <Evidence {...view.ai.evidence} />
         <dl>
           <div><dt>Status</dt><dd>{view.ai.status}</dd></div>
           <div><dt>Recommendation</dt><dd>{view.ai.recommendation}</dd></div>
@@ -120,16 +146,18 @@ export function LiveDecisionCenter({ dataOrigin, center }: Props) {
       </section>
 
       <section aria-labelledby="decision-center-ba">
-        <h3 id="decision-center-ba">BA current and history</h3>
+        <h3 id="decision-center-ba">BA decision revisions</h3>
+        <Evidence {...view.ba.evidence} />
         <p>Current decision: <strong>{view.ba.current}</strong></p>
         <p>{view.ba.currentDetail}</p>
         {view.caseId !== null && view.profileNo !== null ? <LiveBaForm caseId={view.caseId} profileNo={view.profileNo} /> : <p>LIVE BA submission is unavailable because no persisted decision case was returned.</p>}
-        <ol>{view.ba.history.map((entry, index) => <li key={`${entry.decidedAt}-${index}`}><time>{entry.decidedAt}</time> · {entry.decision} · {entry.reason} · {entry.actor}<p>{entry.notes}</p></li>)}</ol>
+        <ol>{view.ba.history.map((entry, index) => <li key={`${entry.decidedAt}-${index}`}><time>{entry.decidedAt}</time> · {entry.decision} · {entry.reason} · {entry.actor}<p>{entry.notes}</p><Evidence {...entry.evidence} /></li>)}</ol>
         {view.ba.history.length === 0 ? <p>No persisted BA history is available.</p> : null}
       </section>
 
       <section aria-labelledby="decision-center-execution">
         <h3 id="decision-center-execution">Execution</h3>
+        <Evidence {...view.execution.evidence} />
         <dl>
           <div><dt>Status</dt><dd>{view.execution.status}</dd></div>
           <div><dt>Requested action</dt><dd>{view.execution.requestedAction}</dd></div>
@@ -141,7 +169,7 @@ export function LiveDecisionCenter({ dataOrigin, center }: Props) {
 
       <section aria-labelledby="decision-center-queue">
         <h3 id="decision-center-queue">Exception-only review queue</h3>
-        {view.reviewQueue.length === 0 ? <p>No persisted exceptions are recorded.</p> : <ul>{view.reviewQueue.map((item) => <li key={item.profileNo}><strong>{item.displayName}</strong> · Profile {item.profileNo}<span>{item.reasons.join(" · ")}</span></li>)}</ul>}
+        {view.reviewQueue.length === 0 ? <p>No persisted exceptions are recorded.</p> : <ul>{view.reviewQueue.map((item) => <li key={item.profileNo}><strong>{item.displayName}</strong> · Profile {item.profileNo}<span>{item.reasons.join(" · ")}</span><Evidence {...item.evidence} /></li>)}</ul>}
       </section>
     </section>
   );

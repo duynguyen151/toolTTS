@@ -50,6 +50,7 @@ export function DashboardOverview({ presentation, operatorProfileNo }: Dashboard
             )}
           </div>
           <h1>Operational overview</h1>
+          <p>Current operational facts · persisted shop read model · GMT+07</p>
           <p>
             {presentation.selectedShop.displayName}
             <span aria-hidden="true"> · </span>

@@ -2,6 +2,32 @@
 
 This checkpoint records repository truth at the pause boundary. The locked authority remains [`docs/plans/2026-08-25-tool-tts-v1-master-plan.md`](../plans/2026-08-25-tool-tts-v1-master-plan.md); task state remains authoritative in [`docs/execution/tool-tts-v1-execution-ledger.md`](tool-tts-v1-execution-ledger.md). This file does not change task acceptance.
 
+## Orientation addendum (2026-08-27)
+
+- Current HEAD is `9c29ac5` (`docs: add Codex handoff checkpoint`); the
+  baseline snapshot below deliberately records the preceding pause boundary.
+- The working tree has since gained active, unaccepted W9-T01 auth/credential
+  seam WIP (including migration `0040_parallel_ironclad`) and additional
+  Dashboard/operations WIP. Neither stream is ledger-accepted; do not mix it
+  into W12-T02 review, documentation work, or another task.
+- The W12-T02 reviewer-requested provider guard and contradictory-capability
+  regression are present as uncommitted edits in `packages/domain/src/target-rule.ts`
+  and `packages/domain/src/target-rule.test.ts`. They are implementation
+  evidence only until focused verification, independent approval, a commit, and
+  a deliberate ledger update occur.
+- The root `public-api-guide.md` was an unreferenced ignored byte-for-byte copy
+  of the intentionally ignored local COTIK guide. It was removed during
+  documentation hygiene; the local ignored guide remains the only copy and
+  must not be staged, printed, or copied.
+- Fresh orientation checks passed for the W12-T02 target-rule test (18 tests),
+  domain typecheck, and Drizzle schema check. A full suite run had one
+  Finance-telemetry timing failure that passed in an isolated rerun; it remains
+  unclassified rather than accepted evidence. Dashboard typecheck/build expose
+  a concrete WIP integration gap: the new shop route imports
+  `unlinkShopByProfileNo` and `updateShopDisplayName`, but the DB package index
+  does not export either query. This is unrelated to W12-T02 and must be owned
+  by the Dashboard/WIP stream.
+
 ## Repository state
 
 - Branch: `codex/v1-boss-dashboard-merge`
@@ -178,9 +204,8 @@ Start a fresh Codex session by reading this checkpoint, the locked Master Plan D
 
 - Branch/HEAD: `codex/v1-boss-dashboard-merge` at `d56fcd1` (`docs(ledger): accept frozen AI decision context`). Preserve the current dirty worktree; no task is being accepted by this checkpoint.
 - Closed since the preceding checkpoint: `W12-T02` (`d891d5e`, `b39cc17`, `b43c1da`, `2a87700`), `W9-T01` (`8fcd164`), `W9-T02` manual-bootstrap completion (`917a002`, `462bc66`, `5edc103`), `W8-T01` (`8ca62bf`, ledger `2922998`), `W17-T01` (`9421e93`, ledger `97f4a3c`), `W15-T01` (`24054e7`, ledger `d56fcd1`), and `W16-T02A` (see ledger). These are ledger-accepted closed state; do not re-audit, re-review, or re-run their verification without a concrete regression traced to them.
-- Current unfinished task: `W15-T02`. Locked acceptance requires CLI and Dashboard structured rendering of all AI-review fields, including Rule agreement/disagreement, stale Finance capture time/age, and an explicit stale conclusion without parsing AI prose. Existing W15-T01 persistence/AI contract is accepted and is not in scope for rework.
-- Current W15-T02 WIP: `apps/cli/src/presentation/review.ts` plus test add a structured `DATA QUALITY` section with frozen Finance capture time/age and deterministic `STALE` conclusion. Dashboard read DTO/UI add `ruleAgreement`, Finance capture time/age, and the same deterministic stale conclusion; UI proof is in untracked `apps/dashboard/components/dashboard/live-decision-center.test.ts`. Keep only the W15-T02 hunks in the already-dirty Dashboard contract/read/model/test files; do not stage their unrelated Dashboard WIP.
-- W15-T02 evidence so far: red/green focused tests completed; current focused suite passed 24 tests for Dashboard/CLI read/presentation and 64 tests when including W15 AI/workflow contract suites. CLI typecheck and build passed. `git diff --check` passed. Dashboard typecheck is blocked by pre-existing unrelated untracked route WIP importing missing DB exports `unlinkShopByProfileNo` and `updateShopDisplayName`; it is not W15-T02 evidence. Independent W15-T02 review was requested but interrupted at user checkpoint; obtain a fresh bounded review before acceptance.
+- Current unfinished task: `W19-T01` and `W18-T01` are READY. `W15-T02` is ledger-accepted and closed; do not re-audit without a concrete regression.
+- W15-T02 acceptance: commit `4f42242`; 25 focused CLI/Dashboard presentation/read/model tests passed, CLI typecheck/build passed, and an independent Terra AI safety/business review returned APPROVE. Dashboard typecheck/build remain blocked by unrelated pre-existing shop-route WIP importing missing DB exports `unlinkShopByProfileNo` and `updateShopDisplayName`; this is recorded in the ledger and is not W15-T02 evidence.
 - READY after W15-T02 acceptance: `W19-T01` and `W18-T01` (all their other listed dependencies are accepted). `W19-T02` remains downstream of `W19-T01`; `W20-T01` remains final barrier. `W10-T01` remains optional/non-gating.
 - Environment constraints remain truthful: `TEST_DATABASE_URL`/`DATABASE_URL` are unset, so PostgreSQL integration/migration evidence stays environment-pending. Live AdsPower/Seller Center/COTIK and operator-completed manual-bootstrap re-verification are unavailable; safe autofill capability is not proven and is not a V1 blocker under accepted W9-T02 semantics.
 - Existing unrelated WIP remains extensive in Dashboard operations/pages/styles, DB shops/migration tests, and Seller Center/Sync; retain it untouched. The ignored local COTIK API guide remains off limits.

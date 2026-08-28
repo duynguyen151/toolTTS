@@ -209,3 +209,12 @@ Start a fresh Codex session by reading this checkpoint, the locked Master Plan D
 - READY after W15-T02 acceptance: `W19-T01` and `W18-T01` (all their other listed dependencies are accepted). `W19-T02` remains downstream of `W19-T01`; `W20-T01` remains final barrier. `W10-T01` remains optional/non-gating.
 - Environment constraints remain truthful: `TEST_DATABASE_URL`/`DATABASE_URL` are unset, so PostgreSQL integration/migration evidence stays environment-pending. Live AdsPower/Seller Center/COTIK and operator-completed manual-bootstrap re-verification are unavailable; safe autofill capability is not proven and is not a V1 blocker under accepted W9-T02 semantics.
 - Existing unrelated WIP remains extensive in Dashboard operations/pages/styles, DB shops/migration tests, and Seller Center/Sync; retain it untouched. The ignored local COTIK API guide remains off limits.
+
+## Continuation checkpoint (2026-08-28, W19-T01 accepted)
+
+- Branch/HEAD: `codex/v1-boss-dashboard-merge` at `e59b267` (`feat(dashboard): version read provenance contract`). Preserve the dirty worktree; unrelated WIP remains untouched.
+- Accepted in this checkpoint: `W19-T01`. Evidence: 30 focused Dashboard read/model/overview/live-decision-center tests passed; CLI typecheck/build passed; scoped diff check passed; independent Luna UI-contract review returned APPROVE after the final timestamp adjustment.
+- W19-T01 acceptance details: `dashboard-read.v2` separates current operational facts from immutable Decision Case, linked AI Decision, BA revisions, and dry-run execution; per-value provenance and frozen typed Rule conditions are explicit; current observation uses persisted `latestSync.startedAt` rather than read-generation time.
+- Dashboard typecheck/build remain environment/WIP-pending only because unrelated shop-route WIP imports missing DB exports `unlinkShopByProfileNo` and `updateShopDisplayName`; this does not invalidate W19-T01 evidence. Live services remain unavailable.
+- READY frontier after W19-T01: `W16-T02B`, `W3-T02`, `W19-T02`, and `W18-T01` (all listed dependencies accepted). `W20-T01` remains the final barrier; `W10-T01` remains optional and non-gating.
+- Next scheduling choice: continue with the highest-value READY task under the locked DAG, preserving all existing Dashboard/DB/Seller Center/Sync WIP and avoiding historical re-audit.

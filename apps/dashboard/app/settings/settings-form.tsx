@@ -11,6 +11,10 @@ export function settingsShopHref(shopId: string): string {
   return `/settings?shopId=${encodeURIComponent(shopId)}`;
 }
 
+export function buildAiTaskRequest(input: { taskId: string; provider: string; baseUrl: string; model: string; enabled: boolean; existing: boolean; secretRef: string }): Record<string, unknown> {
+  return { action: "ai-task", taskId: input.taskId, provider: input.provider, baseUrl: input.baseUrl, model: input.model, enabled: input.enabled, effectiveFrom: new Date().toISOString(), ...(input.existing ? { preserveSecretRef: true } : { secretRef: input.secretRef }) };
+}
+
 export function SettingsForm({ refresh, policy, selectedShopId, shops, aiTasks }: Props) {
   const router = useRouter();
   const [enabled, setEnabled] = useState(refresh.autoRefreshEnabled);
@@ -53,7 +57,7 @@ export function SettingsForm({ refresh, policy, selectedShopId, shops, aiTasks }
   }
   async function saveAi(event: React.FormEvent) {
     event.preventDefault();
-    const result = await send({ action: "ai-task", taskId: aiTaskId, provider: aiProvider, baseUrl: aiBaseUrl, model: aiModel, ...(preserveSecretRef ? { preserveSecretRef: true } : { secretRef: aiSecretRef }), enabled: aiEnabled, effectiveFrom: new Date().toISOString() });
+    const result = await send(buildAiTaskRequest({ taskId: aiTaskId, provider: aiProvider, baseUrl: aiBaseUrl, model: aiModel, enabled: aiEnabled, existing: preserveSecretRef, secretRef: aiSecretRef }));
     setAiMessage(result.ok ? "AI task revision appended." : result.error?.message ?? "AI task could not be saved.");
   }
   async function checkpointAction(body: Record<string, unknown>) {

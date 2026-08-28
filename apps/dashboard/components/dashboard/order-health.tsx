@@ -1,4 +1,5 @@
 import type { DashboardPresentation } from "../../lib/dashboard-contract";
+import Link from "next/link";
 import styles from "./dashboard-overview.module.css";
 
 const orderStates = [
@@ -7,13 +8,13 @@ const orderStates = [
   { key: "canceled", label: "Canceled", tone: "rose" },
 ] as const;
 
-export function OrderHealth({ health }: { health: DashboardPresentation["orderHealth"] }) {
+export function OrderHealth({ health, profileNo }: { health: DashboardPresentation["orderHealth"]; profileNo?: string }) {
   return (
     <section className={styles.orderPanel} aria-labelledby="order-health-heading">
       <div className={styles.sectionHeading}>
         <div>
           <p className={styles.sectionEyebrow}>Order read</p>
-          <h2 id="order-health-heading">Order health</h2>
+          <h2 id="order-health-heading">{profileNo === undefined ? "Order health" : <Link href={`/orders?profile=${encodeURIComponent(profileNo)}`}>Order health</Link>}</h2>
         </div>
         <div className={styles.totalOrders}>
           <strong>{health.total}</strong>

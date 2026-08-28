@@ -85,7 +85,7 @@ export function DashboardOverview({ presentation, operatorProfileNo }: Dashboard
       </nav>
 
       <div className={styles.secondaryGrid}>
-        <OrderHealth health={presentation.orderHealth} />
+        <OrderHealth health={presentation.orderHealth} profileNo={presentation.selectedShop.profileNo} />
         <DataQualityPanel coverage={presentation.coverage} freshness={presentation.freshness} />
         <DecisionTrace stages={presentation.decisionTrace} />
       </div>

@@ -187,6 +187,7 @@ describe("DashboardOverview", () => {
     expect(html).toContain('id="shops"');
     expect(html).toContain('id="sync-state"');
     expect(html).toContain("Order health");
+    expect(html).toContain("/orders?profile=957");
     expect(html).toContain("Data coverage");
     expect(html).toContain("Paused: layout changed");
     expect(html).toContain("Live operations are disabled for sanitized demo data.");

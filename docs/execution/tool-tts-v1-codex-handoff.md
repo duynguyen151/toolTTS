@@ -227,3 +227,11 @@ Start a fresh Codex session by reading this checkpoint, the locked Master Plan D
 - The journey reports the Rule frozen in the immutable Case, not legacy Operational Exposure risk output. Policy and requested AI configuration resolve at the declared `--effective-at` instant. No journey step executes a Seller Center/COTIK business action.
 - Composed PostgreSQL E2E remains environment-pending because `TEST_DATABASE_URL` and `DATABASE_URL` are unset. Live AdsPower, Seller Center, COTIK, and AI-provider verification remain unavailable and are not claimed.
 - READY frontier after W18-T01: `W16-T02B`, `W3-T02`, and `W19-T02`. `W20-T01` remains the final barrier; `W10-T01` remains optional and non-gating.
+
+## Continuation checkpoint (2026-08-28, W16-T02B accepted)
+
+- Branch/HEAD: `codex/v1-boss-dashboard-merge` at `8cf7cd7` (ledger checkpoint; implementation `51a6d1b`). Existing Dashboard/DB/Seller Center/Sync WIP remains dirty and preserved.
+- Accepted in this checkpoint: `W16-T02B`. The Dashboard BA form now supports all five decisions, conditional SLOW_SELL planned methods, and client/server validation for planned-method requirements; BA handler/read/history preserve and render methods as intent only.
+- Provenance boundary: localization/style/layout WIP in `live-ba-form.tsx` and broader Dashboard files was not treated as W16-T02B ownership. Only exact acceptance hunks were committed; unrelated hunks remain unstaged.
+- Evidence: 27 focused BA/read tests passed; full Dashboard suite passed 179 tests with 1 PostgreSQL integration skipped; independent Luna UX/business review APPROVE; `git diff --check` passed. Dashboard typecheck/build remain blocked only by unrelated shop-route imports of missing `unlinkShopByProfileNo` and `updateShopDisplayName`.
+- READY frontier after W16-T02B: `W3-T02` and `W19-T02` (both depend on accepted `W19-T01`; `W20-T01` remains final barrier; `W10-T01` remains optional/non-gating).

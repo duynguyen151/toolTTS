@@ -5,9 +5,11 @@ This checkpoint is an operator handoff for local server testing. It does **not**
 ## Repository snapshot
 
 - Branch: `codex/v1-boss-dashboard-merge`
-- Code HEAD: `62d9e4b` (`feat(dashboard): add top-level /shops list route and direct dependencies`)
+- Code HEAD: `86e05a9` (`Declare dashboard COTIK workspace dependency`)
 - COTIK normal-sync commits: `7878615`, `c3de274`, `8e2ac8b`
 - Navigation/route commits: `edc59e2`, `fb42312`, `62d9e4b`
+- Runtime regression fix commits: `77a0cf9` (add `GlobalTaskProvider` boundary), `eb95f38` (remove untracked `FloatingTaskBar` from that fix)
+- Dependency fix: `86e05a9` adds the direct Dashboard workspace dependency on `@shop-health/cotik`.
 - Existing unrelated WIP remains in the worktree. Do not reset, clean, stash, restore, switch, rebase, merge, or broadly stage it.
 
 ## Fresh verification already completed

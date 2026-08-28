@@ -5,8 +5,22 @@ import { describe, expect, it } from "vitest";
 import { AppShell } from "./app-shell";
 import { NavigationList } from "./navigation";
 import { ProductMark } from "./sidebar";
+import { useGlobalTasks } from "../operations/global-task-context";
 
 describe("AppShell", () => {
+  it("provides global task context to route content", () => {
+    function TaskContextProbe() {
+      const { runningCount } = useGlobalTasks();
+      return createElement("span", null, `Running tasks: ${runningCount}`);
+    }
+
+    const html = renderToStaticMarkup(
+      createElement(AppShell, null, createElement(TaskContextProbe)),
+    );
+
+    expect(html).toContain("Running tasks: 0");
+  });
+
   it("renders the dashboard landmark structure and accessible navigation", () => {
     const html = renderToStaticMarkup(
       createElement(

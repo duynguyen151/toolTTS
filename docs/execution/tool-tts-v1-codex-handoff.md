@@ -235,3 +235,12 @@ Start a fresh Codex session by reading this checkpoint, the locked Master Plan D
 - Provenance boundary: localization/style/layout WIP in `live-ba-form.tsx` and broader Dashboard files was not treated as W16-T02B ownership. Only exact acceptance hunks were committed; unrelated hunks remain unstaged.
 - Evidence: 27 focused BA/read tests passed; full Dashboard suite passed 179 tests with 1 PostgreSQL integration skipped; independent Luna UX/business review APPROVE; `git diff --check` passed. Dashboard typecheck/build remain blocked only by unrelated shop-route imports of missing `unlinkShopByProfileNo` and `updateShopDisplayName`.
 - READY frontier after W16-T02B: `W3-T02` and `W19-T02` (both depend on accepted `W19-T01`; `W20-T01` remains final barrier; `W10-T01` remains optional/non-gating).
+
+## Continuation checkpoint (2026-08-28, W3-T02 accepted)
+
+- Branch/HEAD: `codex/v1-boss-dashboard-merge` at `92f3e75` (`feat(dashboard): add order explorer`). Existing Dashboard/DB/Seller Center/Sync WIP remains dirty and preserved.
+- Accepted in this checkpoint: `W3-T02`. The Order Health card links to an operational `/orders` route with All Available default, Bangkok analytical periods and coverage label, stable status filter, search, page navigation, and an allowlisted order detail.
+- Evidence: 16 focused Orders/query/projection/overview tests passed; complete Dashboard suite passed 183 tests with 1 PostgreSQL integration skipped; independent Luna re-review APPROVE; `git diff --check` passed.
+- Review repairs: unavailable pagination controls are not activatable links; status choices do not disappear after filtering; coverage uses `Asia/Bangkok`, not UTC. The route contains no Rule computation and relies on W3-T01 privacy-minimized DTOs.
+- Dashboard typecheck/build remain blocked only by unrelated pre-existing shop-route imports of missing `unlinkShopByProfileNo` and `updateShopDisplayName`; these were not modified. LIVE and PostgreSQL integration remain unavailable.
+- READY frontier after W3-T02: `W19-T02`. `W20-T01` remains the final barrier; `W10-T01` remains optional/non-gating.

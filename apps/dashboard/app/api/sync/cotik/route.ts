@@ -40,25 +40,42 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    // Ingest latest already-synced COTIK data (Orders and Supplementary Finance)
-    const [ordersResult, financeResult] = await Promise.allSettled([
-      runCotikOrdersSync({ context, shop, client }),
-      runCotikSupplementaryFinanceSync({ context, shop, client }),
-    ]);
+    // Ingest latest already-synced COTIK data sequentially (Orders then Supplementary Finance)
+    // to preserve per-shop non-reentrant advisory lock semantics.
+    let ordersResult: Awaited<ReturnType<typeof runCotikOrdersSync>> | null = null;
+    let ordersError: string | null = null;
+    try {
+      ordersResult = await runCotikOrdersSync({ context, shop, client });
+    } catch (err: any) {
+      ordersError = err?.message ?? String(err);
+    }
 
-    const ordersFulfilled = ordersResult.status === "fulfilled";
-    const financeFulfilled = financeResult.status === "fulfilled";
+    let financeResult: Awaited<ReturnType<typeof runCotikSupplementaryFinanceSync>> | null = null;
+    let financeError: string | null = null;
+    try {
+      financeResult = await runCotikSupplementaryFinanceSync({ context, shop, client });
+    } catch (err: any) {
+      financeError = err?.message ?? String(err);
+    }
 
-    const ordersOk = ordersFulfilled && ordersResult.value.status === "SUCCEEDED";
-    const financeOk = financeFulfilled && financeResult.value.status === "SUCCEEDED";
+    const ordersOk = ordersResult !== null && ordersResult.status === "SUCCEEDED";
+    const financeOk = financeResult !== null && financeResult.status === "SUCCEEDED";
+    const financeSkippedCapability = financeResult !== null
+      && financeResult.status === "SKIPPED"
+      && financeResult.skipReason === "COTIK_SUPPLEMENTARY_FINANCE_UNAVAILABLE";
+
+    // Orders are required for COTIK normal sync. Supplementary Finance is optional
+    // when unconfigured/unavailable on the binding, but if configured and fails/errors,
+    // overall ok is false.
+    const ok = ordersOk && (financeOk || financeSkippedCapability);
 
     return Response.json(
       {
-        ok: ordersOk || financeOk,
+        ok,
         profileNo: parsed.profileNo,
         shopId: shop.id,
-        cotikOrders: ordersFulfilled ? ordersResult.value : { error: String((ordersResult as any).reason) },
-        cotikFinance: financeFulfilled ? financeResult.value : { error: String((financeResult as any).reason) },
+        cotikOrders: ordersResult ?? { error: ordersError ?? "Orders sync failed" },
+        cotikFinance: financeResult ?? { error: financeError ?? "Finance sync failed" },
       },
       { headers: jsonHeaders() }
     );

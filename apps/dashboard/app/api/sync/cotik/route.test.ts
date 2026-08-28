@@ -85,7 +85,68 @@ describe("/api/sync/cotik POST route", () => {
     expect(body.cotikFinance.status).toBe("SKIPPED");
   });
 
-  it("reports ok: true if at least one COTIK sync returns SUCCEEDED", async () => {
+  it("executes orders and finance sequentially and requires orders success for ok: true", async () => {
+    process.env.COTIK_TOKEN = "valid-token";
+    routeMocks.parseLocalProfileRequest.mockResolvedValue({ ok: true, profileNo: "957" });
+    routeMocks.createDatabase.mockReturnValue({ db: {} });
+    routeMocks.closeDatabase.mockResolvedValue(undefined);
+    routeMocks.findShopByProfileNo.mockResolvedValue({ id: "shop-957", profileNo: "957" });
+    routeMocks.createCotikClient.mockReturnValue({});
+
+    const executionOrder: string[] = [];
+    routeMocks.runCotikOrdersSync.mockImplementation(async () => {
+      executionOrder.push("orders");
+      return { status: "SUCCEEDED", rowsWritten: 10 };
+    });
+    routeMocks.runCotikSupplementaryFinanceSync.mockImplementation(async () => {
+      executionOrder.push("finance");
+      return { status: "SUCCEEDED", rowsWritten: 3 };
+    });
+
+    const request = new Request("http://localhost:3000/api/sync/cotik", {
+      method: "POST",
+      body: JSON.stringify({ profileNo: "957" }),
+    });
+
+    const response = await POST(request);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(executionOrder).toEqual(["orders", "finance"]);
+    expect(body.ok).toBe(true);
+    expect(body.cotikOrders.status).toBe("SUCCEEDED");
+    expect(body.cotikFinance.status).toBe("SUCCEEDED");
+  });
+
+  it("does not report ok: true when Orders fails or skips even if supplementary finance succeeds", async () => {
+    process.env.COTIK_TOKEN = "valid-token";
+    routeMocks.parseLocalProfileRequest.mockResolvedValue({ ok: true, profileNo: "957" });
+    routeMocks.createDatabase.mockReturnValue({ db: {} });
+    routeMocks.closeDatabase.mockResolvedValue(undefined);
+    routeMocks.findShopByProfileNo.mockResolvedValue({ id: "shop-957", profileNo: "957" });
+    routeMocks.createCotikClient.mockReturnValue({});
+    routeMocks.runCotikOrdersSync.mockResolvedValue({
+      status: "SKIPPED",
+      skipReason: "COTIK_BINDING_INACTIVE",
+    });
+    routeMocks.runCotikSupplementaryFinanceSync.mockResolvedValue({
+      status: "SUCCEEDED",
+      rowsWritten: 5,
+    });
+
+    const request = new Request("http://localhost:3000/api/sync/cotik", {
+      method: "POST",
+      body: JSON.stringify({ profileNo: "957" }),
+    });
+
+    const response = await POST(request);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.ok).toBe(false);
+    expect(body.cotikOrders.status).toBe("SKIPPED");
+    expect(body.cotikFinance.status).toBe("SUCCEEDED");
+  });
+
+  it("reports ok: true when Orders succeeds and supplementary finance is skipped due to capability unavailable", async () => {
     process.env.COTIK_TOKEN = "valid-token";
     routeMocks.parseLocalProfileRequest.mockResolvedValue({ ok: true, profileNo: "957" });
     routeMocks.createDatabase.mockReturnValue({ db: {} });

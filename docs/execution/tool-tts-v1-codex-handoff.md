@@ -244,3 +244,12 @@ Start a fresh Codex session by reading this checkpoint, the locked Master Plan D
 - Review repairs: unavailable pagination controls are not activatable links; status choices do not disappear after filtering; coverage uses `Asia/Bangkok`, not UTC. The route contains no Rule computation and relies on W3-T01 privacy-minimized DTOs.
 - Dashboard typecheck/build remain blocked only by unrelated pre-existing shop-route imports of missing `unlinkShopByProfileNo` and `updateShopDisplayName`; these were not modified. LIVE and PostgreSQL integration remain unavailable.
 - READY frontier after W3-T02: `W19-T02`. `W20-T01` remains the final barrier; `W10-T01` remains optional/non-gating.
+
+## Continuation checkpoint (2026-08-28, W19-T02 accepted)
+
+- Branch/HEAD: `codex/v1-boss-dashboard-merge` at `210d9ae` (`fix(dashboard): preserve AI task secret references`). Existing Dashboard/DB/Seller Center/Sync WIP remains dirty and preserved.
+- Accepted in this checkpoint: `W19-T02`. Settings now provides a navigation entry and local server-side forms for global and effective shop policy, caution, Auto Refresh/retry settings, Bangkok checkpoint CRUD, AI task revision settings, and safe Test Connection.
+- Evidence: 11 focused Settings tests passed; full Dashboard suite passed 194 tests with 1 PostgreSQL integration skipped; scoped `git diff --check` passed. Independent UX/security review and final bounded secret-reference review both returned APPROVE.
+- Security and semantics: secret values and existing secret-reference names are not returned to the browser; editing a persisted AI task preserves its server-side reference through a validated `preserveSecretRef` path. Policy is append-only and resolves server-side by selected shop; no UI computes the Rule.
+- Dashboard typecheck/build remain blocked only by unrelated pre-existing `/shops` imports of missing `unlinkShopByProfileNo` and `updateShopDisplayName`; these were not modified. LIVE services and PostgreSQL integration remain unavailable.
+- READY frontier after W19-T02: `W20-T01` only among required tasks. `W10-T01` remains optional/non-gating. Do not begin W20-T01 in this session.

@@ -49,9 +49,12 @@ export function LiveDecisionCenter({ dataOrigin, center }: Props) {
           <div><dt>Proven window</dt><dd>{view.coverage.provenWindow}</dd></div>
           <div><dt>Reconciled</dt><dd>{view.coverage.sourceReconciled}</dd></div>
           <div><dt>Freshness</dt><dd>{view.coverage.freshness}</dd></div>
+          <div><dt>Finance captured</dt><dd>{view.coverage.financeCapturedAt ?? "Unavailable"}</dd></div>
+          <div><dt>Finance age</dt><dd>{view.coverage.financeAgeMs === null ? "Unavailable" : `${view.coverage.financeAgeMs} ms`}</dd></div>
           <div><dt>Complete within window</dt><dd>{view.coverage.completeWithinWindow}</dd></div>
           <div><dt>Lifetime history</dt><dd>{view.coverage.lifetimeHistory}</dd></div>
         </dl>
+        {view.coverage.staleDisclosure === null ? null : <p>{view.coverage.staleDisclosure}</p>}
       </section>
 
       <section aria-labelledby="decision-center-metrics">
@@ -97,6 +100,7 @@ export function LiveDecisionCenter({ dataOrigin, center }: Props) {
           <div><dt>Recommendation</dt><dd>{view.ai.recommendation}</dd></div>
           <div><dt>Risk</dt><dd>{view.ai.riskLevel}</dd></div>
           <div><dt>Confidence</dt><dd>{view.ai.confidence}</dd></div>
+          <div><dt>Rule agreement</dt><dd>{view.ai.ruleAgreement}</dd></div>
           <div><dt>Human review required</dt><dd>{view.ai.humanReviewRequired}</dd></div>
           <div><dt>Provider</dt><dd>{view.ai.provider}</dd></div>
           <div><dt>Requested model</dt><dd>{view.ai.requestedModel}</dd></div>

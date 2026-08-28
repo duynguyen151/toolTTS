@@ -71,6 +71,9 @@ export interface DashboardDecisionCenter {
     provenWindow: string;
     sourceReconciled: string;
     freshness: string;
+    financeCapturedAt: string | null;
+    financeAgeMs: number | null;
+    staleDisclosure: string | null;
     completeWithinWindow: string;
     lifetimeHistory: string;
   };
@@ -109,6 +112,7 @@ export interface DashboardDecisionCenter {
     recommendation: string;
     riskLevel: string;
     confidence: string;
+    ruleAgreement: string;
     humanReviewRequired: string;
     reasonCodes: string[];
     supportingFactors: string[];

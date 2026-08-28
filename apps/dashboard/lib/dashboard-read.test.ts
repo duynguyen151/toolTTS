@@ -372,7 +372,8 @@ describe("loadDashboardPresentation", () => {
           ordersSourceComplete: true,
           financeRequiredSourceComplete: true,
           sourceReconciled: true,
-          freshness: "FRESH",
+          freshness: "STALE",
+          financeCapturedAt: "2026-08-16T00:00:00.000Z",
           financeHealth: {
             schemaVersion: "finance-health.v1",
             provider: "SELLER_CENTER",
@@ -382,7 +383,7 @@ describe("loadDashboardPresentation", () => {
             collectedAt: "2026-08-16T00:00:00.000Z",
             evaluatedAt: "2026-08-16T01:00:00.000Z",
             ageMs: 3_600_000,
-            health: "FRESH",
+            health: "STALE",
             completeness: "COMPLETE",
             reconciliation: "RECONCILED",
             officialOnHoldAvailability: "AVAILABLE",
@@ -394,6 +395,7 @@ describe("loadDashboardPresentation", () => {
         ai: {
           status: "AVAILABLE",
           recommendation: "CONTINUE",
+          ruleOverride: true,
           humanReviewRequired: false,
           reasonCodes: [],
           supportingFactors: [],
@@ -424,16 +426,20 @@ describe("loadDashboardPresentation", () => {
     const presentation = await loadDashboardPresentation();
     const center = presentation.decisionCenter!;
 
-    expect(presentation.coverage.status).toBe("READY");
-    expect(center.coverage.status).toBe("COMPLETE");
+    expect(presentation.coverage.status).toBe("PARTIAL");
+    expect(center.coverage.status).toBe("PARTIAL");
     expect(center.financeHealth).toMatchObject({
       provider: "SELLER_CENTER",
-      health: "FRESH",
+      health: "STALE",
       officialOnHoldAvailability: "AVAILABLE",
     });
+    expect(center.coverage.financeCapturedAt).toBe("2026-08-16T00:00:00.000Z");
+    expect(center.coverage.financeAgeMs).toBe(3_600_000);
+    expect(center.coverage.staleDisclosure).toBe("STALE: Finance evidence is advisory only and is not current.");
     expect(center.comparisons[0]).toMatchObject({ relativeDelta: "0.125", previous: "0.8", current: "0.9" });
     expect(center.rule.checks[0]).toMatchObject({ operator: "LT", result: "PASS" });
     expect(center.ai.reason).toBe("Healthy evidence supports continuation.");
+    expect(center.ai.ruleAgreement).toBe("AI differs from deterministic Rule");
     expect(center.ai.policyVersion).toBe("ai-policy.v1");
   });
 

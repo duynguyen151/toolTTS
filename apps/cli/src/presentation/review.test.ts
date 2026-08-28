@@ -96,6 +96,79 @@ describe("decision review human presentation", () => {
     expect(output).toContain("Status: NOT_REQUESTED");
   });
 
+  test("renders AI disagreement with the deterministic Rule as a structured field", () => {
+    const output = formatDecisionReview({
+      ...view,
+      ai: {
+        status: "AVAILABLE",
+        recommendation: "WATCH",
+        riskLevel: "MEDIUM",
+        confidence: 0.62,
+        ruleOverride: true,
+        reasonCodes: ["DATA_INCOMPLETE"],
+        supportingFactors: ["Finance capture remains stale."],
+        riskFactors: ["The deterministic Rule requires current evidence."],
+        whatWouldChangeDecision: ["A fresh Finance capture."],
+        reason: "Advisory only.",
+        humanReviewRequired: true,
+        provider: "test-provider",
+        model: "test-model",
+        requestedModel: "test-model",
+        reportedModel: "test-model",
+        actualModelUsed: "test-model",
+        authMode: "LOCAL_NO_AUTH",
+        outputSchemaVersion: "baseline-ai-output.v1",
+        promptVersion: "baseline-ai-prompt.v1",
+        policyVersion: "risk-control-policy.v1",
+        aiPolicyVersion: null,
+        createdAt: "2026-08-14T01:00:02.000Z",
+      },
+    }, "Asia/Bangkok");
+
+    expect(output).toContain("Rule Agreement: AI differs from deterministic Rule");
+  });
+
+  test("renders frozen stale Finance capture evidence without parsing AI rationale", () => {
+    const output = formatDecisionReview({
+      ...view,
+      coverageSnapshot: {
+        coverageState: "PARTIAL",
+        persistedMetricsWindow: "FULL_PERSISTED_HISTORY",
+        source: "SELLER_CENTER",
+        provenSourceWindow: "ROLLING_12_MONTHS",
+        completeWithinSourceWindow: true,
+        lifetimeHistoryComplete: false,
+        ordersSourceComplete: true,
+        financeRequiredSourceComplete: true,
+        sourceReconciled: true,
+        latestSuccessfulSyncAt: "2026-08-16T01:00:00.000Z",
+        financeCapturedAt: "2026-08-16T00:00:00.000Z",
+        freshness: "STALE",
+        financeHealth: {
+          schemaVersion: "finance-health.v1",
+          provider: "SELLER_CENTER",
+          capability: "OFFICIAL_ON_HOLD",
+          capabilityProofRevision: "seller-center-official-on-hold.v1",
+          providerUpdatedAt: null,
+          collectedAt: "2026-08-16T00:00:00.000Z",
+          evaluatedAt: "2026-08-16T01:00:00.000Z",
+          ageMs: 3_600_000,
+          health: "STALE",
+          completeness: "COMPLETE",
+          reconciliation: "RECONCILED",
+          officialOnHoldAvailability: "AVAILABLE",
+          refreshState: "SUCCEEDED",
+        },
+      },
+    }, "Asia/Bangkok");
+
+    expect(output).toContain("DATA QUALITY");
+    expect(output).toContain("Freshness: STALE");
+    expect(output).toContain("Finance Captured At: 2026-08-16, 07:00:00");
+    expect(output).toContain("Finance Age: 3600000 ms");
+    expect(output).toContain("Stale Conclusion: STALE: Finance evidence is advisory only and is not current.");
+  });
+
   test("renders history as a top-level section while preserving separate decision actors", () => {
     const output = formatDecisionHistory({
       schemaVersion: "decision-history.v1",

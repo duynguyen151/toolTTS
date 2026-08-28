@@ -20,6 +20,22 @@ function metric<T>(
 }
 
 function reviewSections(view: DecisionReviewView, timeZone: string): string[] {
+  const coverageRows: Array<readonly [string, string]> = view.coverageSnapshot === undefined
+    ? [["Availability", "UNAVAILABLE (not recorded by this legacy decision case)"]]
+    : [
+        ["Coverage", view.coverageSnapshot.coverageState],
+        ["Source", view.coverageSnapshot.source ?? "-"],
+        ["Proven Source Window", view.coverageSnapshot.provenSourceWindow ?? "-"],
+        ["Source Reconciled", String(view.coverageSnapshot.sourceReconciled ?? false)],
+        ["Freshness", view.coverageSnapshot.freshness ?? "UNKNOWN"],
+        ["Finance Captured At", formatDate(view.coverageSnapshot.financeHealth?.collectedAt ?? view.coverageSnapshot.financeCapturedAt ?? null, timeZone)],
+        ["Finance Age", view.coverageSnapshot.financeHealth?.ageMs === null || view.coverageSnapshot.financeHealth?.ageMs === undefined
+          ? "-"
+          : `${view.coverageSnapshot.financeHealth.ageMs} ms`],
+        ["Stale Conclusion", view.coverageSnapshot.freshness === "STALE"
+          ? "STALE: Finance evidence is advisory only and is not current."
+          : "-"],
+      ];
   const aiRows: Array<readonly [string, string]> = [
     ["Availability", view.ai.status],
   ];
@@ -29,6 +45,11 @@ function reviewSections(view: DecisionReviewView, timeZone: string): string[] {
       ["Risk Level", view.ai.riskLevel ?? "-"],
       ["Confidence", String(view.ai.confidence)],
       ["Rule Override", view.ai.ruleOverride === null ? "-" : String(view.ai.ruleOverride)],
+      ["Rule Agreement", view.ai.ruleOverride === null
+        ? "Unavailable"
+        : view.ai.ruleOverride
+          ? "AI differs from deterministic Rule"
+          : "AI agrees with deterministic Rule"],
       ["Reason Codes", view.ai.reasonCodes.join(", ") || "-"],
       ["Supporting Factors", view.ai.supportingFactors?.join("; ") || "-"],
       ["Risk Factors", view.ai.riskFactors?.join("; ") || "-"],
@@ -94,6 +115,7 @@ function reviewSections(view: DecisionReviewView, timeZone: string): string[] {
       ["Cancellation Rate", metric(view.metrics.cancellationRate, formatPercent)],
       ["Refund Rate", metric(view.metrics.refundRate, formatPercent)],
     ]),
+    section("DATA QUALITY", coverageRows),
     section("RULE", [
       ["Decision", view.rule.decision],
       ["Triggers", view.rule.triggers.join(", ") || "NONE"],

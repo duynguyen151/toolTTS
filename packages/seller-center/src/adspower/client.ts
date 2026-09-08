@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   ProxyCapabilityResultSchema,
+  normalizeObservedTags,
   resolveObservedStatusFromTags,
   type ProxyCapabilityResult,
 } from "@shop-health/domain";
@@ -26,9 +27,21 @@ const AdsPowerProfileListItemSchema = z.object({
   serial_number: z.union([z.string(), z.number()]).transform(String),
   group_name: z.string().nullable().optional(),
   fbcc_user_tag: z.array(z.object({
+    id: z.union([z.string(), z.number()]).transform(String).optional(),
     name: z.string().trim(),
+    color: z.string().trim().optional(),
   })).nullable().optional(),
-});
+  tags: z.union([z.array(z.string()), z.string()]).nullable().optional().transform((val) => {
+    if (!val) return [];
+    if (Array.isArray(val)) return val.map((s) => s.trim()).filter(Boolean);
+    return val.split(",").map((s) => s.trim()).filter(Boolean);
+  }),
+  user_tags: z.union([z.array(z.string()), z.string()]).nullable().optional().transform((val) => {
+    if (!val) return [];
+    if (Array.isArray(val)) return val.map((s) => s.trim()).filter(Boolean);
+    return val.split(",").map((s) => s.trim()).filter(Boolean);
+  }),
+}).passthrough();
 
 const AdsPowerProfileListResponseSchema = z.object({
   code: z.number(),
@@ -88,10 +101,16 @@ export interface AdsPowerBrowserConnection {
 
 export type AdsPowerProfileState = "OPEN" | "CLOSED" | "ERROR";
 
+export interface AdsPowerProfileTag {
+  name: string;
+  color?: string;
+}
+
 export interface AdsPowerProfileSummary {
   profileId: string;
   profileNo: string;
   groupName: string | null;
+  tags: readonly AdsPowerProfileTag[];
   observedStatus?: "active" | "deactive" | "unknown" | null;
   state: AdsPowerProfileState;
 }
@@ -207,7 +226,11 @@ export class AdsPowerClient {
     }
   }
 
-  async listProfiles(): Promise<AdsPowerProfileSummary[]> {
+  async listProfiles(options?: { readonly forceRefresh?: boolean }): Promise<AdsPowerProfileSummary[]> {
+    if (options?.forceRefresh === true) {
+      this.profileInventory = undefined;
+      this.profileInventoryExpiresAt = 0;
+    }
     if (this.profileInventory !== undefined && Date.now() < this.profileInventoryExpiresAt) {
       return [...this.profileInventory];
     }
@@ -250,11 +273,30 @@ export class AdsPowerClient {
 
     const activeIds = await this.listActiveProfileIds();
     return profiles.map((profile) => {
-      const observedStatus = resolveObservedStatusFromTags((profile.fbcc_user_tag ?? []).map((tag) => tag.name));
+      const rawTags: AdsPowerProfileTag[] = (profile.fbcc_user_tag ?? []).map(({ name, color }) => ({
+        name,
+        ...(color === undefined ? {} : { color }),
+      }));
+      const fallbackTags: AdsPowerProfileTag[] = [...(profile.tags ?? []), ...(profile.user_tags ?? [])]
+        .map((name) => ({ name }));
+      const allTags: AdsPowerProfileTag[] = [...rawTags, ...fallbackTags];
+      const seen = new Set<string>();
+      const tags: AdsPowerProfileTag[] = [];
+      for (const tag of allTags) {
+        const trimmed = tag.name.trim();
+        const key = trimmed.toLowerCase();
+        if (trimmed && !seen.has(key)) {
+          seen.add(key);
+          const color = tag.color?.trim();
+          tags.push({ name: trimmed, ...(color ? { color } : {}) });
+        }
+      }
+      const observedStatus = resolveObservedStatusFromTags(normalizeObservedTags(tags.map((tag) => tag.name)));
       return {
         profileId: profile.user_id,
         profileNo: profile.serial_number,
         groupName: profile.group_name?.trim() || null,
+        tags,
         ...(observedStatus === null ? {} : { observedStatus }),
         state: activeIds === null ? "ERROR" : activeIds.has(profile.user_id) ? "OPEN" : "CLOSED",
       };

@@ -11,6 +11,8 @@ import { registerRiskCommands } from "./commands/risk.js";
 import { registerRefreshSettingsCommands } from "./commands/refresh-settings.js";
 import { registerShopCommands } from "./commands/shop.js";
 import { registerSyncExecutionCommands } from "./commands/sync.js";
+import { registerCotikAccountCommands } from "./commands/cotik-accounts.js";
+import { registerCotikTrackingCommands } from "./commands/cotik-tracking.js";
 import { loadConfig, loadWorkspaceEnvironment } from "./config.js";
 import { toCliErrorPayload } from "./errors.js";
 import { printError } from "./presentation/error.js";
@@ -30,6 +32,8 @@ program
 
 registerDoctorCommand(program, runtime);
 registerShopCommands(program, runtime);
+registerCotikAccountCommands(program, runtime);
+registerCotikTrackingCommands(program, runtime);
 registerProfileCommands(program, runtime);
 registerPolicyCommands(program, runtime);
 registerRefreshSettingsCommands(program, runtime);

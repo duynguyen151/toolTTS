@@ -5,6 +5,7 @@ import { z } from "zod";
 
 const configSchema = z.object({
   DATABASE_URL: z.string().min(1).optional(),
+  COTIK_DEPLOY_VERSION: z.string().trim().min(1).optional(),
   ADSPOWER_BASE_URL: z.string().url().default("http://127.0.0.1:50325"),
   ADSPOWER_API_KEY: z.string().optional(),
   ADSPOWER_AUTOFILL_REFERENCE: z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/).optional(),

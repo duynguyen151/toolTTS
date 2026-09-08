@@ -162,3 +162,45 @@ export async function markShopSynced(
     })
     .where(eq(shops.id, shopId));
 }
+
+export async function updateShopDisplayName(
+  db: Database,
+  profileNo: string,
+  displayName: string
+): Promise<ShopRow> {
+  const [shop] = await db
+    .update(shops)
+    .set({
+      displayName: displayName.trim() ? displayName.trim() : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(shops.profileNo, profileNo))
+    .returning();
+
+  if (!shop) {
+    throw new Error(`Shop not found with profileNo: ${profileNo}`);
+  }
+
+  return shop;
+}
+
+export async function unlinkShopByProfileNo(
+  db: Database,
+  profileNo: string
+): Promise<ShopRow> {
+  const [shop] = await db
+    .update(shops)
+    .set({
+      enabled: false,
+      syncState: "DISABLED",
+      updatedAt: new Date(),
+    })
+    .where(eq(shops.profileNo, profileNo))
+    .returning();
+
+  if (!shop) {
+    throw new Error(`Shop not found with profileNo: ${profileNo}`);
+  }
+
+  return shop;
+}

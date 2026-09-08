@@ -5,6 +5,7 @@ export type {
   AdsPowerOpenReadyOptions,
   AdsPowerProfileState,
   AdsPowerProfileSummary,
+  AdsPowerProfileTag,
 } from "./adspower/client.js";
 export { SellerCenterError } from "./errors.js";
 export type { SellerCenterFailureType } from "./errors.js";

@@ -33,3 +33,39 @@ export {
   type CotikOrdersBinding,
   type CotikOrdersCheckpoint,
 } from "./order-ingestion.js";
+
+// --- W21-T02 Multi-Account Cotik Client, Discovery, and Orders exports ---
+export {
+  createMultiAccountCotikClient,
+  classifyCotikAccountHealth,
+  type MultiAccountClientOptions,
+  type MultiAccountCotikClient,
+} from "./multi-account-client.js";
+
+export {
+  discoverAccountShops,
+  normalizeShopRegion,
+  deriveMaShopNoiBo,
+  type DiscoveredCotikShop,
+  type ShopDiscoveryResult,
+  type DiscoveryResultState,
+} from "./discovery.js";
+
+export {
+  fetchCotikOrdersPage,
+  epochSecondsToDate,
+  parseCotikOrderItems,
+  normalizeRawToObservation,
+  type FetchCotikOrdersFilter,
+} from "./multi-account-orders.js";
+
+// --- W21-T03 POST Tracking Writer exports ---
+export {
+  postCotikTrackingBatch,
+  checkOrderTrackingReady,
+  confirmOrderTrackingReadback,
+  MAX_TRACKING_BATCH_SIZE,
+  type CotikTrackingItem,
+  type PostCotikTrackingBatchInput,
+  type PostCotikTrackingResult
+} from "./tracking-writer.js";

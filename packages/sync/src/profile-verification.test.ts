@@ -60,6 +60,7 @@ describe("verifySelectedProfile", () => {
       profileId: "profile-202",
       profileNo: "202",
       groupName: null,
+      tags: [{ name: "DEACTIVE" }],
       observedStatus: "deactive",
       state: "CLOSED",
     }, {

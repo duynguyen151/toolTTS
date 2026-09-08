@@ -352,3 +352,32 @@ export {
   type CotikOrdersSyncSkipReason,
   type RunCotikOrdersSyncInput
 } from "./cotik-orders.js";
+
+// --- W21 Cotik Multi-Account Sync exports ---
+export {
+  runCotikDiscoverySync,
+  runCotikMultiAccountOrdersSync,
+  type RunCotikMultiAccountDiscoveryInput,
+  type RunCotikMultiAccountOrdersSyncInput,
+  type CotikMultiAccountDiscoveryResult,
+  type CotikMultiAccountOrdersSyncResult,
+  type AccountDiscoverySummary,
+  type AccountOrderSyncSummary,
+  type ShopSyncSummary,
+  type CotikMultiAccountSyncMode
+} from "./cotik-multi-account-sync.js";
+export { stageCotikTracking, resolveCotikTrackingInput, type StageCotikTrackingInput, type StageCotikTrackingResult, type ResolvedCotikTrackingInput } from "./cotik-tracking.js";
+export {
+  readCotikTrackingSheet,
+  readCotikTrackingSheetBatch,
+  writeCotikTrackingSheetResults,
+  type CotikTrackingSheetRequest,
+  type CotikTrackingSheetRow,
+  type CotikTrackingSheetBatchRequest,
+  type CotikTrackingSheetBatchResult,
+  type CotikTrackingSheetBatchRow,
+  type CotikTrackingSheetSkippedRow,
+  type CotikTrackingSheetWriteRequest,
+  type CotikTrackingSheetWriteResult,
+  type GoogleSheetsReadAdapter
+} from "./cotik-tracking-sheets.js";

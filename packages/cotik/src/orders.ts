@@ -23,7 +23,12 @@ const CANONICAL_STATUS_MAP: Readonly<Record<string, CanonicalOrderStatus>> = {
   CANCELLED: "CANCELED",
 };
 
-const EpochSecondsSchema = z.number().int().nonnegative();
+const EpochSecondsSchema = z.union([
+  z.number().int().nonnegative(),
+  z.string().trim().regex(/^\d+$/).transform((val) => Number.parseInt(val, 10)),
+  z.literal("").transform(() => undefined),
+  z.null().transform(() => undefined),
+]);
 const SourceTextSchema = z.union([z.string(), z.number()]);
 const DecimalAmountSchema = z.string().regex(/^\d+(?:\.\d+)?$/);
 

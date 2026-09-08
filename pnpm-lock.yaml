@@ -47,6 +47,9 @@ importers:
       '@shop-health/sync':
         specifier: workspace:*
         version: link:../../packages/sync
+      '@shop-health/worker':
+        specifier: workspace:*
+        version: link:../worker
       cli-table3:
         specifier: ^0.6.5
         version: 0.6.5
@@ -126,6 +129,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@shop-health/cotik':
+        specifier: workspace:*
+        version: link:../../packages/cotik
       '@shop-health/db':
         specifier: workspace:*
         version: link:../../packages/db

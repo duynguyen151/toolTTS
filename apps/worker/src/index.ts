@@ -29,6 +29,8 @@ import { loadWorkerConfig } from "./config.js";
 import { executeClaimedRefreshAttempts } from "./refresh-controller-loop.js";
 import { selectAutomaticOrdersShops } from "./automatic-shop-selector.js";
 import { runAutomaticOrdersWithPreflight } from "./automatic-orders-preflight.js";
+import { createCotikScheduler } from "./cotik-scheduler.js";
+import { runCotikWorkerCycle } from "./cotik-cycle.js";
 
 const config = loadWorkerConfig();
 const logger = pino({
@@ -53,6 +55,9 @@ const proxyPreflight = createAdsPowerProxyPreflight(config.ADSPOWER_API_KEY === 
 
 let stopping = false;
 const lastRun = new Map<string, number>();
+const tickCotik = createCotikScheduler(config.COTIK_DEPLOY_VERSION, () =>
+  runCotikWorkerCycle({ context, deploymentId: config.COTIK_DEPLOY_VERSION, logger })
+);
 
 function isDue(shop: ShopRow, kind: SyncKind, now: number): boolean {
   const key = `${shop.id}:${kind}`;
@@ -115,6 +120,11 @@ async function workerLoop(): Promise<void> {
   logger.info({ operation: "worker.start" }, "Shop Health worker started");
 
   while (!stopping) {
+    try {
+      await tickCotik(Date.now());
+    } catch {
+      logger.error({ operation: "worker.cotik", failureType: "COTIK_CYCLE_FAILED" }, "Cotik cycle paused; inspect database and configuration");
+    }
     try {
       const now = new Date();
       const shops = await listReadyAdsPowerProfileShops(context.db);

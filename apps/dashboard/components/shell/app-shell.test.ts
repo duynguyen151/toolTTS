@@ -46,6 +46,13 @@ describe("AppShell", () => {
     expect(html).toContain('type="search"');
   });
 
+  it("mounts the light and dark theme control in the application shell", () => {
+    const html = renderToStaticMarkup(createElement(AppShell, null, "Content"));
+
+    expect(html).toContain('class="theme-toggle-btn"');
+    expect(html).toContain('aria-label="Chuyển sang Giao diện Tối (Dark mode)"');
+  });
+
   it("renders only top-level navigation items (Dashboard, Shops, Settings) without page-internal hash anchors", () => {
     const html = renderToStaticMarkup(createElement(NavigationList));
 

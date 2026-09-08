@@ -20,6 +20,7 @@ export interface DashboardShopSource {
 export interface DashboardSource {
   generatedAt: Date;
   shops: DashboardShopSource[];
+  portfolio?: DashboardPortfolioOverview;
   selected: {
     shopId: string;
     orders: {
@@ -210,6 +211,49 @@ export interface DashboardStatusView {
   tone: DashboardTone;
 }
 
+export interface DashboardPortfolioOverview {
+  totalShops: number;
+  activeShops: number;
+  officialOnHoldByCurrency: Array<{
+    currency: string;
+    totalAmount: string;
+    formatted: string;
+    shopCount: number;
+  }>;
+  portfolioDeliveryRate: {
+    numerator: number;
+    denominator: number;
+    rate: number | null;
+    formatted: string;
+  };
+  totalPortfolioOrders: number;
+  attention: {
+    needsBaReviewCount: number;
+    rulePauseCount: number;
+    disagreementCount: number;
+    authAttentionCount: number;
+  };
+  shops: Array<{
+    id: string;
+    profileNo: string;
+    displayName: string;
+    compositeHealth: "HEALTHY" | "AT_RISK" | "DATA_BLOCKED";
+    officialOnHoldAmount: string | null;
+    currency: string;
+    deliveryRate: { value: number | null };
+    totalOrders: number | null;
+    ruleResult: string | null;
+    aiRecommendation: string | null;
+    baDecision: string | null;
+    cotikBinding: {
+      enabled: boolean;
+      cotikShopId: string;
+      lastOrdersSyncedAt: string | null;
+      lastFinanceSyncedAt: string | null;
+    } | null;
+  }>;
+}
+
 export interface DashboardReadSection {
   owner: "CURRENT_OPERATIONAL_FACTS" | "IMMUTABLE_DECISION_CASE";
   source: "PERSISTED_SHOP_READ_MODEL" | "DECISION_CASE";
@@ -221,6 +265,7 @@ export interface DashboardPresentation {
   schemaVersion?: "dashboard-read.v2";
   generatedAt: string;
   dataOrigin: DashboardDataOrigin;
+  portfolio?: DashboardPortfolioOverview;
   currentOperational?: DashboardReadSection & { owner: "CURRENT_OPERATIONAL_FACTS"; source: "PERSISTED_SHOP_READ_MODEL" };
   shops: Array<{
     id: string;

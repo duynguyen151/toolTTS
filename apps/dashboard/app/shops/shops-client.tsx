@@ -10,24 +10,38 @@ import {
   ChevronRightIcon,
   FunnelIcon,
   MagnifyingGlassIcon,
-  PlayIcon,
-  ShieldCheckIcon,
   ArrowDownTrayIcon,
 } from "@heroicons/react/24/outline";
 
 import type { ConsoleShopSummary, PaginatedResult } from "../../lib/operations-console-contract";
 import { useGlobalTasks } from "../../components/operations/global-task-context";
 import { StatusBadge } from "../../components/ui/status-badge";
-import { TriadBadgeGroup } from "../../components/dashboard/triad-badge-group";
+import { PageSidePanel } from "../../components/shell/page-side-panel";
 import styles from "./shops.module.css";
 
-const verificationLabels: Record<string, string> = {
-  READY: "Sẵn sàng",
-  LOGIN_REQUIRED: "Cần đăng nhập",
-  UNVERIFIED: "Chưa xác thực",
-  HUMAN_ACTION_REQUIRED: "Cần thao tác",
-  UNSUPPORTED_REGION: "Khu vực chưa hỗ trợ",
-};
+function formatDeliveryRate(rate: number | null | undefined): { label: string; color: string } {
+  if (rate === null || rate === undefined) return { label: "Chưa đủ", color: "#94a3b8" };
+  const num = Number(rate);
+  if (Number.isNaN(num)) return { label: "Chưa đủ", color: "#94a3b8" };
+  const pct = num <= 1 && num > 0 ? num * 100 : num;
+  const label = `${pct.toFixed(1)}%`;
+  if (pct >= 70) return { label, color: "#34d399" };
+  if (pct >= 50) return { label, color: "#fbbf24" };
+  return { label, color: "#ff8e88" };
+}
+
+function formatSyncTime(dateStr: string | null | undefined): string {
+  if (!dateStr) return "Chưa sync";
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return "Chưa sync";
+  return d.toLocaleString("vi-VN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    day: "2-digit",
+    month: "2-digit",
+  });
+}
+
 
 const syncLabels: Record<string, string> = {
   ACTIVE: "Đang đồng bộ",
@@ -72,8 +86,9 @@ export function ShopsListClient({ initialResult, initialParams }: Props) {
   const [sortOrder, setSortOrder] = useState(initialParams.sortOrder ?? "asc");
   const [pageSize, setPageSize] = useState(String(initialResult.pageSize || 20));
 
-  const { startSync, startVerify, startOpen, isProfileBusy } = useGlobalTasks();
+  const { isProfileBusy } = useGlobalTasks();
   const [actionFeedback, setActionFeedback] = useState<{ id: string; msg: string; type: "success" | "error" } | null>(null);
+  const [refreshingList, setRefreshingList] = useState(false);
 
   const applyFilters = (newPage = 1, customPageSize = pageSize) => {
     const params = new URLSearchParams();
@@ -96,33 +111,36 @@ export function ShopsListClient({ initialResult, initialParams }: Props) {
     applyFilters(1);
   };
 
-  const handleOpenProfile = async (profileNo: string, displayName?: string) => {
+  const handleRefresh = async () => {
     setActionFeedback(null);
-    const ok = await startOpen(profileNo, displayName);
-    if (ok) {
-      setActionFeedback({ id: profileNo, msg: `Đã mở profile #${profileNo} thành công`, type: "success" });
-    } else {
-      setActionFeedback({ id: profileNo, msg: "Không thể mở profile", type: "error" });
-    }
-  };
-
-  const handleVerifyProfile = async (profileNo: string, displayName?: string) => {
-    setActionFeedback(null);
-    const isReady = await startVerify(profileNo, displayName);
-    if (isReady) {
-      setActionFeedback({ id: profileNo, msg: `Đã xác thực profile #${profileNo}: Sẵn sàng (READY)`, type: "success" });
-    } else {
-      setActionFeedback({ id: profileNo, msg: "Xác thực cần thao tác hoặc chưa hoàn tất", type: "error" });
-    }
-  };
-
-  const handleSyncSelected = async (profileNo: string, displayName?: string) => {
-    setActionFeedback(null);
-    const ok = await startSync(profileNo, displayName);
-    if (ok) {
-      setActionFeedback({ id: profileNo, msg: `Đã kích hoạt đồng bộ profile #${profileNo}`, type: "success" });
-    } else {
-      setActionFeedback({ id: profileNo, msg: "Không thể đồng bộ profile", type: "error" });
+    setRefreshingList(true);
+    try {
+      const res = await fetch("/api/shops/refresh", { method: "POST" });
+      const data = await res.json();
+      if (data.ok) {
+        setActionFeedback({
+          id: "refresh",
+          msg: data.message || `Đã làm mới danh sách: cập nhật ${data.totalProcessed} shop từ 5 tài khoản COTIK.`,
+          type: "success",
+        });
+        startTransition(() => {
+          router.refresh();
+        });
+      } else {
+        setActionFeedback({
+          id: "refresh",
+          msg: `Lỗi làm mới: ${data.error?.message || "Không thể tải danh sách từ COTIK"}`,
+          type: "error",
+        });
+      }
+    } catch {
+      setActionFeedback({
+        id: "refresh",
+        msg: "Lỗi kết nối khi gọi API làm mới danh sách COTIK",
+        type: "error",
+      });
+    } finally {
+      setRefreshingList(false);
     }
   };
 
@@ -136,10 +154,24 @@ export function ShopsListClient({ initialResult, initialParams }: Props) {
       });
       const data = await res.json();
       if (data.ok) {
-        setActionFeedback({ id: profileNo, msg: `Đã nạp dữ liệu COTIK mới nhất cho profile #${profileNo}`, type: "success" });
-        applyFilters(initialResult.page);
+        const ordersCount = data.cotikOrders?.rowsWritten ?? 0;
+        const financeCount = data.cotikFinance?.rowsWritten ?? 0;
+        setActionFeedback({
+          id: profileNo,
+          msg: `Đã nạp COTIK cho #${profileNo}: ${ordersCount} đơn, ${financeCount} tài chính (${data.cotikOrders?.mode || "SYNC"}).`,
+          type: "success",
+        });
+        startTransition(() => {
+          router.refresh();
+        });
       } else {
-        setActionFeedback({ id: profileNo, msg: `Lỗi nạp COTIK: ${data.error?.message ?? "Thất bại"}`, type: "error" });
+        const skipReason = (data.cotikOrders as any)?.skipReason || (data.cotikFinance as any)?.skipReason;
+        const rawErr = data.message || skipReason || data.error?.message || data.cotikOrders?.error || data.cotikFinance?.error || "Thất bại";
+        let userMsg = typeof rawErr === "string" ? rawErr : JSON.stringify(rawErr);
+        if (userMsg.includes("COTIK_BINDING_INACTIVE")) {
+          userMsg = "Shop chưa liên kết COTIK. Bấm 'Làm mới danh sách' ở góc trên để cập nhật liên kết.";
+        }
+        setActionFeedback({ id: profileNo, msg: `Lỗi nạp COTIK: ${userMsg}`, type: "error" });
       }
     } catch {
       setActionFeedback({ id: profileNo, msg: "Lỗi kết nối khi nạp dữ liệu COTIK", type: "error" });
@@ -147,27 +179,101 @@ export function ShopsListClient({ initialResult, initialParams }: Props) {
   };
 
   return (
-    <div className={styles.shopsContainer}>
-      <header className={styles.pageHeader}>
-        <div>
-          <div className={styles.titleBadgeRow}>
-            <div className={styles.titleBadge}>
-              <BuildingStorefrontIcon className={styles.badgeIcon} aria-hidden="true" />
-              <span>Quản Lý Vận Hành Tập Trung</span>
-            </div>
-            <span className={styles.totalCounterBadge}>
-              Tổng cộng: <strong>{initialResult.totalItems}</strong> Profile AdsPower
-            </span>
+    <div className={styles.shopsPageLayout}>
+      {/* Left Column: Full-height PageSidePanel with matching scenery thumbnail */}
+      <PageSidePanel badgeText={`PORTFOLIO · ${initialResult.totalItems} SHOPS`}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "9px 12px",
+              borderRadius: "8px",
+              background: "var(--color-surface-subtle)",
+              border: "1px solid var(--color-border)",
+              fontSize: "0.8125rem",
+            }}
+          >
+            <span style={{ color: "var(--color-ink-muted)" }}>Tổng số cửa hàng:</span>
+            <strong style={{ color: "var(--color-ink)" }}>{initialResult.totalItems} Shop</strong>
           </div>
-          <h1 className={styles.pageTitle}>Danh Sách Cửa Hàng TikTok Shop</h1>
-          <p className={styles.pageDescription}>
-            Hệ thống đồng bộ đầy đủ toàn bộ hồ sơ trình duyệt AdsPower. Tìm kiếm, lọc theo nhóm/thẻ, thực hiện thao tác nhanh (Mở, Xác thực, Đồng bộ) và quản lý chi tiết.
-          </p>
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "9px 12px",
+              borderRadius: "8px",
+              background: "var(--color-surface-subtle)",
+              border: "1px solid var(--color-border)",
+              fontSize: "0.8125rem",
+            }}
+          >
+            <span style={{ color: "var(--color-ink-muted)" }}>Tiêu chuẩn Delivery Rate:</span>
+            <strong style={{ color: "var(--color-success)" }}>≥ 70% An toàn</strong>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "9px 12px",
+              borderRadius: "8px",
+              background: "var(--color-surface-subtle)",
+              border: "1px solid var(--color-border)",
+              fontSize: "0.8125rem",
+            }}
+          >
+            <span style={{ color: "var(--color-ink-muted)" }}>Đồng bộ dữ liệu:</span>
+            <strong style={{ color: "var(--color-info)" }}>COTIK Realtime</strong>
+          </div>
         </div>
-      </header>
+
+        <div
+          style={{
+            marginTop: 4,
+            padding: "10px 12px",
+            borderRadius: "8px",
+            background: "var(--color-primary-soft)",
+            border: "1px solid var(--color-primary-soft)",
+            fontSize: "0.75rem",
+            lineHeight: 1.45,
+            color: "var(--color-primary-ink)",
+          }}
+        >
+          💡 Bấm vào từng shop để mở trang thẩm định chuyên sâu với đầy đủ lịch sử phân tích và khuyến nghị AI.
+        </div>
+      </PageSidePanel>
+
+      {/* Right Column: Existing Shops Container */}
+      <div className={styles.shopsContainer} data-layout="fixed-console">
+        <header className={styles.pageHeader} data-fixed-region="page-header">
+          <div>
+            <div className={styles.pageTitleRow}>
+              <h1 className={styles.pageTitle}>Danh Sách Cửa Hàng TikTok Shop</h1>
+              <span className={styles.totalCounterBadge}>
+                <strong>{initialResult.totalItems}</strong> shop
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            className={styles.actionBtnTertiary}
+            onClick={handleRefresh}
+            disabled={isPending || refreshingList}
+            aria-label="Làm mới danh sách cửa hàng từ 5 tài khoản COTIK"
+            title="GET tuần tự danh sách cửa hàng từ 5 al-token COTIK"
+          >
+            <ArrowPathIcon className={`${styles.actionIcon} ${refreshingList ? styles.spinIcon : ""}`} aria-hidden="true" />
+            <span>{refreshingList ? "Đang làm mới..." : "Làm mới danh sách"}</span>
+          </button>
+        </header>
 
       {/* Filter & Search Bar */}
-      <section className={styles.filterSection} aria-label="Bộ lọc danh sách cửa hàng">
+      <section className={styles.filterSection} data-fixed-region="filters" aria-label="Bộ lọc danh sách cửa hàng">
         <form onSubmit={handleSearchSubmit} className={styles.searchForm}>
           <div className={styles.searchInputWrap}>
             <MagnifyingGlassIcon className={styles.searchIcon} aria-hidden="true" />
@@ -206,25 +312,6 @@ export function ShopsListClient({ initialResult, initialParams }: Props) {
             </select>
           </div>
 
-          <div className={styles.filterGroup}>
-            <label htmlFor="verify-filter">Xác thực:</label>
-            <select
-              id="verify-filter"
-              value={verificationState}
-              onChange={(e) => {
-                setVerificationState(e.target.value);
-                applyFilters(1);
-              }}
-              className={styles.selectInput}
-            >
-              <option value="">Tất cả xác thực</option>
-              <option value="READY">READY (Sẵn sàng)</option>
-              <option value="UNVERIFIED">UNVERIFIED (Chưa xác thực)</option>
-              <option value="LOGIN_REQUIRED">LOGIN_REQUIRED (Cần đăng nhập)</option>
-              <option value="HUMAN_ACTION_REQUIRED">HUMAN_ACTION_REQUIRED</option>
-              <option value="UNSUPPORTED_REGION">Khu vực không hỗ trợ</option>
-            </select>
-          </div>
 
           <div className={styles.filterGroup}>
             <label htmlFor="sort-filter">Sắp xếp:</label>
@@ -255,6 +342,7 @@ export function ShopsListClient({ initialResult, initialParams }: Props) {
           className={`${styles.feedbackBanner} ${
             actionFeedback.type === "success" ? styles.feedbackSuccess : styles.feedbackError
           }`}
+          data-fixed-region="feedback"
           role="status"
           aria-live="polite"
         >
@@ -272,18 +360,18 @@ export function ShopsListClient({ initialResult, initialParams }: Props) {
 
       {/* Table Section (Desktop) / Cards (Mobile) */}
       <section className={styles.tableSection} aria-label="Bảng dữ liệu cửa hàng">
-        <div className={styles.tableResponsiveWrap}>
+        <div className={styles.tableResponsiveWrap} data-scroll-region="profiles">
           <table className={styles.shopsTable}>
             <thead>
               <tr>
                 <th scope="col">Profile</th>
-                <th scope="col">Cửa Hàng / Nhóm</th>
+                <th scope="col">Cửa Hàng</th>
                 <th scope="col">Shop Health</th>
-                <th scope="col">Xác Thực & COTIK</th>
-                <th scope="col">Đồng Bộ</th>
+                <th scope="col">Trạng Thái COTIK</th>
                 <th scope="col">Đơn Hàng</th>
-                <th scope="col">On Hold</th>
-                <th scope="col">Triad (Rule/AI/BA)</th>
+                <th scope="col">OH COTIK</th>
+                <th scope="col">Delivery Rate</th>
+                <th scope="col">Đồng Bộ Gần Nhất</th>
                 <th scope="col">Thao Tác</th>
               </tr>
             </thead>
@@ -297,19 +385,13 @@ export function ShopsListClient({ initialResult, initialParams }: Props) {
               ) : (
                 initialResult.items.map((shop) => {
                   const isUnlinked = shop.id.startsWith("unlinked-") || shop.displayName.includes("Chưa liên kết");
+                  const deliveryInfo = formatDeliveryRate(shop.deliveryRate);
 
                   return (
                     <tr key={shop.id}>
                       <td>
                         <div className={styles.profileCell}>
                           <span className={styles.profileNo}>#{shop.profileNo}</span>
-                          {shop.adsPowerState && (
-                            <span
-                              className={styles.adsStateDot}
-                              data-state={shop.adsPowerState}
-                              title={`AdsPower: ${shop.adsPowerState}`}
-                            />
-                          )}
                         </div>
                       </td>
                       <td>
@@ -324,25 +406,17 @@ export function ShopsListClient({ initialResult, initialParams }: Props) {
                               <strong>{shop.displayName}</strong>
                             </Link>
                           )}
+                          <div style={{ fontSize: "0.72rem", color: "#94a3b8", marginTop: 2 }}>
+                            <span>ShopID: </span>
+                            <code style={{ color: "#cbd5e1" }}>
+                              {shop.verifiedTiktokShopId || shop.cotikBinding?.cotikShopId || "Chưa có ID"}
+                            </code>
+                          </div>
                           {shop.groupName && (
                             <span className={styles.groupBadge}>Nhóm: {shop.groupName}</span>
                           )}
-                          {shop.tags && shop.tags.length > 0 && (
-                            <div className={styles.tagsRow} aria-label="AdsPower tags">
-                              {shop.tags.slice(0, 4).map((tag) => {
-                                const name = typeof tag === "string" ? tag : tag.name;
-                                const color = typeof tag === "string" ? undefined : tag.color;
-                                return (
-                                  <span key={name} className={styles.tagChip} data-color={color}>
-                                    {name}
-                                  </span>
-                                );
-                              })}
-                              {shop.tags.length > 4 && <span className={styles.tagsMore}>+{shop.tags.length - 4}</span>}
-                            </div>
-                          )}
-                          {shop.verifiedTiktokShopId && (
-                            <small className={styles.ttsId}>TTS ID: {shop.verifiedTiktokShopId}</small>
+                          {shop.cotikBinding?.cotikShopId && (
+                            <small className={styles.ttsId}>COTIK ID: {shop.cotikBinding.cotikShopId}</small>
                           )}
                         </div>
                       </td>
@@ -353,39 +427,18 @@ export function ShopsListClient({ initialResult, initialParams }: Props) {
                               ? "success"
                               : shop.compositeHealth === "AT_RISK"
                               ? "danger"
-                              : "warning"
+                              : "neutral"
                           }
                         >
-                          {shop.compositeHealth === "HEALTHY" ? "An toàn" : shop.compositeHealth === "AT_RISK" ? "Cần chú ý" : "Lỗi dữ liệu"}
+                          {shop.compositeHealth === "HEALTHY" ? "An toàn" : shop.compositeHealth === "AT_RISK" ? "Cần chú ý" : "Chưa kết nối"}
                         </StatusBadge>
                       </td>
                       <td>
                         <div className={styles.syncCell}>
-                          <span
-                            className={styles.verificationBadge}
-                            data-state={shop.verificationState}
-                          >
-                            {verificationLabels[shop.verificationState] ?? shop.verificationState}
-                          </span>
                           {shop.cotikBinding?.enabled ? (
-                            <StatusBadge tone="info">COTIK: Đã nối</StatusBadge>
+                            <StatusBadge tone="success">COTIK: Đã kết nối</StatusBadge>
                           ) : (
-                            <small className={styles.mutedText}>COTIK: Chưa nối</small>
-                          )}
-                        </div>
-                      </td>
-                      <td>
-                        <div className={styles.syncCell}>
-                          <span className={styles.syncBadge} data-state={syncLabels[shop.syncState] ?? shop.syncState}>
-                            {syncLabels[shop.syncState] ?? shop.syncState}
-                          </span>
-                          {shop.lastOrdersSyncedAt && (
-                            <small className={styles.syncTime}>
-                              {new Date(shop.lastOrdersSyncedAt).toLocaleTimeString("vi-VN", {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
-                            </small>
+                            <StatusBadge tone="neutral">Chưa kết nối</StatusBadge>
                           )}
                         </div>
                       </td>
@@ -395,17 +448,24 @@ export function ShopsListClient({ initialResult, initialParams }: Props) {
                         </span>
                       </td>
                       <td>
-                        <span className={styles.metricVal}>
-                          {shop.onHoldAmount !== null ? `$${Number(shop.onHoldAmount).toLocaleString("vi-VN", { minimumFractionDigits: 2 })}` : "—"}
+                        <strong className={styles.prominentMetricGreen}>
+                          {shop.onHoldAmount !== null ? `$${Number(shop.onHoldAmount).toLocaleString("en-US", { minimumFractionDigits: 2 })}` : "—"}
+                        </strong>
+                      </td>
+                      <td>
+                        <span style={{ color: deliveryInfo.color, fontWeight: 700, fontSize: "0.8125rem", whiteSpace: "nowrap" }}>
+                          {deliveryInfo.label}
                         </span>
                       </td>
                       <td>
-                        <TriadBadgeGroup
-                          ruleResult={shop.latestRecommendation}
-                          aiRecommendation={shop.latestAiRecommendation}
-                          baDecision={shop.latestBaDecision}
-                          compact
-                        />
+                        <div className={styles.syncCell}>
+                          <span className={styles.syncBadge} data-state={syncLabels[shop.syncState] ?? shop.syncState}>
+                            {syncLabels[shop.syncState] ?? shop.syncState}
+                          </span>
+                          <small className={styles.syncTime}>
+                            {formatSyncTime(shop.lastOrdersSyncedAt || shop.cotikBinding?.lastOrdersSyncedAt || shop.lastFinanceSyncedAt)}
+                          </small>
+                        </div>
                       </td>
                       <td>
                         <div className={styles.actionsGroup}>
@@ -414,48 +474,23 @@ export function ShopsListClient({ initialResult, initialParams }: Props) {
 
                             return (
                               <>
-                                {shop.cotikBinding?.enabled ? (
-                                  <button
-                                    type="button"
-                                    className={`${styles.actionBtn} ${styles.actionBtnPrimary}`}
-                                    onClick={() => handleIngestCotik(shop.profileNo)}
-                                    disabled={isBusy || isPending}
-                                    title="Nạp dữ liệu từ COTIK API (Nguồn chính)"
-                                  >
-                                    <ArrowDownTrayIcon className={styles.actionIcon} aria-hidden="true" />
-                                    <span>Sync COTIK (Chính)</span>
-                                  </button>
-                                ) : null}
                                 <button
                                   type="button"
-                                  className={styles.actionBtn}
-                                  onClick={() => handleOpenProfile(shop.profileNo, shop.displayName)}
+                                  className={`${styles.actionBtn} ${styles.actionBtnPrimary}`}
+                                  onClick={() => handleIngestCotik(shop.profileNo)}
                                   disabled={isBusy || isPending}
-                                  title="Mở AdsPower Browser (Khi cần kiểm tra trực tiếp)"
+                                  title="GET đồng bộ thông tin từ COTIK"
                                 >
-                                  <PlayIcon className={styles.actionIcon} aria-hidden="true" />
-                                  <span>Mở</span>
+                                  <ArrowDownTrayIcon className={styles.actionIcon} aria-hidden="true" />
+                                  <span>Sync COTIK</span>
                                 </button>
-                                <button
-                                  type="button"
-                                  className={styles.actionBtn}
-                                  onClick={() => handleVerifyProfile(shop.profileNo, shop.displayName)}
-                                  disabled={isBusy || isPending}
-                                  title="Xác thực danh tính Seller Center"
-                                >
-                                  <ShieldCheckIcon className={styles.actionIcon} aria-hidden="true" />
-                                  <span>Xác thực</span>
-                                </button>
-                                <button
-                                  type="button"
+                                <Link
+                                  href={`/shops/${shop.profileNo}`}
                                   className={`${styles.actionBtn} ${styles.actionBtnSecondary}`}
-                                  onClick={() => handleSyncSelected(shop.profileNo, shop.displayName)}
-                                  disabled={isBusy || isPending}
-                                  title="Đồng bộ qua AdsPower / Seller Center (Chế độ dự phòng Fallback)"
+                                  title="Xem chi tiết cửa hàng"
                                 >
-                                  <ArrowPathIcon className={styles.actionIcon} aria-hidden="true" />
-                                  <span>Sync SC (Fallback)</span>
-                                </button>
+                                  <span>Chi tiết →</span>
+                                </Link>
                               </>
                             );
                           })()}
@@ -470,7 +505,7 @@ export function ShopsListClient({ initialResult, initialParams }: Props) {
         </div>
 
         {/* Pagination & Page Size */}
-        <div className={styles.paginationBar}>
+        <div className={styles.paginationBar} data-fixed-region="pagination">
           <div className={styles.pageSizeControl}>
             <label htmlFor="page-size-select">Hiển thị:</label>
             <select
@@ -519,5 +554,6 @@ export function ShopsListClient({ initialResult, initialParams }: Props) {
         </div>
       </section>
     </div>
+  </div>
   );
 }

@@ -188,7 +188,7 @@ export function CotikSettings({
           </div>
           {activeDeploymentId && (
             <div style={{ fontSize: "0.75rem", color: "var(--color-ink-muted, #94a3b8)", textAlign: "right" }}>
-              <div>Deployment ID: <code>{activeDeploymentId}</code></div>
+              <div>Deploy version: <code>{activeDeploymentId}</code></div>
               {lastResetAt && <div>Last Reset: {new Date(lastResetAt).toLocaleString()}</div>}
             </div>
           )}

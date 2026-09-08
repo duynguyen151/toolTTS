@@ -38,70 +38,92 @@ export function OperationsControls({ generatedAtLabel }: { generatedAtLabel: str
   return (
     <>
       <div className={styles.controls} data-operation-state={operations.operationState}>
-      <div className={styles.metaLine}>
-        <span className={styles.generatedAt}>Generated {generatedAtLabel}</span>
-        <span
-          className={styles.operationMessage}
-          aria-live="polite"
-          aria-atomic="true"
-          role="status"
-          title={operations.operationMessage}
-        >
-          {operations.operationMessage}
-        </span>
-      </div>
-      <div className={styles.actionRow}>
-        <label className={styles.profileSelect}>
-          <span className="sr-only">AdsPower profile</span>
-          <select
-            aria-label="AdsPower profile"
-            disabled={!operations.liveOperationsEnabled || operations.isBusy}
-            onChange={(event) => operations.selectProfile(event.target.value)}
-            value={operations.selectedProfileNo ?? ""}
+        <div className={styles.metaLine}>
+          <span className={styles.generatedAt}>Generated {generatedAtLabel}</span>
+          <span
+            className={styles.operationMessage}
+            aria-live="polite"
+            aria-atomic="true"
+            role="status"
+            title={operations.operationMessage}
           >
-            {operations.profiles.length === 0 ? <option value="">No profiles available</option> : null}
-            {operations.profiles.map((profile) => (
-              <option key={profile.profileNo} value={profile.profileNo}>
-                Profile {profile.profileNo} · {profile.state} · {profile.linkState === "LINKED" ? "linked" : profile.linkState === "UNLINKED" ? "unlinked" : "link unknown"}
-              </option>
-            ))}
-          </select>
-          <ChevronUpDownIcon aria-hidden="true" />
-        </label>
-        <SecondaryButton
-          disabled={!canOpen}
-          leadingIcon={<ArrowTopRightOnSquareIcon />}
-          loading={operations.operationState === "OPENING_PROFILE"}
-          onClick={() => void operations.openProfile()}
-        >
-          {operations.operationState === "HUMAN_ACTION_REQUIRED" ? "Open profile to continue" : "Open profile"}
-        </SecondaryButton>
-        <SecondaryButton disabled={!canOpen} onClick={() => void operations.verifyProfile()}>
-          Verify profile
-        </SecondaryButton>
-        <PrimaryButton
-          disabled={!canUpdate}
-          leadingIcon={<ArrowPathIcon />}
-          loading={operations.isBusy && operations.operationState !== "OPENING_PROFILE"}
-          onClick={() => void operations.updateData()}
-        >
-          {updateLabels[operations.operationState]}
-        </PrimaryButton>
-        <SecondaryButton disabled={!canSyncSelected} onClick={() => void operations.syncSelected()}>
-          Sync selected (COTIK)
-        </SecondaryButton>
-        <SecondaryButton disabled={!operations.liveOperationsEnabled || operations.isBusy} onClick={() => void operations.syncAllEligible()}>
-          Sync all eligible (COTIK)
-        </SecondaryButton>
-        <SecondaryButton
-          aria-controls="operation-realtime-log"
-          aria-expanded={operations.logOpen}
-          onClick={operations.toggleLog}
-        >
-          Log
-        </SecondaryButton>
+            {operations.operationMessage}
+          </span>
+        </div>
+
+        <div className={styles.actionRow}>
+          {/* Segment 1: Profile Selection & Refresh */}
+          <div className={styles.toolbarSegment}>
+            <label className={styles.profileSelect}>
+              <span className="sr-only">AdsPower profile</span>
+              <select
+                aria-label="AdsPower profile"
+                disabled={!operations.liveOperationsEnabled || operations.isBusy}
+                onChange={(event) => operations.selectProfile(event.target.value)}
+                value={operations.selectedProfileNo ?? ""}
+              >
+                {operations.profiles.length === 0 ? <option value="">No profiles available</option> : null}
+                {operations.profiles.map((profile) => (
+                  <option key={profile.profileNo} value={profile.profileNo}>
+                    Profile {profile.profileNo} · {profile.state} · {profile.linkState === "LINKED" ? "linked" : profile.linkState === "UNLINKED" ? "unlinked" : "link unknown"}
+                  </option>
+                ))}
+              </select>
+              <ChevronUpDownIcon aria-hidden="true" />
+            </label>
+            <SecondaryButton
+              aria-label="Retry AdsPower"
+              disabled={!operations.liveOperationsEnabled || operations.isBusy}
+              leadingIcon={<ArrowPathIcon />}
+              loading={operations.profilesRefreshing}
+              onClick={() => void operations.refreshProfiles()}
+            >
+              Retry AdsPower
+            </SecondaryButton>
+          </div>
+
+          {/* Segment 2: Diagnostics */}
+          <div className={styles.toolbarSegment}>
+            <SecondaryButton
+              disabled={!canOpen}
+              leadingIcon={<ArrowTopRightOnSquareIcon />}
+              loading={operations.operationState === "OPENING_PROFILE"}
+              onClick={() => void operations.openProfile()}
+            >
+              {operations.operationState === "HUMAN_ACTION_REQUIRED" ? "Open profile to continue" : "Open profile"}
+            </SecondaryButton>
+            <SecondaryButton disabled={!canOpen} onClick={() => void operations.verifyProfile()}>
+              Verify profile
+            </SecondaryButton>
+          </div>
+
+          {/* Segment 3: Sync & Log */}
+          <div className={styles.toolbarSegment}>
+            <PrimaryButton
+              disabled={!canUpdate}
+              leadingIcon={<ArrowPathIcon />}
+              loading={operations.isBusy && operations.operationState !== "OPENING_PROFILE"}
+              onClick={() => void operations.updateData()}
+            >
+              {updateLabels[operations.operationState]}
+            </PrimaryButton>
+            <SecondaryButton disabled={!canSyncSelected} onClick={() => void operations.syncSelected()}>
+              Sync selected (COTIK)
+            </SecondaryButton>
+            <SecondaryButton disabled={!operations.liveOperationsEnabled || operations.isBusy} onClick={() => void operations.syncAllEligible()}>
+              Sync all eligible (COTIK)
+            </SecondaryButton>
+            <SecondaryButton
+              aria-controls="operation-realtime-log"
+              aria-expanded={operations.logOpen}
+              onClick={operations.toggleLog}
+            >
+              Log
+            </SecondaryButton>
+          </div>
+        </div>
       </div>
-      </div>
+
       <OperationLogPanel
         entries={operations.operationLogs}
         onClear={operations.clearOperationLogs}

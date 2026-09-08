@@ -112,6 +112,29 @@ export async function readConsoleShops(
       shopMap.set(s.profileNo, s);
     }
 
+    const shopOrdersMap = new Map<string, { total: number; inTransit: number; delivered: number; completed: number; awaiting: number }>();
+    try {
+      if (context.db.query?.orders?.findMany) {
+        const ordersRows = await context.db.query.orders.findMany({
+          columns: { shopId: true, canonicalStatus: true },
+        });
+        for (const o of ordersRows as any[]) {
+          let s = shopOrdersMap.get(o.shopId);
+          if (!s) {
+            s = { total: 0, inTransit: 0, delivered: 0, completed: 0, awaiting: 0 };
+            shopOrdersMap.set(o.shopId, s);
+          }
+          s.total += 1;
+          if (o.canonicalStatus === "IN_TRANSIT") s.inTransit += 1;
+          else if (o.canonicalStatus === "DELIVERED") s.delivered += 1;
+          else if (o.canonicalStatus === "COMPLETED") s.completed += 1;
+          else if (o.canonicalStatus === "AWAITING_SHIPMENT" || o.canonicalStatus === "AWAITING_COLLECTION" || o.canonicalStatus === "PENDING" || o.canonicalStatus === "UNPAID") s.awaiting += 1;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
     const buildLinkedSummary = async (
       shop: ShopRow,
       dbProfile: AdsPowerProfileRow | undefined,
@@ -133,12 +156,30 @@ export async function readConsoleShops(
       const orderMetrics = metrics && typeof metrics.orders === "object" && metrics.orders !== null ? (metrics.orders as Record<string, unknown>) : undefined;
       const deliveryMetric = metrics && typeof metrics.deliveryRate === "object" && metrics.deliveryRate !== null ? (metrics.deliveryRate as Record<string, unknown>) : undefined;
 
+      const directStats = shopOrdersMap.get(shop.id);
+      let calculatedDeliveryRate: number | null = null;
+      if (directStats) {
+        const num = directStats.delivered + directStats.completed + directStats.inTransit;
+        const den = num + directStats.awaiting;
+        if (den > 0) {
+          calculatedDeliveryRate = Number(((num / den) * 100).toFixed(1));
+        }
+      }
+
       const totalOrders = latestReview?.metrics.totalOrders
-        ?? (typeof orderMetrics?.total === "number" ? orderMetrics.total : null);
+        ?? (typeof orderMetrics?.total === "number" ? orderMetrics.total : null)
+        ?? (directStats?.total != null && directStats.total > 0 ? directStats.total : null);
       const deliveryRate = latestReview?.metrics.deliveryRate
-        ?? (typeof deliveryMetric?.value === "number" ? deliveryMetric.value : null);
+        ?? (typeof deliveryMetric?.value === "number" ? deliveryMetric.value : null)
+        ?? calculatedDeliveryRate;
+      const cotikProv = cotikBinding?.provenance as Record<string, unknown> | undefined;
+      const cotikOnHoldVal = cotikProv?.sumEstSettlementAmount != null
+        ? String(cotikProv.sumEstSettlementAmount)
+        : null;
+
       const onHoldAmount = latestReview?.metrics.onHoldValue
         ?? finance.latestSnapshot?.officialOnHoldAmount
+        ?? cotikOnHoldVal
         ?? null;
 
       const verificationState: ShopVerificationState = (dbProfile?.verificationState as ShopVerificationState)
@@ -151,11 +192,19 @@ export async function readConsoleShops(
       const ruleResult = latestReview?.rule.decision ?? null;
       const aiRecommendation = latestReview?.ai?.status === "AVAILABLE" ? latestReview.ai.recommendation : null;
 
+      const hasCotik = Boolean(cotikBinding?.enabled);
+      const parsedDeliveryRate = deliveryRate != null
+        ? (deliveryRate <= 1 && deliveryRate > 0 ? deliveryRate * 100 : Number(deliveryRate))
+        : null;
+      const isDeliveryLow = parsedDeliveryRate !== null && !Number.isNaN(parsedDeliveryRate) && parsedDeliveryRate < 70;
+
       let compositeHealth: "HEALTHY" | "AT_RISK" | "DATA_BLOCKED" = "HEALTHY";
-      if (ruleResult === "PAUSE" || aiRecommendation === "PAUSE" || shop.syncState.startsWith("PAUSED_")) {
-        compositeHealth = "AT_RISK";
-      } else if (shop.syncState === "DISABLED" || verificationState === "LOGIN_REQUIRED" || verificationState === "HUMAN_ACTION_REQUIRED" || verificationState === "UNVERIFIED") {
+      if (!hasCotik || shop.syncState === "DISABLED") {
         compositeHealth = "DATA_BLOCKED";
+      } else if (ruleResult === "PAUSE" || aiRecommendation === "PAUSE" || isDeliveryLow || shop.syncState.startsWith("PAUSED_")) {
+        compositeHealth = "AT_RISK";
+      } else {
+        compositeHealth = "HEALTHY";
       }
 
       return {
@@ -192,6 +241,9 @@ export async function readConsoleShops(
           cotikShopId: cotikBinding.providerShopId ?? "",
           lastOrdersSyncedAt: formatIso(cotikBinding.providerUpdatedAt),
           lastFinanceSyncedAt: formatIso(cotikBinding.providerUpdatedAt),
+          sumEstSettlementAmount: typeof cotikProv?.sumEstSettlementAmount === "number" ? cotikProv.sumEstSettlementAmount : null,
+          estimatedSettlement: typeof cotikProv?.estimatedSettlement === "string" ? cotikProv.estimatedSettlement : null,
+          onHoldBuckets: (cotikProv?.onHoldBuckets as any) ?? null,
         } : null,
         compositeHealth,
       };
@@ -358,6 +410,7 @@ export async function readConsoleShopDetail(
       orderFacts,
       financeSummary,
       presentation,
+      cotikBinding,
     ] = await Promise.all([
       listAdsPowerProfiles(context.db).catch(() => [] as AdsPowerProfileRow[]),
       adsPowerClient ? adsPowerClient.listProfiles().catch(() => []) : Promise.resolve([]),
@@ -367,6 +420,11 @@ export async function readConsoleShopDetail(
       getFullPersistedRiskOrderFacts(context.db, shop.id).catch(() => []),
       getFinanceSummary(context.db, shop.id).catch(() => ({ latestSnapshot: null, statementsCount: 0 })),
       loadDashboardPresentation(profileNo),
+      context.db.query?.shopProviderBindings?.findFirst
+        ? context.db.query.shopProviderBindings.findFirst({
+            where: (table: any, { eq, and }: any) => and(eq(table.shopId, shop.id), eq(table.provider, "COTIK")),
+          }).catch(() => null)
+        : Promise.resolve(null),
     ]);
 
     const dbProfile = dbProfiles.find((p) => p.profileNo === profileNo);
@@ -382,11 +440,23 @@ export async function readConsoleShopDetail(
       ? factsTotal
       : (latestReview?.metrics.totalOrders ?? (typeof orderMetrics?.total === "number" ? orderMetrics.total : null));
 
+    const directNum = orderFacts.filter(f => f.canonicalStatus === "DELIVERED" || f.canonicalStatus === "COMPLETED" || f.canonicalStatus === "IN_TRANSIT").reduce((sum, f) => sum + f.orderCount, 0);
+    const directAwaiting = orderFacts.filter(f => f.canonicalStatus === "AWAITING_SHIPMENT" || f.canonicalStatus === "AWAITING_COLLECTION" || f.canonicalStatus === "PENDING" || f.canonicalStatus === "UNPAID").reduce((sum, f) => sum + f.orderCount, 0);
+    const directDen = directNum + directAwaiting;
+    const directDeliveryRate = directDen > 0 ? Number(((directNum / directDen) * 100).toFixed(1)) : null;
+
     const deliveryRate = latestReview?.metrics.deliveryRate
-      ?? (typeof deliveryMetric?.value === "number" ? deliveryMetric.value : null);
+      ?? (typeof deliveryMetric?.value === "number" ? deliveryMetric.value : null)
+      ?? directDeliveryRate;
+
+    const cotikProv = cotikBinding?.provenance as Record<string, unknown> | undefined;
+    const cotikOnHoldVal = cotikProv?.sumEstSettlementAmount != null
+      ? String(cotikProv.sumEstSettlementAmount)
+      : null;
 
     const onHoldAmount = latestReview?.metrics.onHoldValue
       ?? financeSummary.latestSnapshot?.officialOnHoldAmount
+      ?? cotikOnHoldVal
       ?? null;
 
     const verificationState: ShopVerificationState = (dbProfile?.verificationState as ShopVerificationState)
@@ -424,6 +494,15 @@ export async function readConsoleShopDetail(
       adsPowerState: liveAds?.state,
       groupName: liveAds?.groupName ?? null,
       tags: liveAds?.tags ?? [],
+      cotikBinding: cotikBinding ? {
+        enabled: cotikBinding.enabled,
+        cotikShopId: cotikBinding.providerShopId ?? "",
+        lastOrdersSyncedAt: formatIso(shop.lastOrdersSyncedAt),
+        lastFinanceSyncedAt: formatIso(shop.lastFinanceSyncedAt),
+        sumEstSettlementAmount: typeof cotikProv?.sumEstSettlementAmount === "number" ? cotikProv.sumEstSettlementAmount : null,
+        estimatedSettlement: typeof cotikProv?.estimatedSettlement === "string" ? cotikProv.estimatedSettlement : null,
+        onHoldBuckets: (cotikProv?.onHoldBuckets as any) ?? null,
+      } : null,
     };
 
     // Construct Audit Logs from real DB records
@@ -541,14 +620,34 @@ export async function readConsoleShopDetail(
           onHoldAmount: onHoldAmount,
           currency: shop.currency,
           capturedAt: formatIso(financeSummary.latestSnapshot?.capturedAt),
+          cotikOnHold: cotikBinding ? {
+            sumEstSettlementAmount: typeof cotikProv?.sumEstSettlementAmount === "number" ? cotikProv.sumEstSettlementAmount : null,
+            estimatedSettlement: typeof cotikProv?.estimatedSettlement === "string" ? cotikProv.estimatedSettlement : null,
+            onHoldBuckets: (cotikProv?.onHoldBuckets as any) ?? null,
+          } : null,
         },
-        kpis: presentation.kpis.map((k) => ({
-          id: k.id,
-          label: k.label,
-          value: k.value,
-          detail: k.detail,
-          tone: (k.tone === "danger" || k.tone === "rose") ? "danger" : (k.tone === "warning" || k.tone === "amber") ? "warning" : (k.tone === "mint" || k.tone === "success") ? "good" : "neutral",
-        })),
+        kpis: presentation.kpis.map((k) => {
+          if (k.id === "on-hold" && (k.value === "Unavailable" || k.value === "$0.00") && onHoldAmount !== null) {
+            const num = Number(onHoldAmount);
+            const valStr = Number.isFinite(num)
+              ? `$${num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              : onHoldAmount;
+            return {
+              id: k.id,
+              label: "Finance On Hold",
+              value: valStr,
+              detail: cotikProv?.estimatedSettlement ? `Estimated settlement: ${cotikProv.estimatedSettlement}` : "COTIK sum est settlement",
+              tone: (num > 0 ? "warning" : "good") as "warning" | "good",
+            };
+          }
+          return {
+            id: k.id,
+            label: k.label,
+            value: k.value,
+            detail: k.detail,
+            tone: (k.tone === "danger" || k.tone === "rose") ? "danger" : (k.tone === "warning" || k.tone === "amber") ? "warning" : (k.tone === "mint" || k.tone === "success") ? "good" : "neutral",
+          };
+        }),
       },
       dataTab: {
         dataCoverage: computeCoverageState(latestReview),

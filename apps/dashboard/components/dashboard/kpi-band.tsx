@@ -48,7 +48,7 @@ export function KpiBand({ kpis }: { kpis: DashboardKpi[] }) {
                     <div className={styles.financeHeading}>
                       <Icon aria-hidden="true" />
                       <div>
-                        <span>Official finance</span>
+                        <span>Estimated settlement</span>
                         <h3>{kpi.label}</h3>
                       </div>
                     </div>

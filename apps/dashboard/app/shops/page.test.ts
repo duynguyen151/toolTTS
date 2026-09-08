@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -56,6 +57,8 @@ vi.mock("../../lib/operations-console-read", () => ({
 import { GlobalTaskProvider } from "../../components/operations/global-task-context";
 import ShopsPage from "./page";
 
+const shopsCss = readFileSync(new URL("./shops.module.css", import.meta.url), "utf8");
+
 describe("ShopsPage (/shops)", () => {
   it("renders the shops list route with shop links and actions", async () => {
     const pageElement = await ShopsPage({
@@ -68,7 +71,29 @@ describe("ShopsPage (/shops)", () => {
     expect(html).toContain("Shop Alpha");
     expect(html).toContain("#118");
     expect(html).toContain('href="/shops/118"');
-    expect(html).toContain("Sync COTIK (Chính)");
-    expect(html).toContain("Sync SC (Fallback)");
+    expect(html).toContain("Sync COTIK");
+    expect(html).toContain("COTIK ID: cotik-118");
+    expect(html).toContain("Chi tiết →");
+    expect(html).toContain('aria-label="Làm mới danh sách cửa hàng từ 5 tài khoản COTIK"');
+  });
+
+  it("keeps the console chrome fixed while only the profile viewport scrolls", async () => {
+    const pageElement = await ShopsPage({
+      searchParams: Promise.resolve({}),
+    });
+
+    const html = renderToStaticMarkup(
+      createElement(GlobalTaskProvider, null, pageElement),
+    );
+
+    expect(html).toContain('data-layout="fixed-console"');
+    expect(html).toContain('data-fixed-region="page-header"');
+    expect(html).toContain('data-fixed-region="filters"');
+    expect(html).toContain('data-scroll-region="profiles"');
+    expect(html).toContain('data-fixed-region="pagination"');
+    expect(html).not.toContain("Hệ thống đồng bộ đầy đủ toàn bộ hồ sơ trình duyệt AdsPower");
+    expect(shopsCss).toMatch(/\.shopsContainer\s*\{[\s\S]*height:\s*100%[\s\S]*overflow:\s*hidden/);
+    expect(shopsCss).toMatch(/\.tableResponsiveWrap\s*\{[\s\S]*overflow:\s*auto/);
+    expect(shopsCss).toMatch(/\.paginationBar\s*\{[\s\S]*flex:\s*0\s+0\s+auto/);
   });
 });

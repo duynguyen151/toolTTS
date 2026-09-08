@@ -6,7 +6,9 @@ const databaseMocks = vi.hoisted(() => ({
   getFinanceSummary: vi.fn(),
   getFullPersistedRiskOrderFacts: vi.fn(),
   getLatestKpiSnapshot: vi.fn(),
+  listAdsPowerProfiles: vi.fn(),
   listDecisionHistory: vi.fn(),
+  listEnabledShopProviderBindings: vi.fn(),
   listShops: vi.fn(),
   listSyncRuns: vi.fn(),
 }));
@@ -23,7 +25,9 @@ function configureDatabaseRead() {
   databaseMocks.getFinanceSummary.mockResolvedValue({ latestSnapshot: null });
   databaseMocks.getFullPersistedRiskOrderFacts.mockResolvedValue([]);
   databaseMocks.getLatestKpiSnapshot.mockResolvedValue(null);
+  databaseMocks.listAdsPowerProfiles.mockResolvedValue([]);
   databaseMocks.listDecisionHistory.mockResolvedValue({ items: [], nextCursor: null });
+  databaseMocks.listEnabledShopProviderBindings.mockResolvedValue([]);
   databaseMocks.listSyncRuns.mockResolvedValue([]);
 }
 
@@ -37,6 +41,63 @@ afterEach(() => {
 });
 
 describe("loadDashboardPresentation", () => {
+  it("builds the boss portfolio from currency buckets and canonical rate counts", async () => {
+    process.env.DATABASE_URL = "postgres://dashboard-test";
+    configureDatabaseRead();
+    databaseMocks.listShops.mockResolvedValue([
+      {
+        id: "shop-a",
+        profileNo: "SHOP-A",
+        displayName: "Shop A",
+        currency: "USD",
+        dataOrigin: "LIVE",
+        enabled: true,
+        syncState: "ACTIVE",
+        pauseReason: null,
+        lastOrdersSyncedAt: null,
+        lastFinanceSyncedAt: null,
+        verificationStatus: "VERIFIED",
+      },
+      {
+        id: "shop-b",
+        profileNo: "SHOP-B",
+        displayName: "Shop B",
+        currency: "VND",
+        dataOrigin: "LIVE",
+        enabled: true,
+        syncState: "ACTIVE",
+        pauseReason: null,
+        lastOrdersSyncedAt: null,
+        lastFinanceSyncedAt: null,
+        verificationStatus: "VERIFIED",
+      },
+    ]);
+    databaseMocks.getFullPersistedRiskOrderFacts.mockImplementation(async (_db: unknown, shopId: string) => shopId === "shop-a"
+      ? [
+          { canonicalStatus: "DELIVERED", currency: "USD", orderCount: 1, totalValue: "10.0000" },
+          { canonicalStatus: "AWAITING_SHIPMENT", currency: "USD", orderCount: 1, totalValue: "10.0000" },
+        ]
+      : [{ canonicalStatus: "DELIVERED", currency: "VND", orderCount: 8, totalValue: "80.0000" }]);
+    databaseMocks.getFinanceSummary.mockImplementation(async (_db: unknown, shopId: string) => ({
+      latestSnapshot: shopId === "shop-a"
+        ? { officialOnHoldAmount: "100.0000", currency: "USD", capturedAt: new Date("2026-08-16T00:00:00.000Z") }
+        : { officialOnHoldAmount: "200000.0000", currency: "VND", capturedAt: new Date("2026-08-16T00:00:00.000Z") },
+    }));
+
+    const presentation = await loadDashboardPresentation();
+
+    expect(presentation.portfolio).toMatchObject({
+      activeShops: 2,
+      totalShops: 2,
+      totalPortfolioOrders: 10,
+      portfolioDeliveryRate: { numerator: 9, denominator: 10, formatted: "90.0%" },
+    });
+    expect(presentation.portfolio?.officialOnHoldByCurrency).toEqual([
+      expect.objectContaining({ currency: "USD", totalAmount: "100.0000", shopCount: 1 }),
+      expect.objectContaining({ currency: "VND", totalAmount: "200000.0000", shopCount: 1 }),
+    ]);
+  });
+
   it("does not replace unavailable live data with sanitized demo data", async () => {
     delete process.env.DATABASE_URL;
 

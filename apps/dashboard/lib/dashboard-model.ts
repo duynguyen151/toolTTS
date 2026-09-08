@@ -323,6 +323,7 @@ export function buildDashboardPresentation(source: DashboardSource): DashboardPr
       canceled: formatCount(source.selected.orders.canceled),
     },
     decisionTrace: buildDecisionTrace(source),
+    ...(source.portfolio === undefined ? {} : { portfolio: source.portfolio }),
     decisionCenter: source.selected.decisionCenter ?? unavailableDecisionCenter(),
   };
 }

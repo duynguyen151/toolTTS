@@ -1,0 +1,358 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0;
+}
+
+.header {
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(7, 11, 20, 0.45);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  backdrop-filter: blur(10px) saturate(120%);
+  box-shadow: none;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.header p {
+  margin: 4px 0 0;
+  font-size: 0.875rem;
+  font-weight: 400;
+  color: #cbd5e1;
+}
+
+.settingsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.card {
+  contain: layout paint;
+  padding: var(--space-5);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(7, 11, 20, 0.45);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  backdrop-filter: blur(10px) saturate(120%);
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.cardDesc {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: #cbd5e1;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.fieldset {
+  margin: 0;
+  padding: 0;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field label,
+.fieldLabel {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  color: #cbd5e1;
+}
+
+.input,
+.select,
+.textarea {
+  font-family: monospace;
+  font-size: 0.875rem;
+  background: rgba(10, 15, 26, 0.50);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: var(--space-2) var(--space-3);
+  min-height: 100px;
+  background: rgba(14, 20, 32, 0.90);
+  color: #f1f5f9;
+  line-height: 1.4;
+}
+
+.checkboxLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #f8fafc;
+  cursor: pointer;
+}
+
+.submitBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 40px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-sm);
+  border: none;
+  background: var(--color-primary);
+  color: white;
+  font-weight: 600;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  box-shadow: var(--shadow-action);
+  transition: background var(--motion-fast) var(--ease-standard);
+}
+
+.submitBtn:hover {
+  background: var(--color-primary-hover);
+}
+
+.secondaryBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface);
+  color: var(--color-ink-soft);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.secondaryBtn:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.listItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: rgba(14, 20, 32, 0.70);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  color: #f8fafc;
+  font-size: 0.8125rem;
+}
+
+.detailsList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+  padding: var(--space-3);
+  background: rgba(14, 20, 32, 0.70);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.detailsList dt {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #cbd5e1;
+}
+
+.detailsList dd {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.btnGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+/* ── Left Art Showcase & Page Layout for Settings ── */
+.settingsPageLayout {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 24px;
+  align-items: start;
+  width: 100%;
+}
+
+@media (max-width: 1100px) {
+  .settingsPageLayout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.leftArtShowcase {
+  position: sticky;
+  top: 96px;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
+  background: rgba(14, 20, 32, 0.7);
+  display: flex;
+  flex-direction: column;
+}
+
+.artImageWrap {
+  position: relative;
+  width: 100%;
+  height: 220px;
+  overflow: hidden;
+}
+
+.artImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.leftArtShowcase:hover .artImage {
+  transform: scale(1.04);
+}
+
+.artOverlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(7, 10, 18, 0.1) 0%, rgba(7, 10, 18, 0.85) 100%);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 16px 18px;
+}
+
+.artEyebrow {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #ff8e88;
+  margin-bottom: 4px;
+}
+
+.artTitle {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.artContent {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.artDesc {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: #94a3b8;
+}
+
+/* ============================================================= Light Theme: Sương mai Kyoto Overrides */
+:global([data-theme="light"]) .header,
+:global(html.light) .header {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-card);
+}
+
+:global([data-theme="light"]) .header h1,
+:global(html.light) .header h1 {
+  color: var(--color-ink);
+}
+
+:global([data-theme="light"]) .header p,
+:global(html.light) .header p {
+  color: var(--color-ink-muted);
+}
+
+:global([data-theme="light"]) .card,
+:global(html.light) .card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-card);
+}
+
+:global([data-theme="light"]) .cardTitle,
+:global(html.light) .cardTitle {
+  color: var(--color-ink);
+}
+
+:global([data-theme="light"]) .cardDesc,
+:global(html.light) .cardDesc {
+  color: var(--color-ink-muted);
+}
+
+:global([data-theme="light"]) .field label,
+:global([data-theme="light"]) .fieldLabel,
+:global(html.light) .field label,
+:global(html.light) .fieldLabel {
+  color: var(--color-ink-soft);
+}
+
+:global([data-theme="light"]) .input,
+:global([data-theme="light"]) .select,
+:global([data-theme="light"]) .textarea,
+:global(html.light) .input,
+:global(html.light) .select,
+:global(html.light) .textarea {
+  background: rgba(255, 255, 255, 0.82);
+  border-color: var(--color-border);
+  color: var(--color-ink);
+}

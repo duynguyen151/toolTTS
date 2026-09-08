@@ -1,6 +1,7 @@
 import { DashboardOverview } from "../../components/dashboard/dashboard-overview";
 import { OperationsProvider } from "../../components/operations/operations-provider";
 import { loadDashboardPresentation } from "../../lib/dashboard-read";
+import { loadCotikPortfolioMetrics } from "../../lib/cotik-accounts";
 import { getDashboardOperations } from "../../lib/server/operations/runtime";
 import {
   loadProfileOperationsPresentation,
@@ -23,6 +24,8 @@ export default async function DashboardPage({
     presentation,
     () => getDashboardOperations().listProfiles(presentation.selectedShop.profileNo),
   );
+  const cotikMetrics = await loadCotikPortfolioMetrics();
+
   return (
     <OperationsProvider
       key={requestedProfileNo ?? presentation.selectedShop.profileNo}
@@ -38,6 +41,7 @@ export default async function DashboardPage({
     >
       <DashboardOverview
         presentation={presentation}
+        cotikMetrics={cotikMetrics}
         {...(requestedProfileNo === undefined ? {} : { operatorProfileNo: requestedProfileNo })}
       />
     </OperationsProvider>

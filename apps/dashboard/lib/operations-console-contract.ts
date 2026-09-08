@@ -60,6 +60,15 @@ export interface ConsoleShopSummary {
     readonly cotikShopId: string;
     readonly lastOrdersSyncedAt?: string | null | undefined;
     readonly lastFinanceSyncedAt?: string | null | undefined;
+    readonly sumEstSettlementAmount?: number | null | undefined;
+    readonly estimatedSettlement?: string | null | undefined;
+    readonly onHoldBuckets?: {
+      readonly totalOnHold?: number;
+      readonly totalWaitingDelivered?: number;
+      readonly totalAwaitSettlement?: number;
+      readonly totalAwaitRefundReturn?: number;
+      readonly reserve?: number;
+    } | null | undefined;
   } | null | undefined;
   readonly compositeHealth?: "HEALTHY" | "AT_RISK" | "DATA_BLOCKED" | undefined;
 }
@@ -100,6 +109,17 @@ export interface ConsoleShopDetail {
       readonly onHoldAmount: string | null;
       readonly currency: string;
       readonly capturedAt: string | null;
+      readonly cotikOnHold?: {
+        readonly sumEstSettlementAmount: number | null;
+        readonly estimatedSettlement: string | null;
+        readonly onHoldBuckets?: {
+          readonly totalOnHold?: number;
+          readonly totalWaitingDelivered?: number;
+          readonly totalAwaitSettlement?: number;
+          readonly totalAwaitRefundReturn?: number;
+          readonly reserve?: number;
+        } | null;
+      } | null;
     };
     readonly kpis: ReadonlyArray<{
       readonly id: string;

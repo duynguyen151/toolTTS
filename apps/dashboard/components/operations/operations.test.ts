@@ -128,6 +128,7 @@ describe("dashboard operations controls", () => {
   it("allows opening an AdsPower profile but prevents updates for an unlinked profile", () => {
     const html = renderOperations();
 
+    expect(html).toMatch(/<button(?![^>]*disabled)[^>]*>.*Retry AdsPower/s);
     expect(html).toMatch(/<button(?![^>]*disabled)[^>]*>.*Open profile/s);
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>.*Update data/s);
     expect(html).toMatch(/<button(?![^>]*disabled)[^>]*>.*Sync selected/s);
@@ -216,6 +217,7 @@ describe("dashboard operations controls", () => {
 
     expect(html).toContain("Live operations are disabled for sanitized demo data.");
     expect(html).toContain("No profiles available");
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>.*Retry AdsPower/s);
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>.*Open profile/s);
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>.*Update data/s);
     expect(html).not.toContain("DEMO-001");

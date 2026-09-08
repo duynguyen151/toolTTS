@@ -13,7 +13,6 @@ import {
   DocumentMagnifyingGlassIcon,
   ExclamationTriangleIcon,
   PencilSquareIcon,
-  PlayIcon,
   ShieldCheckIcon,
   Squares2X2Icon,
   TagIcon,
@@ -69,7 +68,7 @@ interface Props {
 export function ShopDetailClient({ initialDetail, initialTab }: Props) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<ConsoleTabKey>(initialTab);
-  const { startSync, startVerify, startOpen, isProfileBusy } = useGlobalTasks();
+  const { isProfileBusy } = useGlobalTasks();
   const isBusy = isProfileBusy(initialDetail.shop.profileNo);
   const [actionFeedback, setActionFeedback] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
@@ -91,35 +90,6 @@ export function ShopDetailClient({ initialDetail, initialTab }: Props) {
     window.history.replaceState(null, "", `/shops/${shop.profileNo}?tab=${tab}`);
   };
 
-  const handleOpenProfile = async () => {
-    setActionFeedback(null);
-    const ok = await startOpen(shop.profileNo, shop.displayName);
-    if (ok) {
-      setActionFeedback({ msg: `Đã mở profile #${shop.profileNo} thành công`, type: "success" });
-    } else {
-      setActionFeedback({ msg: "Không thể mở profile", type: "error" });
-    }
-  };
-
-  const handleVerifyProfile = async () => {
-    setActionFeedback(null);
-    const isReady = await startVerify(shop.profileNo, shop.displayName);
-    if (isReady) {
-      setActionFeedback({ msg: `Đã xác thực profile: Sẵn sàng (READY)`, type: "success" });
-    } else {
-      setActionFeedback({ msg: "Xác thực cần thao tác hoặc chưa hoàn tất", type: "error" });
-    }
-  };
-
-  const handleSyncData = async () => {
-    setActionFeedback(null);
-    const ok = await startSync(shop.profileNo, shop.displayName);
-    if (ok) {
-      setActionFeedback({ msg: `Đã kích hoạt đồng bộ dữ liệu`, type: "success" });
-    } else {
-      setActionFeedback({ msg: "Không thể đồng bộ", type: "error" });
-    }
-  };
 
   const handleIngestCotik = async () => {
     setActionFeedback(null);
@@ -131,10 +101,21 @@ export function ShopDetailClient({ initialDetail, initialTab }: Props) {
       });
       const data = await res.json();
       if (data.ok) {
-        setActionFeedback({ msg: `Đã nạp dữ liệu COTIK API mới nhất thành công`, type: "success" });
+        const ordersCount = data.cotikOrders?.rowsWritten ?? 0;
+        const financeCount = data.cotikFinance?.rowsWritten ?? 0;
+        setActionFeedback({
+          msg: `Đã nạp COTIK thành công: ${ordersCount} đơn hàng, ${financeCount} bản ghi tài chính (${data.cotikOrders?.mode || "SYNC"}).`,
+          type: "success",
+        });
         router.refresh();
       } else {
-        setActionFeedback({ msg: `Lỗi nạp COTIK: ${data.error?.message ?? "Thất bại"}`, type: "error" });
+        const skipReason = (data.cotikOrders as any)?.skipReason || (data.cotikFinance as any)?.skipReason;
+        const rawErr = data.message || skipReason || data.error?.message || data.cotikOrders?.error || data.cotikFinance?.error || "Thất bại";
+        let userMsg = typeof rawErr === "string" ? rawErr : JSON.stringify(rawErr);
+        if (userMsg.includes("COTIK_BINDING_INACTIVE")) {
+          userMsg = "Shop chưa liên kết COTIK. Vui lòng vào danh sách Shop bấm 'Làm mới danh sách' để cập nhật liên kết.";
+        }
+        setActionFeedback({ msg: `Lỗi nạp COTIK: ${userMsg}`, type: "error" });
       }
     } catch {
       setActionFeedback({ msg: "Lỗi kết nối khi nạp dữ liệu COTIK", type: "error" });
@@ -251,47 +232,8 @@ export function ShopDetailClient({ initialDetail, initialTab }: Props) {
             title="Nạp dữ liệu từ COTIK API (Nguồn chính)"
           >
             <ArrowDownTrayIcon className={styles.btnIcon} aria-hidden="true" />
-            <span>Sync COTIK (Chính)</span>
+            <span>Sync COTIK</span>
           </button>
-          <button
-            type="button"
-            onClick={handleOpenProfile}
-            disabled={isBusy}
-            className={styles.secondaryBtn}
-            title="Mở AdsPower Browser khi cần kiểm tra trực tiếp"
-          >
-            <PlayIcon className={styles.btnIcon} aria-hidden="true" />
-            <span>{isBusy ? "Đang xử lý..." : "Mở AdsPower"}</span>
-          </button>
-          <button
-            type="button"
-            onClick={handleVerifyProfile}
-            disabled={isBusy}
-            className={styles.secondaryBtn}
-            title="Xác thực danh tính Seller Center"
-          >
-            <ShieldCheckIcon className={styles.btnIcon} aria-hidden="true" />
-            <span>{isBusy ? "Đang xử lý..." : "Xác thực danh tính"}</span>
-          </button>
-          {(() => {
-            const isReady = shop.verificationState === "READY";
-            return (
-              <button
-                type="button"
-                onClick={handleSyncData}
-                disabled={!isReady || isBusy}
-                className={styles.secondaryBtn}
-                title={
-                  !isReady
-                    ? "Cần xác thực danh tính TikTok Shop thành công (READY) trước khi đồng bộ"
-                    : "Đồng bộ đơn hàng & tài chính qua Seller Center (Fallback khi mở AdsPower)"
-                }
-              >
-                <ArrowPathIcon className={styles.btnIcon} aria-hidden="true" />
-                <span>{isBusy ? "Đang sync..." : "Sync SC (Fallback)"}</span>
-              </button>
-            );
-          })()}
           <button
             type="button"
             onClick={() => {
@@ -610,10 +552,10 @@ export function ShopDetailClient({ initialDetail, initialTab }: Props) {
               <h2 id="finance-heading" className={styles.cardTitle}>Tài Chính & On Hold</h2>
               <div className={styles.metricsList}>
                 <div className={styles.metricRow}>
-                  <span>Số tiền On Hold chính thức:</span>
+                  <span>Tổng On Hold Shop (sum_est_settlement_amount):</span>
                   <strong className={styles.highlightVal}>
                     {(() => {
-                      const raw = overview.finance.onHoldAmount;
+                      const raw = overview.finance.cotikOnHold?.sumEstSettlementAmount ?? overview.finance.onHoldAmount;
                       if (raw === null || raw === "Unavailable") return "Chưa khả dụng";
                       const num = Number(raw);
                       if (!Number.isFinite(num)) return "Chưa khả dụng";
@@ -621,6 +563,12 @@ export function ShopDetailClient({ initialDetail, initialTab }: Props) {
                     })()}
                   </strong>
                 </div>
+                {overview.finance.cotikOnHold?.estimatedSettlement && (
+                  <div className={styles.metricRow}>
+                    <span>Chu kỳ thanh toán ước tính (Estimated Settlement):</span>
+                    <strong>{overview.finance.cotikOnHold.estimatedSettlement}</strong>
+                  </div>
+                )}
                 <div className={styles.metricRow}>
                   <span>Tiền tệ vận hành:</span>
                   <strong>{overview.finance.currency}</strong>
@@ -630,6 +578,50 @@ export function ShopDetailClient({ initialDetail, initialTab }: Props) {
                   <small>{overview.finance.capturedAt ? new Date(overview.finance.capturedAt).toLocaleString("vi-VN") : "Chưa có"}</small>
                 </div>
               </div>
+
+              {/* Chi tiết phân rã On Hold từ /api/analytic/on-hold */}
+              {overview.finance.cotikOnHold?.onHoldBuckets && (
+                <div className={styles.onHoldBreakdownSection}>
+                  <h3 className={styles.onHoldBreakdownTitle}>
+                    Chi Tiết Phân Rã Nguyên Nhân On Hold (/api/analytic/on-hold)
+                  </h3>
+                  <div className={styles.onHoldBucketsGrid}>
+                    <div className={styles.bucketCard}>
+                      <span className={styles.bucketLabel}>Chờ tất toán (Await Settlement)</span>
+                      <strong className={styles.bucketVal}>
+                        ${(Number(overview.finance.cotikOnHold.onHoldBuckets.totalAwaitSettlement) || 0).toLocaleString("vi-VN", { minimumFractionDigits: 2 })}
+                      </strong>
+                    </div>
+                    <div className={styles.bucketCard}>
+                      <span className={styles.bucketLabel}>Chờ hoàn tiền (Refund/Return)</span>
+                      <strong className={styles.bucketVal}>
+                        ${(Number(overview.finance.cotikOnHold.onHoldBuckets.totalAwaitRefundReturn) || 0).toLocaleString("vi-VN", { minimumFractionDigits: 2 })}
+                      </strong>
+                    </div>
+                    <div className={styles.bucketCard}>
+                      <span className={styles.bucketLabel}>Đang chờ giao (Waiting Delivered)</span>
+                      <strong className={styles.bucketVal}>
+                        ${(Number(overview.finance.cotikOnHold.onHoldBuckets.totalWaitingDelivered) || 0).toLocaleString("vi-VN", { minimumFractionDigits: 2 })}
+                      </strong>
+                    </div>
+                    <div className={styles.bucketCard}>
+                      <span className={styles.bucketLabel}>On Hold khác (Total On Hold)</span>
+                      <strong className={styles.bucketVal}>
+                        ${(Number(overview.finance.cotikOnHold.onHoldBuckets.totalOnHold) || 0).toLocaleString("vi-VN", { minimumFractionDigits: 2 })}
+                      </strong>
+                    </div>
+                    <div className={styles.bucketCard}>
+                      <span className={styles.bucketLabel}>Tiền ký quỹ (Reserve)</span>
+                      <strong className={styles.bucketVal}>
+                        ${(Number(overview.finance.cotikOnHold.onHoldBuckets.reserve) || 0).toLocaleString("vi-VN", { minimumFractionDigits: 2 })}
+                      </strong>
+                    </div>
+                  </div>
+                  <p className={styles.onHoldNotice}>
+                    * <strong>Nguồn dữ liệu:</strong> Tổng On Hold của shop được xác định chuẩn xác từ <code>/api/analytic/shop → sum_est_settlement_amount</code> (khớp với tổng <code>est_amount</code> của các đơn hàng đang giữ tiền). Endpoint <code>/api/analytic/on-hold</code> phân rã các nhóm nguyên nhân cụ thể đã ghi nhận.
+                  </p>
+                </div>
+              )}
             </section>
           </div>
         )}

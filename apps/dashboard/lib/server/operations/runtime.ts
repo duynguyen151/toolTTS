@@ -85,7 +85,9 @@ export function createDashboardOperationsRuntime(
   }
 
   const adapters: DashboardOperationsAdapters = {
-    listAdsPowerProfiles: () => adsPower.listProfiles(),
+    listAdsPowerProfiles: (forceRefresh) => adsPower.listProfiles(
+      forceRefresh === true ? { forceRefresh: true } : {},
+    ),
     listShops: () => withDatabase(databaseUrl, async ({ db }) => (
       (await listShops(db)).map((shop) => ({
         id: shop.id,

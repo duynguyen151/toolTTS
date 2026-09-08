@@ -1,15 +1,21 @@
 .dashboard {
   display: grid;
-  gap: 14px;
+  gap: 5px;
   min-width: 0;
 }
-
 .pageHeader {
   display: flex;
-  min-height: 62px;
-  align-items: end;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.headerTop {
+  display: flex;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-6);
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
 }
 
 .pageIntro,
@@ -23,10 +29,10 @@
 .eyebrowLine {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  margin-bottom: 2px;
+  gap: 6px;
+  margin-bottom: 0px;
   color: var(--color-primary);
-  font-size: 0.6875rem;
+  font-size: 0.58rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -34,17 +40,87 @@
 
 .pageIntro h1 {
   margin: 0;
-  font-size: clamp(1.4rem, 2vw, 1.8rem);
-  font-weight: 650;
-  letter-spacing: -0.045em;
+  font-size: clamp(1.05rem, 1.2vw, 1.2rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
   line-height: 1.15;
+  color: #ffffff;
 }
 
 .pageIntro > p {
-  margin: 5px 0 0;
-  color: var(--color-ink-muted);
+  margin: 1px 0 0;
+  color: #cbd5e1;
+  font-size: 0.68rem;
+  line-height: 1.3;
+}
+
+.accountsSection {
+  margin-bottom: 4px;
+}
+
+.accountsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 3px;
+}
+
+.accountsTitle {
   font-size: 0.75rem;
-  line-height: 1.45;
+  font-weight: 600;
+  color: var(--color-ink);
+  margin: 0;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+}
+
+.accountsLink {
+  font-size: 0.68rem;
+  color: var(--color-primary);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.accountsGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 860px) {
+  .accountsGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 540px) {
+  .accountsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.accountCard {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: var(--color-surface);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border);
+  color: inherit;
+  text-decoration: none;
+  min-width: 0;
+  transition: all 0.18s ease;
+}
+
+.accountCard:hover {
+  border-color: var(--color-primary);
+  transform: translateY(-1px);
+  background: rgba(224, 35, 28, 0.08);
 }
 
 .headerActions {
@@ -56,7 +132,7 @@
 
 .generatedAt {
   margin: 0;
-  color: var(--color-ink-muted);
+  color: #94a3b8;
   font-size: 0.75rem;
   line-height: 1.4;
   white-space: nowrap;
@@ -77,26 +153,36 @@
 
 .primaryGrid {
   display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(350px, 0.9fr);
-  gap: var(--space-4);
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 0.9fr);
+  gap: var(--space-3);
   min-width: 0;
 }
 
 .secondaryGrid {
   display: grid;
-  grid-template-columns: minmax(220px, 0.78fr) minmax(280px, 1fr) minmax(320px, 1.16fr);
-  gap: var(--space-4);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
   min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .primaryGrid,
+  .secondaryGrid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .kpiSection,
 .orderPanel,
-.decisionPanel {
+.decisionPanel,
+.operationalPanel {
   min-width: 0;
-  border: 1px solid var(--color-border);
+  border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: var(--radius-md);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-card);
+  background: rgba(7, 11, 20, 0.45);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  backdrop-filter: blur(10px) saturate(120%);
+  box-shadow: none;
 }
 
 .kpiSection,
@@ -107,18 +193,13 @@
   padding: 15px 16px;
 }
 
-.operationalPanel {
-  min-width: 0;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-  box-shadow: var(--shadow-card);
-}
-
 .qualityPanel {
   min-width: 0;
   border-top: 3px solid var(--color-pastel-amber-ink);
-  background: transparent;
+  background: rgba(7, 11, 20, 0.45);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  backdrop-filter: blur(10px) saturate(120%);
+  border-radius: var(--radius-md);
 }
 
 .sectionHeading {
@@ -132,9 +213,9 @@
 
 .sectionEyebrow {
   margin: 0 0 2px;
-  color: var(--color-ink-muted);
+  color: #cbd5e1;
   font-size: 0.6875rem;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
@@ -142,12 +223,13 @@
 .sectionHeading h2 {
   margin: 0;
   font-size: 0.9rem;
-  font-weight: 650;
+  font-weight: 700;
   letter-spacing: -0.025em;
+  color: #ffffff;
 }
 
 .sectionHeading > span {
-  color: var(--color-ink-muted);
+  color: #94a3b8;
   font-size: 0.75rem;
   font-weight: 500;
   white-space: nowrap;
@@ -167,7 +249,7 @@
   overflow: hidden;
   padding: 0;
   margin: 0;
-  border: 1px solid var(--color-border);
+  border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: var(--radius-sm);
   list-style: none;
 }
@@ -176,9 +258,9 @@
   --kpi-ink: var(--color-ink-soft);
   --kpi-soft: var(--color-surface-strong);
   min-width: 0;
-  border-left: 1px solid var(--color-border);
+  border-left: 1px solid rgba(255, 255, 255, 0.10);
   border-top: 3px solid var(--kpi-ink);
-  background: var(--color-surface);
+  background: rgba(14, 20, 32, 0.78);
 }
 
 .kpiItem:first-child {
@@ -187,7 +269,7 @@
 
 .kpiItem[data-kpi-id="on-hold"] {
   grid-column: span 2;
-  background: color-mix(in srgb, var(--color-pastel-rose) 24%, var(--color-surface));
+  background: rgba(36, 18, 28, 0.85);
 }
 
 .kpiItem[data-tone="rose"] {
@@ -226,7 +308,7 @@
 
 .kpiItem h3 {
   margin: 0;
-  color: var(--color-ink);
+  color: #cbd5e1;
   font-size: 0.75rem;
   font-weight: 600;
   line-height: 1.35;
@@ -280,6 +362,7 @@
   font-weight: 700;
   letter-spacing: -0.045em;
   line-height: 1.08;
+  color: #ffffff;
 }
 
 .financeValue {
@@ -863,4 +946,89 @@
     grid-column: 2;
     justify-items: start;
   }
+}
+
+/* ============================================================= Light Theme: Sương mai Kyoto Overrides */
+:global([data-theme="light"]) .pageIntro h1,
+:global(html.light) .pageIntro h1 {
+  color: var(--color-ink, #22252a);
+}
+
+:global([data-theme="light"]) .pageIntro > p,
+:global(html.light) .pageIntro > p {
+  color: var(--color-ink-soft, #424750);
+}
+
+:global([data-theme="light"]) .generatedAt,
+:global(html.light) .generatedAt {
+  color: var(--color-ink-muted, #737882);
+}
+
+:global([data-theme="light"]) .kpiSection,
+:global([data-theme="light"]) .orderPanel,
+:global([data-theme="light"]) .decisionPanel,
+:global([data-theme="light"]) .operationalPanel,
+:global([data-theme="light"]) .qualityPanel,
+:global(html.light) .kpiSection,
+:global(html.light) .orderPanel,
+:global(html.light) .decisionPanel,
+:global(html.light) .operationalPanel,
+:global(html.light) .qualityPanel {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(215, 205, 195, 0.8);
+  box-shadow: 0 4px 20px rgba(45, 30, 20, 0.04);
+}
+
+:global([data-theme="light"]) .sectionHeading h2,
+:global(html.light) .sectionHeading h2 {
+  color: var(--color-ink, #22252a);
+}
+
+:global([data-theme="light"]) .sectionEyebrow,
+:global(html.light) .sectionEyebrow {
+  color: var(--color-ink-muted, #737882);
+}
+
+:global([data-theme="light"]) .sectionHeading > span,
+:global(html.light) .sectionHeading > span {
+  color: var(--color-ink-muted, #737882);
+}
+
+:global([data-theme="light"]) .kpiGrid,
+:global(html.light) .kpiGrid {
+  border: 1px solid rgba(215, 205, 195, 0.75);
+}
+
+:global([data-theme="light"]) .kpiItem,
+:global(html.light) .kpiItem {
+  background: rgba(255, 255, 255, 0.85);
+  border-left: 1px solid rgba(215, 205, 195, 0.75);
+}
+
+:global([data-theme="light"]) .kpiItem:first-child,
+:global(html.light) .kpiItem:first-child {
+  border-left: 0;
+}
+
+:global([data-theme="light"]) .kpiItem[data-kpi-id="on-hold"],
+:global(html.light) .kpiItem[data-kpi-id="on-hold"] {
+  background: rgba(255, 243, 240, 0.9);
+}
+
+:global([data-theme="light"]) .kpiItem h3,
+:global(html.light) .kpiItem h3 {
+  color: var(--color-ink-muted, #737882);
+}
+
+:global([data-theme="light"]) .financeValue,
+:global([data-theme="light"]) .numberValue,
+:global([data-theme="light"]) .rateValue,
+:global([data-theme="light"]) .salesValue,
+:global([data-theme="light"]) .attentionValue p,
+:global(html.light) .financeValue,
+:global(html.light) .numberValue,
+:global(html.light) .rateValue,
+:global(html.light) .salesValue,
+:global(html.light) .attentionValue p {
+  color: var(--color-ink, #22252a);
 }

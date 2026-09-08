@@ -36,7 +36,7 @@ export interface CotikSyncSummary {
 }
 
 export interface DashboardOperationsAdapters {
-  listAdsPowerProfiles(): Promise<readonly AdsPowerProfileSummary[]>;
+  listAdsPowerProfiles(forceRefresh?: boolean): Promise<readonly AdsPowerProfileSummary[]>;
   listShops(): Promise<readonly DashboardOperationsShop[]>;
   /** Canonical READY/ELIGIBLE profile-and-shop inventory for all sync gates. */
   listEligibleShops(): Promise<readonly DashboardOperationsShop[]>;
@@ -60,7 +60,10 @@ export interface DashboardOperationsAdapters {
 export type UpdateDataEmitter = (event: UpdateDataEvent) => void | Promise<void>;
 
 export interface DashboardOperations {
-  listProfiles(selectedProfileNo?: string): Promise<ProfileOperationsPresentation>;
+  listProfiles(
+    selectedProfileNo?: string,
+    options?: { readonly forceRefresh?: boolean },
+  ): Promise<ProfileOperationsPresentation>;
   openProfile(profileNo: string): Promise<OpenProfileResult>;
   verifyProfile(profileNo: string): Promise<VerifyProfileResult>;
   updateData(profileNo: string, emit: UpdateDataEmitter): Promise<void>;
@@ -246,19 +249,19 @@ export function createDashboardOperations(adapters: DashboardOperationsAdapters)
       syncWaiters.shift()?.();
     }
   };
-  const loadAdsPowerProfiles = async (): Promise<readonly AdsPowerProfileSummary[]> => {
+  const loadAdsPowerProfiles = async (forceRefresh = false): Promise<readonly AdsPowerProfileSummary[]> => {
     const context = syncContext.getStore();
-    if (context?.adsPowerProfiles !== undefined) return context.adsPowerProfiles;
-    const profiles = await adapters.listAdsPowerProfiles();
+    if (!forceRefresh && context?.adsPowerProfiles !== undefined) return context.adsPowerProfiles;
+    const profiles = await adapters.listAdsPowerProfiles(forceRefresh);
     if (context !== undefined) context.adsPowerProfiles = profiles;
     return profiles;
   };
 
   const operations: DashboardOperations = {
-    async listProfiles(selectedProfileNo) {
+    async listProfiles(selectedProfileNo, options) {
       let adsPowerProfiles: readonly AdsPowerProfileSummary[];
       try {
-        adsPowerProfiles = await loadAdsPowerProfiles();
+        adsPowerProfiles = await loadAdsPowerProfiles(options?.forceRefresh === true);
       } catch (cause) {
         return {
           status: "ERROR",

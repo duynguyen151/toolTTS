@@ -1,19 +1,21 @@
 .controls {
-  display: grid;
-  min-width: 0;
-  justify-items: end;
-  gap: 6px;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 8px;
 }
 
 .metaLine {
   display: flex;
   max-width: 100%;
   align-items: center;
-  justify-content: end;
+  justify-content: space-between;
   gap: 12px;
-  color: var(--color-ink-muted);
+  color: #cbd5e1;
   font-size: 0.6875rem;
   line-height: 1.35;
+  width: 100%;
+  padding: 0 2px;
 }
 
 .generatedAt,
@@ -24,11 +26,12 @@
 .operationMessage {
   position: relative;
   min-width: 0;
-  max-width: 260px;
+  max-width: 420px;
   overflow: hidden;
   padding-left: 10px;
-  color: var(--color-ink-soft);
+  color: #ffffff;
   text-overflow: ellipsis;
+  font-weight: 500;
 }
 
 .operationMessage::before {
@@ -73,8 +76,70 @@
   display: flex;
   min-width: 0;
   align-items: center;
-  justify-content: end;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 10px;
+  width: 100%;
+}
+
+.toolbarSegment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(10, 15, 26, 0.80);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  backdrop-filter: blur(10px) saturate(120%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-md, 10px);
+  padding: 4px 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+@media (max-width: 1100px) {
+  .actionRow {
+    gap: 8px;
+  }
+}
+
+@media (max-width: 860px) {
+  .actionRow {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .toolbarSegment {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .toolbarSegment > * {
+    flex: 1 1 auto;
+    min-height: 42px;
+  }
+
+  .profileSelect {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .metaLine {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .toolbarSegment {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .toolbarSegment > * {
+    width: 100%;
+    min-height: 44px;
+  }
 }
 
 .profileSelect {
@@ -90,13 +155,13 @@
   height: 44px;
   appearance: none;
   padding: 0 34px 0 12px;
-  border: 1px solid var(--color-border-strong);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 9px;
   outline: 0;
-  color: var(--color-ink-soft);
-  background: var(--color-surface);
-  font-size: 0.7rem;
-  font-weight: 550;
+  color: #ffffff;
+  background: rgba(14, 20, 32, 0.85);
+  font-size: 0.72rem;
+  font-weight: 600;
   text-overflow: ellipsis;
   transition:
     border-color var(--motion-fast) var(--ease-standard),
@@ -105,8 +170,8 @@
 }
 
 .profileSelect select:hover:not(:disabled) {
-  border-color: #cfd5e3;
-  background: var(--color-surface-subtle);
+  border-color: rgba(224, 35, 28, 0.4);
+  background: rgba(20, 26, 38, 0.8);
 }
 
 .profileSelect select:focus-visible {
@@ -116,12 +181,10 @@
 
 .profileSelect select:disabled {
   color: var(--color-ink-muted);
-  background: var(--color-surface-subtle);
+  background: rgba(14, 18, 28, 0.35);
 }
 
 .profileSelect svg {
-  position: absolute;
-  right: 11px;
   width: 16px;
   height: 16px;
   pointer-events: none;

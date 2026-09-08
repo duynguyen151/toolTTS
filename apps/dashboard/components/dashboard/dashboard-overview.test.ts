@@ -9,6 +9,7 @@ import { DashboardOverview } from "./dashboard-overview";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn() }),
+  usePathname: () => "/dashboard",
 }));
 
 const presentation: DashboardPresentation = {

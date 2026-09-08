@@ -5,8 +5,13 @@ import {
   getFullPersistedRiskOrderFacts,
   getLatestKpiSnapshot,
   listDecisionHistory,
+  listEnabledShopProviderBindings,
+  listAdsPowerProfiles,
   listShops,
   listSyncRuns,
+  type AdsPowerProfileRow,
+  type Database,
+  type FinanceSummary,
   type DecisionReviewRecord,
   type KpiSnapshotRow,
   type RiskOrderFactRow,
@@ -14,9 +19,12 @@ import {
   type SyncRunRow,
 } from "@shop-health/db";
 
+import { calculateAuthoritativeDeliveryRateFromCounts } from "@shop-health/domain";
+
 import type {
   DashboardDecisionCenter,
   DashboardEvidenceMetadata,
+  DashboardPortfolioOverview,
   DashboardPresentation,
   DashboardShopSource,
   DashboardSource,
@@ -454,6 +462,164 @@ function countFacts(facts: readonly RiskOrderFactRow[], statuses?: ReadonlySet<s
   );
 }
 
+function scaledMoney(value: string): bigint | null {
+  const match = /^\d+(?:\.(\d{1,4}))?$/.exec(value.trim());
+  if (match === null) return null;
+  return BigInt(value.split(".")[0]!) * 10_000n + BigInt((match[1] ?? "").padEnd(4, "0"));
+}
+
+function formatScaledMoney(value: bigint): string {
+  return `${value / 10_000n}.${(value % 10_000n).toString().padStart(4, "0")}`;
+}
+
+function formatCurrency(amount: string, currency: string): string {
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount)) return "Unavailable";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(numericAmount);
+}
+
+function ruleAiDisagreement(review: DecisionReviewRecord | null): boolean {
+  if (review?.ai?.status !== "AVAILABLE") return false;
+  const healthyAiRecommendation = review.ai.recommendation === "CONTINUE" || review.ai.recommendation === "SCALE";
+  return review.ai.recommendation !== review.rule.decision
+    && !(review.rule.decision === "CONTINUE" && healthyAiRecommendation);
+}
+
+function isAuthAttention(
+  shop: ShopRow,
+  profile: AdsPowerProfileRow | undefined,
+  cotikBinding?: Awaited<ReturnType<typeof listEnabledShopProviderBindings>>[number] | null,
+): boolean {
+  if (cotikBinding !== undefined) {
+    return cotikBinding === null || !cotikBinding.enabled;
+  }
+  return false;
+}
+
+type PortfolioShopRead = {
+  shop: ShopRow;
+  facts: RiskOrderFactRow[];
+  finance: FinanceSummary;
+  review: DecisionReviewRecord | null;
+  latestRun: SyncRunRow | null;
+  cotikBinding: Awaited<ReturnType<typeof listEnabledShopProviderBindings>>[number] | null;
+};
+
+function buildPortfolioShopView(
+  input: PortfolioShopRead,
+  adsPowerProfile: AdsPowerProfileRow | undefined,
+): DashboardPortfolioOverview["shops"][number] {
+  const { shop, facts, finance, review, latestRun, cotikBinding } = input;
+  const delivery = calculateAuthoritativeDeliveryRateFromCounts(
+    facts.map(({ canonicalStatus, orderCount }) => ({ canonicalStatus, count: orderCount })),
+  );
+  const officialOnHoldAmount = finance.latestSnapshot?.officialOnHoldAmount ?? null;
+  const hasCotik = Boolean(cotikBinding?.enabled);
+  const deliveryPct = delivery.rate !== null
+    ? (delivery.rate <= 1 && delivery.rate > 0 ? delivery.rate * 100 : delivery.rate)
+    : (review?.metrics.deliveryRate != null ? (review.metrics.deliveryRate <= 1 && review.metrics.deliveryRate > 0 ? review.metrics.deliveryRate * 100 : review.metrics.deliveryRate) : null);
+  const isDeliveryLow = deliveryPct !== null && deliveryPct < 70;
+
+  const dataBlocked = !hasCotik || shop.syncState === "DISABLED";
+  const atRisk = review?.rule.decision === "PAUSE"
+    || (review?.ai?.status === "AVAILABLE" && review.ai.recommendation === "PAUSE")
+    || isDeliveryLow
+    || shop.syncState === "PAUSED_LAYOUT"
+    || shop.syncState === "PAUSED_MANUAL";
+
+  return {
+    id: shop.id,
+    profileNo: shop.profileNo,
+    displayName: shop.displayName ?? shop.profileNo,
+    compositeHealth: atRisk ? "AT_RISK" : dataBlocked ? "DATA_BLOCKED" : "HEALTHY",
+    officialOnHoldAmount,
+    currency: finance.latestSnapshot?.currency ?? shop.currency,
+    deliveryRate: { value: delivery.rate },
+    totalOrders: facts.length > 0 ? countFacts(facts) : review?.metrics.totalOrders ?? null,
+    ruleResult: review?.rule.decision ?? null,
+    aiRecommendation: review?.ai?.status === "AVAILABLE" ? review.ai.recommendation : null,
+    baDecision: review?.ba?.decision ?? null,
+    cotikBinding: cotikBinding === null ? null : {
+      enabled: cotikBinding.enabled,
+      cotikShopId: cotikBinding.providerShopId ?? "",
+      lastOrdersSyncedAt: displayTimestamp(cotikBinding.providerUpdatedAt),
+      lastFinanceSyncedAt: displayTimestamp(cotikBinding.providerUpdatedAt),
+    },
+  };
+}
+
+function buildPortfolioOverview(
+  reads: readonly PortfolioShopRead[],
+  adsPowerProfiles: readonly AdsPowerProfileRow[],
+): DashboardPortfolioOverview {
+  const profileMap = new Map(adsPowerProfiles.map((profile) => [profile.profileNo, profile]));
+  const shops = reads.map((read) => buildPortfolioShopView(read, profileMap.get(read.shop.profileNo)));
+  const moneyByCurrency = new Map<string, { amount: bigint; shopCount: number }>();
+  let numerator = 0;
+  let denominator = 0;
+
+  for (const read of reads) {
+    const snapshot = read.finance.latestSnapshot;
+    const amount = snapshot === null || snapshot.officialOnHoldAmount === null || snapshot.officialOnHoldAmount === undefined
+      ? null
+      : scaledMoney(snapshot.officialOnHoldAmount);
+    if (amount !== null && snapshot !== null) {
+      const currency = snapshot.currency;
+      const bucket = moneyByCurrency.get(currency) ?? { amount: 0n, shopCount: 0 };
+      bucket.amount += amount;
+      bucket.shopCount += 1;
+      moneyByCurrency.set(currency, bucket);
+    }
+
+    const delivery = calculateAuthoritativeDeliveryRateFromCounts(
+      read.facts.map(({ canonicalStatus, orderCount }) => ({ canonicalStatus, count: orderCount })),
+    );
+    if (delivery.rate !== null && delivery.deliveredCount !== null && delivery.totalCount !== null) {
+      numerator += delivery.deliveredCount;
+      denominator += delivery.totalCount;
+    }
+  }
+
+  const hasUnknownStatus = reads.some((read) => calculateAuthoritativeDeliveryRateFromCounts(
+    read.facts.map(({ canonicalStatus, orderCount }) => ({ canonicalStatus, count: orderCount })),
+  ).dataIssues.includes("UNKNOWN_STATUS_PRESENT"));
+  const portfolioRate = hasUnknownStatus || denominator === 0 ? null : numerator / denominator;
+  const reviewByShop = reads.filter((read) => read.review !== null).map((read) => read.review!);
+  const needsBaReviewCount = reviewByShop.filter((review) => review.ba === null && decisionQueueReasons(review).length > 0).length;
+
+  return {
+    totalShops: reads.length,
+    activeShops: reads.filter(({ shop }) => shop.enabled && shop.syncState === "ACTIVE").length,
+    officialOnHoldByCurrency: [...moneyByCurrency.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([currency, bucket]) => {
+        const totalAmount = formatScaledMoney(bucket.amount);
+        return { currency, totalAmount, formatted: formatCurrency(totalAmount, currency), shopCount: bucket.shopCount };
+      }),
+    portfolioDeliveryRate: {
+      numerator,
+      denominator,
+      rate: portfolioRate,
+      formatted: portfolioRate === null
+        ? "Chưa đủ dữ liệu"
+        : new Intl.NumberFormat("en-US", { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(portfolioRate),
+    },
+    totalPortfolioOrders: reads.reduce((total, read) => total + (read.facts.length > 0 ? countFacts(read.facts) : read.review?.metrics.totalOrders ?? 0), 0),
+    attention: {
+      needsBaReviewCount,
+      rulePauseCount: reviewByShop.filter((review) => review.rule.decision === "PAUSE").length,
+      disagreementCount: reviewByShop.filter(ruleAiDisagreement).length,
+      authAttentionCount: reads.filter((read) => isAuthAttention(read.shop, profileMap.get(read.shop.profileNo), read.cotikBinding)).length,
+    },
+    shops,
+  };
+}
+
 function decisionStages(review: DecisionReviewRecord | null): Pick<DashboardSource["selected"], "rule" | "ai" | "ba" | "execution"> {
   if (review === null) {
     return {
@@ -576,7 +742,29 @@ async function readLiveSource(databaseUrl: string, requestedProfileNo?: string):
     }
     if (selectedShop === null) return null;
 
-    const [facts, finance, kpi, runs, decisionPage, decisionHistoryPages] = await Promise.all([
+    const [adsPowerProfiles, portfolioReads, facts, finance, kpi, runs, decisionPage, decisionHistoryPages] = await Promise.all([
+      listAdsPowerProfiles(context.db),
+      Promise.all(dashboardShops.map(async (shop): Promise<PortfolioShopRead> => {
+        const [shopFacts, shopFinance, shopRuns, shopDecisionPage, bindings] = await Promise.all([
+          getFullPersistedRiskOrderFacts(context.db, shop.id),
+          getFinanceSummary(context.db, shop.id),
+          listSyncRuns(context.db, shop.id, 1),
+          listDecisionHistory(context.db, {
+            profileNo: shop.profileNo,
+            caseOrigin: "LIVE",
+            limit: 1,
+          }),
+          listEnabledShopProviderBindings(context.db, shop.id),
+        ]);
+        return {
+          shop,
+          facts: shopFacts,
+          finance: shopFinance,
+          latestRun: shopRuns[0] ?? null,
+          review: shopDecisionPage.items[0] ?? null,
+          cotikBinding: bindings.find((binding) => binding.provider === "COTIK") ?? null,
+        };
+      })),
       getFullPersistedRiskOrderFacts(context.db, selectedShop.id),
       getFinanceSummary(context.db, selectedShop.id),
       getLatestKpiSnapshot(context.db, selectedShop.id),
@@ -616,6 +804,7 @@ async function readLiveSource(databaseUrl: string, requestedProfileNo?: string):
     return {
       generatedAt: new Date(),
       shops: dashboardShops.map((shop) => shopSource(shop, shop.id === selectedShop.id ? latestRun : null)),
+      portfolio: buildPortfolioOverview(portfolioReads, adsPowerProfiles),
       selected: {
         shopId: selectedShop.id,
         orders: { total, awaitingShipment, delivered, canceled },

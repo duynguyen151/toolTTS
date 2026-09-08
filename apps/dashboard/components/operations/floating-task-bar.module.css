@@ -1,0 +1,281 @@
+.floatingContainer {
+  position: fixed;
+  inset-block-end: calc(var(--space-5, 20px) + env(safe-area-inset-bottom, 0px));
+  inset-inline-end: var(--space-5, 20px);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2, 8px);
+  max-width: min(420px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.floatingContainer > * {
+  pointer-events: auto;
+}
+
+.pillBar {
+  position: relative;
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  align-items: center;
+  padding: 0;
+  background: var(--color-surface-strong, #1e293b);
+  color: var(--color-ink, #ffffff);
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pillBar:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5), 0 0 14px rgba(224, 35, 28, 0.3);
+  border-color: rgba(224, 35, 28, 0.5);
+  color: #ff5a52;
+}
+
+.pillMenuIcon {
+  width: 22px;
+  height: 22px;
+}
+
+.pillCount {
+  position: absolute;
+  inset-block-start: -5px;
+  inset-inline-end: -5px;
+  display: grid;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  place-items: center;
+  border: 2px solid var(--color-canvas, #edf4f7);
+  border-radius: 9999px;
+  color: #ffffff;
+  background: var(--color-danger, #b84353);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.pillSpinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #38bdf8;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.pillSuccessIcon {
+  color: #4ade80;
+  font-weight: 800;
+}
+
+.pillText {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+
+.pillToggleBtn {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.expandedCard {
+  width: min(380px, calc(100vw - 32px));
+  max-height: min(520px, calc(100svh - 40px));
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e2e8f0);
+  border-radius: var(--radius-lg, 14px);
+  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.2), 0 6px 16px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.expandedHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--color-surface-subtle, #f8fafc);
+  border-bottom: 1px solid var(--color-border, #e2e8f0);
+}
+
+.expandedTitle {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--color-ink, #0f172a);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.expandedActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.actionIconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--color-border, #e2e8f0);
+  background: var(--color-surface, #ffffff);
+  color: var(--color-ink-muted, #64748b);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.actionIconBtn:hover {
+  color: var(--color-ink, #0f172a);
+  background: var(--color-surface-strong, #f1f5f9);
+}
+
+.taskList {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--color-border-subtle, #f1f5f9);
+}
+
+.taskMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 18px;
+}
+
+.dismissTaskButton {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  color: var(--color-ink-muted, #64748b);
+  background: transparent;
+}
+
+.dismissTaskButton:hover {
+  color: var(--color-ink, #0f172a);
+  background: var(--color-surface-strong, #f1f5f9);
+}
+
+.dismissTaskButton svg {
+  width: 16px;
+  height: 16px;
+}
+
+.taskItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 16px;
+  background: var(--color-surface, #ffffff);
+  transition: background 0.15s ease;
+}
+
+.taskHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.taskTitle {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--color-ink, #0f172a);
+}
+
+.taskBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.taskBadge[data-status="RUNNING"] {
+  background: #e0f2fe;
+  color: #0284c7;
+}
+
+.taskBadge[data-status="SUCCESS"] {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.taskBadge[data-status="ERROR"] {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.taskMessage {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--color-ink-muted, #64748b);
+  line-height: 1.4;
+}
+
+.taskTime {
+  font-size: 0.6875rem;
+  color: var(--color-ink-subtle, #94a3b8);
+  margin-top: 2px;
+}
+
+.emptyState {
+  padding: 24px;
+  text-align: center;
+  color: var(--color-ink-muted, #64748b);
+  font-size: 0.8125rem;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 640px) {
+  .floatingContainer {
+    inset-inline-end: 14px;
+  }
+
+  .expandedCard {
+    width: min(380px, calc(100vw - 28px));
+  }
+}

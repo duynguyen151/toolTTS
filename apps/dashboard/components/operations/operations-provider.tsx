@@ -38,9 +38,11 @@ type OperationsContextValue = {
   operationLogs: readonly OperationLogEntry[];
   logOpen: boolean;
   isBusy: boolean;
+  profilesRefreshing: boolean;
   clearOperationLogs(): void;
   toggleLog(): void;
   selectProfile(profileNo: string): void;
+  refreshProfiles(): Promise<void>;
   openProfile(): Promise<void>;
   verifyProfile(): Promise<void>;
   updateData(): Promise<void>;
@@ -123,6 +125,7 @@ export function OperationsProvider({
   );
   const [operationLogs, setOperationLogs] = useState<readonly OperationLogEntry[]>([]);
   const [logOpen, setLogOpen] = useState(false);
+  const [profilesRefreshing, setProfilesRefreshing] = useState(false);
 
   const reportOperation = useCallback((state: UpdateDataState, message: string): void => {
     setOperationState(state);
@@ -140,13 +143,40 @@ export function OperationsProvider({
     () => profiles.find((profile) => profile.profileNo === selectedProfileNo) ?? null,
     [profiles, selectedProfileNo],
   );
-  const isBusy = operationState !== "READY" && !isTerminalUpdateState(operationState);
+  const isBusy = profilesRefreshing || (operationState !== "READY" && !isTerminalUpdateState(operationState));
 
   const selectProfile = useCallback((profileNo: string) => {
     if (!liveOperationsEnabled || !profiles.some((profile) => profile.profileNo === profileNo)) return;
     reportOperation("CONNECTING", `Loading dashboard for profile ${profileNo}`);
     router.push(dashboardProfileHref(profileNo));
   }, [liveOperationsEnabled, profiles, reportOperation, router]);
+
+  const refreshProfiles = useCallback(async () => {
+    if (!liveOperationsEnabled || isBusy) return;
+    setProfilesRefreshing(true);
+    reportOperation("CONNECTING", "Refreshing AdsPower profile inventory.");
+
+    try {
+      const response = await fetch("/api/profiles/retry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const result = await response.json() as ProfileOperationsPresentation;
+
+      if (!response.ok || result.status !== "READY") {
+        reportOperation("ERROR", result.error?.message ?? failedMessage(response.status));
+        return;
+      }
+
+      setProfiles(result.profiles);
+      reportOperation("READY", `AdsPower profile inventory refreshed (${result.profiles.length} profiles).`);
+    } catch {
+      reportOperation("ERROR", "AdsPower could not be reached from the dashboard.");
+    } finally {
+      setProfilesRefreshing(false);
+    }
+  }, [isBusy, liveOperationsEnabled, reportOperation]);
 
   const openProfile = useCallback(async () => {
     if (!liveOperationsEnabled || !profileSelectionAligned || selectedProfileNo === null) return;
@@ -257,9 +287,11 @@ export function OperationsProvider({
     operationLogs,
     logOpen,
     isBusy,
+    profilesRefreshing,
     clearOperationLogs,
     toggleLog,
     selectProfile,
+    refreshProfiles,
     openProfile,
     verifyProfile,
     updateData,
@@ -277,9 +309,11 @@ export function OperationsProvider({
     operationLogs,
     logOpen,
     isBusy,
+    profilesRefreshing,
     clearOperationLogs,
     toggleLog,
     selectProfile,
+    refreshProfiles,
     openProfile,
     verifyProfile,
     updateData,

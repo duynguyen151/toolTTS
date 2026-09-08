@@ -2,7 +2,10 @@
 
 ## Scope
 
-Build and maintain the backend-first TikTok Shop Health collector and deterministic risk CLI. Preserve the V1 boundary: no HTTP API, web UI, Redis, queue, LLM decision-making, or automatic Seller Center actions unless the user explicitly expands scope.
+Build and maintain the backend-first TikTok Shop Health collector and deterministic risk CLI, as well as V1 Dashboard/settings and W21 Cotik multi-account fulfillment foundations. Preserve boundaries:
+- Cotik tracking write is permitted ONLY under STRICT CONTROL via the dual kill switch (`cotikPostEnabled` in `cotik_workflow_settings`).
+- Kill switch defaults to OFF and resets to OFF on every new deployment; automatic enabling of the kill switch in production is strictly forbidden.
+- CONTINUED PROHIBITIONS: No LLM/AI authority over business decisions or automated actions; no Seller Center writes of any kind; no automatic price, stock, promotion, or listing mutations in Seller Center or COTIK; no Holiday Mode automation.
 
 ## Architecture
 
@@ -34,6 +37,7 @@ Keep extraction, normalization, persistence, domain decisions, and presentation 
 - Store timestamps in UTC and keep display-time-zone conversion in presentation code.
 - Never persist cookies, tokens, browser storage, buyer names, contact details, or shipping addresses.
 - Never enable/disable Holiday Mode or perform another Seller Center write without explicit user authorization and an approved, auditable implementation.
+- Cotik tracking write operations are allowed ONLY when: (1) kill switch `cotikPostEnabled` is explicitly true; (2) tracking resolves to a MATCHED carrier rule in `cotik_provider_rules`; (3) intents are fingerprinted and confirmed by readback; (4) max 3 attempts per intent; (5) max 50 orders per batch; (6) kill switch resets to OFF upon every new deployment. AI must never decide or trigger writes; automatic enabling of kill switch is prohibited.
 - Database schema changes require a Drizzle migration and schema validation.
 - Run the narrowest relevant tests during iteration, then typecheck, full tests, and build before claiming completion.
 

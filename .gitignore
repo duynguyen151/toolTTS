@@ -31,4 +31,14 @@ adspower-sessions/
 docs/integrations/cotik/public-api-guide.md
 # Keep any copied local COTIK API guide out of version control as well.
 /public-api-guide.md
+# Local Google OAuth credentials and tokens must never be version-controlled.
+/OauthGoogle/*.json
+/OauthGoogle/**/*.json
 .agents/vendor/
+
+# Local agent, browser, and scratch artifacts.
+/.claude/
+/.playwright-mcp/
+/.superpowers/
+/scratch/
+/*.png

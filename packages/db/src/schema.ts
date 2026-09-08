@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   check,
+  customType,
   foreignKey,
   index,
   integer,
@@ -1451,3 +1452,455 @@ export type BaDecisionRow = typeof baDecisions.$inferSelect;
 export type AiDecisionRow = typeof aiDecisions.$inferSelect;
 export type DecisionExecutionRow = typeof decisionExecutions.$inferSelect;
 export type ShopProviderBindingRow = typeof shopProviderBindings.$inferSelect;
+
+export const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+  toDriver(val: Buffer): Buffer {
+    return val;
+  },
+  fromDriver(val: unknown): Buffer {
+    if (Buffer.isBuffer(val)) {
+      return val;
+    }
+    if (typeof val === "string") {
+      if (val.startsWith("\\x")) {
+        return Buffer.from(val.slice(2), "hex");
+      }
+      return Buffer.from(val, "hex");
+    }
+    return Buffer.from(val as ArrayBuffer);
+  }
+});
+
+export const cotikAccounts = pgTable(
+  "cotik_accounts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    displayName: text("display_name").notNull(),
+    status: text("status").notNull().default("ACTIVE"),
+    priority: integer("priority").notNull().default(0),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    check(
+      "cotik_accounts_display_name_not_blank",
+      sql`length(btrim(${table.displayName})) > 0`
+    ),
+    check(
+      "cotik_accounts_status_valid",
+      sql`${table.status} in ('ACTIVE', 'TOKEN_EXPIRED', 'BLOCKED', 'SUBSCRIPTION_EXPIRED', 'DISABLED', 'SHOP_DISCONNECTED', 'RATE_LIMITED', 'NETWORK_ERROR', 'UNKNOWN')`
+    ),
+    index("cotik_accounts_status_idx").on(table.status),
+    index("cotik_accounts_priority_idx").on(table.priority)
+  ]
+);
+
+export const cotikAccountSecrets = pgTable(
+  "cotik_account_secrets",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => cotikAccounts.id, { onDelete: "cascade" }),
+    keyId: text("key_id").notNull(),
+    version: integer("version").notNull().default(1),
+    encryptedToken: bytea("encrypted_token").notNull(),
+    nonce: bytea("nonce").notNull(),
+    authTag: bytea("auth_tag").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("cotik_account_secrets_account_id_unique").on(table.accountId),
+    check(
+      "cotik_account_secrets_key_id_not_blank",
+      sql`length(btrim(${table.keyId})) > 0`
+    ),
+    check(
+      "cotik_account_secrets_version_positive",
+      sql`${table.version} > 0`
+    )
+  ]
+);
+
+export const cotikLogicalShops = pgTable(
+  "cotik_logical_shops",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    maShopNoiBo: text("ma_shop_noi_bo").notNull(),
+    region: text("region").notNull(),
+    canonicalShopId: uuid("canonical_shop_id").references(() => shops.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("cotik_logical_shops_ma_shop_noi_bo_unique").on(table.maShopNoiBo),
+    check(
+      "cotik_logical_shops_ma_shop_noi_bo_not_blank",
+      sql`length(btrim(${table.maShopNoiBo})) > 0`
+    ),
+    check(
+      "cotik_logical_shops_region_valid",
+      sql`${table.region} in ('US', 'UK')`
+    ),
+    index("cotik_logical_shops_region_idx").on(table.region)
+  ]
+);
+
+export const cotikAccountShops = pgTable(
+  "cotik_account_shops",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => cotikAccounts.id, { onDelete: "cascade" }),
+    logicalShopId: uuid("logical_shop_id")
+      .notNull()
+      .references(() => cotikLogicalShops.id, { onDelete: "cascade" }),
+    cotikShopId: text("cotik_shop_id").notNull(),
+    discoveryState: text("discovery_state").notNull().default("DISCOVERED"),
+    lastDiscoveredAt: timestamp("last_discovered_at", { withTimezone: true }),
+    checkpoint: jsonb("checkpoint"),
+    missingDayCount: integer("missing_day_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("cotik_account_shops_account_cotik_unique").on(table.accountId, table.cotikShopId),
+    uniqueIndex("cotik_account_shops_account_logical_unique").on(table.accountId, table.logicalShopId),
+    check(
+      "cotik_account_shops_cotik_shop_id_not_blank",
+      sql`length(btrim(${table.cotikShopId})) > 0`
+    ),
+    check(
+      "cotik_account_shops_discovery_state_valid",
+      sql`${table.discoveryState} in ('DISCOVERED', 'DISCONNECTED', 'ERROR')`
+    ),
+    check(
+      "cotik_account_shops_missing_day_count_non_negative",
+      sql`${table.missingDayCount} >= 0`
+    ),
+    index("cotik_account_shops_discovery_state_idx").on(table.discoveryState)
+  ]
+);
+
+export const cotikWorkflowSettings = pgTable(
+  "cotik_workflow_settings",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    singletonKey: text("singleton_key").notNull().default("SINGLETON"),
+    cotikSyncEnabled: boolean("cotik_sync_enabled").notNull().default(false),
+    cotikPostEnabled: boolean("cotik_post_enabled").notNull().default(false),
+    deploymentId: text("deployment_id"),
+    lastResetAt: timestamp("last_reset_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("cotik_workflow_settings_singleton_key_unique").on(table.singletonKey)
+  ]
+);
+
+export const cotikProviderCatalog = pgTable(
+  "cotik_provider_catalog",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    providerId: text("provider_id").notNull(),
+    carrierName: text("carrier_name").notNull(),
+    region: text("region").notNull(),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("cotik_provider_catalog_provider_id_unique").on(table.providerId),
+    check(
+      "cotik_provider_catalog_provider_id_not_blank",
+      sql`length(btrim(${table.providerId})) > 0`
+    ),
+    check(
+      "cotik_provider_catalog_carrier_name_not_blank",
+      sql`length(btrim(${table.carrierName})) > 0`
+    ),
+    check(
+      "cotik_provider_catalog_region_valid",
+      sql`${table.region} in ('US', 'UK')`
+    ),
+    index("cotik_provider_catalog_region_idx").on(table.region)
+  ]
+);
+
+export const cotikProviderRules = pgTable(
+  "cotik_provider_rules",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    region: text("region").notNull(),
+    prefix: text("prefix").notNull(),
+    trackingLength: integer("tracking_length"),
+    charsetPattern: text("charset_pattern"),
+    providerId: text("provider_id")
+      .notNull()
+      .references(() => cotikProviderCatalog.providerId, { onDelete: "cascade" }),
+    version: integer("version").notNull().default(1),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    check(
+      "cotik_provider_rules_region_valid",
+      sql`${table.region} in ('US', 'UK')`
+    ),
+    check(
+      "cotik_provider_rules_prefix_not_blank",
+      sql`length(btrim(${table.prefix})) > 0`
+    ),
+    check(
+      "cotik_provider_rules_tracking_length_valid",
+      sql`${table.trackingLength} is null or ${table.trackingLength} > 0`
+    ),
+    check(
+      "cotik_provider_rules_version_positive",
+      sql`${table.version} > 0`
+    ),
+    index("cotik_provider_rules_region_prefix_idx").on(table.region, table.prefix)
+  ]
+);
+
+export type CotikAccountRow = typeof cotikAccounts.$inferSelect;
+export type CotikAccountSecretRow = typeof cotikAccountSecrets.$inferSelect;
+export type CotikLogicalShopRow = typeof cotikLogicalShops.$inferSelect;
+export type CotikAccountShopRow = typeof cotikAccountShops.$inferSelect;
+export type CotikWorkflowSettingsRow = typeof cotikWorkflowSettings.$inferSelect;
+export type CotikProviderCatalogRow = typeof cotikProviderCatalog.$inferSelect;
+export type CotikProviderRuleRow = typeof cotikProviderRules.$inferSelect;
+
+export const cotikOrderObservations = pgTable(
+  "cotik_order_observations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => cotikAccounts.id, { onDelete: "cascade" }),
+    logicalShopId: uuid("logical_shop_id")
+      .notNull()
+      .references(() => cotikLogicalShops.id, { onDelete: "cascade" }),
+    cotikShopId: text("cotik_shop_id").notNull(),
+    orderId: text("order_id").notNull(),
+    orderStatus: text("order_status").notNull(),
+    orderCreateTime: timestamp("order_create_time", { withTimezone: true }).notNull(),
+    orderUpdateTime: timestamp("order_update_time", { withTimezone: true }).notNull(),
+    tracking: text("tracking"),
+    carrier: text("carrier"),
+    shippingProvider: text("shipping_provider"),
+    rawData: jsonb("raw_data").default({}).notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("cotik_order_observations_acc_shop_order_unique").on(
+      table.accountId,
+      table.logicalShopId,
+      table.orderId
+    ),
+    index("cotik_order_observations_logical_order_idx").on(table.logicalShopId, table.orderId),
+    index("cotik_order_observations_observed_at_idx").on(table.observedAt),
+    check(
+      "cotik_order_observations_order_id_not_blank",
+      sql`length(btrim(${table.orderId})) > 0`
+    ),
+    check(
+      "cotik_order_observations_status_not_blank",
+      sql`length(btrim(${table.orderStatus})) > 0`
+    )
+  ]
+);
+
+export const cotikOrders = pgTable(
+  "cotik_orders",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    logicalShopId: uuid("logical_shop_id")
+      .notNull()
+      .references(() => cotikLogicalShops.id, { onDelete: "cascade" }),
+    orderId: text("order_id").notNull(),
+    orderStatus: text("order_status").notNull(),
+    orderCreateTime: timestamp("order_create_time", { withTimezone: true }).notNull(),
+    orderUpdateTime: timestamp("order_update_time", { withTimezone: true }).notNull(),
+    winnerAccountId: uuid("winner_account_id")
+      .notNull()
+      .references(() => cotikAccounts.id, { onDelete: "cascade" }),
+    winnerObservedAt: timestamp("winner_observed_at", { withTimezone: true }).notNull(),
+    tracking: text("tracking"),
+    carrier: text("carrier"),
+    shippingProvider: text("shipping_provider"),
+    rawData: jsonb("raw_data").default({}).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("cotik_orders_logical_shop_order_unique").on(
+      table.logicalShopId,
+      table.orderId
+    ),
+    index("cotik_orders_update_time_idx").on(table.orderUpdateTime),
+    check(
+      "cotik_orders_order_id_not_blank",
+      sql`length(btrim(${table.orderId})) > 0`
+    ),
+    check(
+      "cotik_orders_status_not_blank",
+      sql`length(btrim(${table.orderStatus})) > 0`
+    )
+  ]
+);
+
+export const cotikOrderItems = pgTable(
+  "cotik_order_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    logicalShopId: uuid("logical_shop_id")
+      .notNull()
+      .references(() => cotikLogicalShops.id, { onDelete: "cascade" }),
+    orderId: text("order_id").notNull(),
+    sku: text("sku").notNull(),
+    skuName: text("sku_name").notNull(),
+    refLink: text("ref_link"),
+    quantity: integer("quantity").notNull().default(1),
+    providerEvidence: jsonb("provider_evidence"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    index("cotik_order_items_logical_order_idx").on(table.logicalShopId, table.orderId),
+    check(
+      "cotik_order_items_quantity_positive",
+      sql`${table.quantity} > 0`
+    ),
+    check(
+      "cotik_order_items_sku_not_blank",
+      sql`length(btrim(${table.sku})) > 0`
+    )
+  ]
+);
+
+export type CotikOrderObservationRow = typeof cotikOrderObservations.$inferSelect;
+export type CotikOrderRow = typeof cotikOrders.$inferSelect;
+export type CotikOrderItemRow = typeof cotikOrderItems.$inferSelect;
+
+// --- W21 Phase 2B Cotik POST Writer & Tracking tables ---
+
+export const cotikTrackingCandidates = pgTable(
+  "cotik_tracking_candidates",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    orderId: text("order_id").notNull(),
+    tracking: text("tracking").notNull(),
+    providerId: text("provider_id").notNull(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => cotikAccounts.id, { onDelete: "cascade" }),
+    logicalShopId: uuid("logical_shop_id")
+      .notNull()
+      .references(() => cotikLogicalShops.id, { onDelete: "cascade" }),
+    region: text("region").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    status: text("status").notNull().default("PENDING"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("cotik_tracking_candidates_fingerprint_idx").on(table.fingerprint),
+    index("cotik_tracking_candidates_order_idx").on(table.orderId),
+    index("cotik_tracking_candidates_status_idx").on(table.status),
+    check(
+      "cotik_tracking_candidates_region_check",
+      sql`${table.region} IN ('US', 'UK')`
+    ),
+    check(
+      "cotik_tracking_candidates_status_check",
+      sql`${table.status} IN ('PENDING', 'POSTED', 'REJECTED', 'FAILED')`
+    ),
+    check(
+      "cotik_tracking_candidates_order_id_not_blank",
+      sql`length(btrim(${table.orderId})) > 0`
+    ),
+    check(
+      "cotik_tracking_candidates_tracking_not_blank",
+      sql`length(btrim(${table.tracking})) > 0`
+    )
+  ]
+);
+
+export const cotikPostIntents = pgTable(
+  "cotik_post_intents",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    fingerprint: text("fingerprint").notNull(),
+    orderId: text("order_id").notNull(),
+    tracking: text("tracking").notNull(),
+    providerId: text("provider_id").notNull(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => cotikAccounts.id, { onDelete: "restrict" }),
+    logicalShopId: uuid("logical_shop_id")
+      .notNull()
+      .references(() => cotikLogicalShops.id, { onDelete: "restrict" }),
+    region: text("region").notNull(),
+    status: text("status").notNull().default("PENDING"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(3),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("cotik_post_intents_fingerprint_idx").on(table.fingerprint),
+    index("cotik_post_intents_order_idx").on(table.orderId),
+    index("cotik_post_intents_status_idx").on(table.status),
+    check(
+      "cotik_post_intents_status_check",
+      sql`${table.status} IN ('PENDING', 'IN_PROGRESS', 'CONFIRMED', 'FAILED', 'ABORTED')`
+    ),
+    check(
+      "cotik_post_intents_attempt_bound",
+      sql`${table.attemptCount} >= 0 AND ${table.attemptCount} <= ${table.maxAttempts} AND ${table.maxAttempts} >= 1 AND ${table.maxAttempts} <= 3`
+    ),
+    check(
+      "cotik_post_intents_region_check",
+      sql`${table.region} IN ('US', 'UK')`
+    )
+  ]
+);
+
+export const cotikPostAttempts = pgTable(
+  "cotik_post_attempts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    intentId: uuid("intent_id")
+      .notNull()
+      .references(() => cotikPostIntents.id, { onDelete: "restrict" }),
+    attemptNo: integer("attempt_no").notNull(),
+    requestPayload: jsonb("request_payload").$type<Record<string, unknown>>().notNull(),
+    responsePayload: jsonb("response_payload").$type<Record<string, unknown>>(),
+    httpStatus: integer("http_status"),
+    outcome: text("outcome").notNull(),
+    readbackConfirmed: boolean("readback_confirmed").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("cotik_post_attempts_intent_attempt_idx").on(table.intentId, table.attemptNo),
+    check(
+      "cotik_post_attempts_outcome_check",
+      sql`${table.outcome} IN ('SUCCESS', 'HTTP_ERROR', 'TIMEOUT', 'UNCONFIRMED')`
+    ),
+    check(
+      "cotik_post_attempts_attempt_no_bound",
+      sql`${table.attemptNo} >= 1 AND ${table.attemptNo} <= 3`
+    )
+  ]
+);
+
+export type CotikTrackingCandidateRow = typeof cotikTrackingCandidates.$inferSelect;
+export type CotikPostIntentRow = typeof cotikPostIntents.$inferSelect;
+export type CotikPostAttemptRow = typeof cotikPostAttempts.$inferSelect;

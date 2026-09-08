@@ -3,12 +3,19 @@ import postgres from "postgres";
 
 import * as schema from "./schema.js";
 
+function requiresTls(databaseUrl: string): boolean {
+  const hostname = new URL(databaseUrl).hostname.toLowerCase();
+  return hostname === "supabase.com" || hostname.endsWith(".supabase.com") ||
+    hostname === "supabase.co" || hostname.endsWith(".supabase.co");
+}
+
 export function createDatabase(databaseUrl: string): DatabaseContext {
   const sql = postgres(databaseUrl, {
     max: 10,
     idle_timeout: 20,
     connect_timeout: 10,
-    prepare: false
+    prepare: false,
+    ...(requiresTls(databaseUrl) ? { ssl: "require" as const } : {})
   });
 
   return {

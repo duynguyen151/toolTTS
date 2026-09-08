@@ -127,7 +127,7 @@ function comparable(metric: string, current: MetricValue, previous: MetricValue,
 function expectedBlockers(coverage: DecisionCoverageSnapshot): string[] {
   const blockers: string[] = [];
   if (coverage.coverageState !== "COMPLETE") blockers.push(`DATA_COVERAGE_${coverage.coverageState}`);
-  if (coverage.source !== "SELLER_CENTER") blockers.push("SOURCE_NOT_VERIFIED");
+  if (coverage.source !== "SELLER_CENTER" && coverage.source !== "COTIK") blockers.push("SOURCE_NOT_VERIFIED");
   if (coverage.ordersSourceComplete !== true) blockers.push("ORDERS_SOURCE_INCOMPLETE");
   if (coverage.financeRequiredSourceComplete !== true) blockers.push("FINANCE_SOURCE_INCOMPLETE");
   if (coverage.sourceReconciled !== true) blockers.push("FINANCE_NOT_RECONCILED");

@@ -8,6 +8,7 @@ export {
 } from "./client.js";
 export { readDatabaseConfig, type DatabaseConfig } from "./config.js";
 export {
+  withCotikCycleExecutionLock,
   withRefreshProfileExecutionLock,
   withShopAdvisoryLock,
   withShopRiskControlLock,
@@ -55,6 +56,7 @@ export {
   settlementRecords,
   settlementStateEnum,
   shops,
+  shopProviderBindings,
   shopEligibilityStatusEnum,
   shopVerificationStatusEnum,
   shopSyncStateEnum,
@@ -292,3 +294,132 @@ export {
   shopProviderBindingCheckpointSchema,
   updateShopProviderBindingCheckpoint
 } from "./queries/provider-bindings.js";
+
+// --- W21-T01 Cotik Multi-Account Foundation exports ---
+export {
+  bytea,
+  cotikAccounts,
+  cotikAccountSecrets,
+  cotikLogicalShops,
+  cotikAccountShops,
+  cotikWorkflowSettings,
+  cotikProviderCatalog,
+  cotikProviderRules,
+  type CotikAccountRow,
+  type CotikAccountSecretRow,
+  type CotikLogicalShopRow,
+  type CotikAccountShopRow,
+  type CotikWorkflowSettingsRow,
+  type CotikProviderCatalogRow,
+  type CotikProviderRuleRow
+} from "./schema.js";
+
+export {
+  encryptCotikToken,
+  decryptCotikToken,
+  getVaultKey,
+  getVaultKeyring,
+  parseCotikVaultKeyring,
+  type CotikVaultKeyring,
+  type CotikVaultKeyringEntry,
+  type CotikTokenDecryptionOptions,
+  createCotikAccount,
+  upsertCotikAccount,
+  setCotikAccountToken,
+  getDecryptedCotikToken,
+  findCotikAccountById,
+  listActiveCotikAccounts,
+  listCotikAccounts,
+  updateCotikAccountStatus,
+  deleteCotikAccount,
+  type CreateCotikAccountInput,
+  type EncryptedSecretPayload
+} from "./queries/cotik-accounts.js";
+
+export {
+  upsertCotikLogicalShop,
+  findCotikLogicalShopByMaShopNoiBo,
+  findCotikLogicalShopById,
+  listCotikLogicalShops,
+  upsertCotikAccountShop,
+  listCotikAccountShopsByAccount,
+  listCotikAccountShopsByLogicalShop,
+  updateCotikAccountShopDiscoveryState,
+  updateCotikAccountShopCheckpoint,
+  type UpsertCotikLogicalShopInput,
+  type UpsertCotikAccountShopInput
+} from "./queries/cotik-shops.js";
+
+export {
+  upsertProviderCatalogEntry,
+  seedProviderCatalog,
+  listProviderCatalog,
+  createProviderRule,
+  seedProviderRules,
+  listProviderRules,
+  type UpsertProviderCatalogInput,
+  type CreateProviderRuleInput
+} from "./queries/provider-catalog.js";
+
+// --- W21-T02 Cotik Observation & Winner Projection exports ---
+export {
+  cotikOrderObservations,
+  cotikOrders,
+  cotikOrderItems,
+  type CotikOrderObservationRow,
+  type CotikOrderRow,
+  type CotikOrderItemRow
+} from "./schema.js";
+
+export {
+  recordCotikOrderObservation,
+  recordCotikOrderObservations,
+  listObservationsForOrder
+} from "./queries/cotik-observations.js";
+
+export {
+  projectWinningCotikOrder,
+  pickWinningCotikObservation,
+  isEligibleCotikWinnerCandidate,
+  shouldPersistCotikOrderItems,
+  type CotikWinningObservationCandidate,
+  findCotikOrderById,
+  listCotikOrderItems,
+  type ProjectWinningOrderInput
+} from "./queries/cotik-orders-multi.js";
+
+// --- W21 Phase 2B Cotik POST Writer & Tracking exports ---
+export {
+  cotikTrackingCandidates,
+  cotikPostIntents,
+  cotikPostAttempts,
+  type CotikTrackingCandidateRow,
+  type CotikPostIntentRow,
+  type CotikPostAttemptRow
+} from "./schema.js";
+
+export {
+  getCotikWorkflowSettings,
+  ensureCotikWorkflowSettings,
+  setCotikWorkflowSettings,
+  resetCotikWorkflowSettingsForDeployment,
+  type SetCotikWorkflowSettingsInput,
+  type DeploymentResetResult
+} from "./queries/cotik-workflow.js";
+
+export {
+  computeTrackingFingerprint,
+  createTrackingCandidate,
+  createOrGetPostIntent,
+  recordPostAttempt,
+  listPendingPostIntents,
+  listInProgressPostIntents,
+  getPostIntentById,
+  getPostIntentByFingerprint,
+  findPostIntentForTracking,
+  listAttemptsForIntent,
+  type CreateTrackingCandidateInput,
+  type CreatePostIntentInput,
+  type FindPostIntentForTrackingInput,
+  type RecordPostAttemptInput
+} from "./queries/cotik-tracking.js";

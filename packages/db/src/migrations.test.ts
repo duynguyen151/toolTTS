@@ -130,7 +130,7 @@ describe("W5-T02 Finance health migration", () => {
 
     expect(sql).toContain('ADD COLUMN "source_reconciled" boolean');
     expect(sql).toContain('DROP TRIGGER "sync_runs_finance_evidence_authorized"');
-    expect(sql).toContain('WHERE EXISTS (\n\tSELECT 1 FROM "finance_captures"');
+    expect(sql).toContain('SELECT 1 FROM "finance_captures" AS "fc" WHERE "fc"."sync_run_id" = "sr"."id"');
     expect(sql).not.toContain('UPDATE "sync_runs" AS "sr"\nSET "source_reconciled" = false');
     expect(sql).toContain('NEW.source_reconciled IS DISTINCT FROM true');
     expect(sql).toContain('CREATE TRIGGER "sync_runs_finance_evidence_authorized"');

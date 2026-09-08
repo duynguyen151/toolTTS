@@ -7,6 +7,7 @@ import {
   NonNegativeDecimalStringSchema,
 } from "./contracts/common.js";
 import { FinanceHealthSnapshotSchema } from "./finance-health.js";
+import { SourceProviderSchema } from "./contracts/source.js";
 import { ResolvedRiskPolicySnapshotSchema } from "./risk-policy.js";
 import type { RiskControlDecision } from "./risk-control.js";
 
@@ -127,7 +128,7 @@ export const DecisionCoverageSnapshotSchema = z
   .object({
     coverageState: DecisionDataCoverageSchema,
     persistedMetricsWindow: z.string().trim().min(1),
-    source: z.literal("SELLER_CENTER").nullable().optional(),
+    source: SourceProviderSchema.nullable().optional(),
     provenSourceWindow: z.enum(["ROLLING_12_MONTHS"]).nullable(),
     completeWithinSourceWindow: z.boolean().nullable(),
     lifetimeHistoryComplete: z.boolean().nullable(),

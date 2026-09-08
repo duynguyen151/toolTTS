@@ -70,7 +70,7 @@ export const ProfileSummarySchema = z.object({
 
 export const DataQualitySummarySchema = z.object({
   coverage: DecisionDataCoverageSchema,
-  source: z.literal("SELLER_CENTER").nullable(),
+  source: z.enum(["SELLER_CENTER", "COTIK"]).nullable(),
   provenSourceWindow: z.enum(["ROLLING_12_MONTHS"]).nullable(),
   completeWithinSourceWindow: z.boolean().nullable(),
   lifetimeHistoryComplete: z.boolean().nullable(),

@@ -295,6 +295,41 @@
       "when": 1787843312358,
       "tag": "0041_objective_shop_health_history",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1788726338448,
+      "tag": "0042_numerous_black_knight",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1788726624198,
+      "tag": "0043_strong_skaar",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1788727024178,
+      "tag": "0044_uneven_mentallo",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1788748849447,
+      "tag": "0045_omniscient_santa_claus",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1788770000000,
+      "tag": "0046_w21_persistence_corrective",
+      "breakpoints": true
     }
   ]
 }

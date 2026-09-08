@@ -32,7 +32,6 @@ export async function withShopAdvisoryLock<T>(
     connection.release();
   }
 }
-
 export async function withTransactionalShopLock<T>(
   context: DatabaseContext,
   shopId: string,
@@ -70,7 +69,6 @@ export async function withRefreshProfileExecutionLock<T>(
     connection.release();
   }
 }
-
 export async function withShopRiskControlLock<T>(
   context: DatabaseContext,
   shopId: string,
@@ -84,4 +82,29 @@ export async function withShopRiskControlLock<T>(
     );
     return operation(transaction);
   });
+}
+
+const COTIK_CYCLE_EXECUTION_LOCK_NAMESPACE = 4;
+
+/** Prevents concurrent worker instances from running overlapping Cotik sync/write cycles */
+export async function withCotikCycleExecutionLock<T>(
+  context: DatabaseContext,
+  operation: () => Promise<T>
+): Promise<T | null> {
+  const connection = await context.sql.reserve();
+  try {
+    const [{ acquired }] = await connection<[{ acquired: boolean }]>`
+      select pg_try_advisory_lock(hashtextextended('cotik_worker_cycle', ${COTIK_CYCLE_EXECUTION_LOCK_NAMESPACE})) as acquired
+    `;
+    if (!acquired) {
+      return null;
+    }
+    try {
+      return await operation();
+    } finally {
+      await connection`select pg_advisory_unlock(hashtextextended('cotik_worker_cycle', ${COTIK_CYCLE_EXECUTION_LOCK_NAMESPACE}))`;
+    }
+  } finally {
+    connection.release();
+  }
 }

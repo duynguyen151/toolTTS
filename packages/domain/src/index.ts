@@ -19,3 +19,6 @@ export * from "./proxy-preflight.js";
 export * from "./risk-control.js";
 export * from "./risk-policy.js";
 export * from "./target-rule.js";
+export * from "./contracts/provider-matcher.js";
+export * from "./provider-matcher.js";
+export * from "./contracts/cotik-observation.js";

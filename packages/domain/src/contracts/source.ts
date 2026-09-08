@@ -91,7 +91,24 @@ export const SourceProvenanceSchema = z
   .object({
     source: SourceProviderSchema,
     capabilities: z.array(SourceCapabilitySchema),
+    accountKey: z.string().optional(),
+    tokenKey: z.string().optional(),
+    accountName: z.string().optional(),
+    cotikShopId: z.string().optional(),
+    sumEstSettlementAmount: z.number().nullable().optional(),
+    estimatedSettlement: z.string().nullable().optional(),
+    onHoldBuckets: z
+      .object({
+        totalOnHold: z.number().optional(),
+        totalWaitingDelivered: z.number().optional(),
+        totalAwaitSettlement: z.number().optional(),
+        totalAwaitRefundReturn: z.number().optional(),
+        reserve: z.number().optional(),
+      })
+      .nullable()
+      .optional(),
   })
+  .passthrough()
   .superRefine((provenance, context) => {
     if (
       provenance.source === "COTIK" &&

@@ -1,7 +1,15 @@
-# Tool_TTS - Current Implementation Status
+# Tool_TTS - Historical Implementation Evidence
 
-> Update this file whenever the implementation materially changes.
-> This is operational state, not long-term product strategy.
+> This file records the pre-Master-Plan integration milestone on
+> `codex/v1-integration`; it is not current operational state and must not be
+> updated as a task tracker. For current scope, acceptance, continuation, and
+> implementation truth, use `AGENTS.md`, the locked Master Plan, the execution
+> ledger, the Codex handoff, and current Git state respectively.
+>
+> The historical claims below remain useful evidence only where their exact
+> commits, environment, and verification commands can be established. The
+> locked V1 semantics supersede this file's earlier four-decision model,
+> Operational-Onhold Rule terminology, and Dashboard-deferred wording.
 
 ## Repository
 

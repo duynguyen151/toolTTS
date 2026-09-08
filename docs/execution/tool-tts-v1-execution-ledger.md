@@ -14,7 +14,7 @@
 - BA decisions are `SCALE`, `CONTINUE`, `SLOW_SELL`, `WATCH`, and `PAUSE`.
 - Requested AI configuration resolves before construction; the immutable Decision Case persists before AI invocation.
 - AI advises; BA decides; neither AI nor BA mutates a Case.
-- V1 performs no Seller Center or COTIK business write action.
+- V1 performs no Seller Center business write action. W21 is the sole narrowly approved COTIK tracking-write exception, gated by both persisted switches, deterministic MATCHED provider evidence, bounded attempts/batches and readback. W21 is LIVE ACCEPTED after operator-controlled live verification; AI must never enable switches or trigger business writes.
 
 ## Exclusive ownership zones
 
@@ -83,6 +83,15 @@ Only one implementation worker may edit each shared integration seam at a time:
 | W3-T02 | DONE | W3-T01, W19-T01 | Completed | Technical Lead bounded Dashboard Orders slice | Independent Luna UI/accessibility/privacy reviewer | Order Explorer route/query/coverage tests; Dashboard Order Health link | 16 focused Orders/query/projection/overview tests; Dashboard suite 183 passed/1 skipped; scoped `git diff --check` | APPROVE | PASS: All Available default; Bangkok coverage labels; status/search/pagination/detail; PII-minimized DTO integration; independent re-review after pagination/status/UTC findings | `92f3e75308f344b995e1335d183f00227bbc9f89` | ENVIRONMENT_PENDING: Dashboard typecheck/build blocked by unrelated `unlinkShopByProfileNo`/`updateShopDisplayName` imports; live services unavailable | Accepted 2026-08-28. Route uses only the existing W3-T01 allowlisted list/detail DTOs; React never recomputes the Rule. |
 | W19-T02 | DONE | W6-T01, W13-T02, W14-T02, W19-T01 | Completed | Technical Lead bounded Dashboard settings slice | Independent Luna UX/security reviewer plus bounded secret reviewer | Settings page/API; policy and effective shop policy; Bangkok refresh/checkpoint CRUD; AI task revision/Test Connection; settings navigation | 11 focused Settings tests; Dashboard suite 194 passed/1 skipped; scoped `git diff --check` | APPROVE | PASS: Settings routes validate local requests; effective values resolve per selected shop; policy/AI revisions append only; checkpoint/retry edits remain Bangkok/seconds; secret references never return to client and existing custom references preserve server-side; final secret reviewer APPROVE | `ab24940`, `210d9ae` | ENVIRONMENT_PENDING: Dashboard typecheck/build blocked only by unrelated pre-existing `/shops` imports of `unlinkShopByProfileNo` and `updateShopDisplayName`; live services unavailable | Accepted 2026-08-28. Final review repairs covered AI task editing, shop-policy readback, refresh readback, checkpoint CRUD, and preserve-existing secret-reference validation/proof. |
 
-## Scheduling rule
+## W21 review closure checkpoint - 2026-09-07
+
+- **Status: CODE VERIFIED / CROSS-REVIEW COMPLETE / SUPABASE DB APPLIED / LIVE POST VERIFIED / LIVE ACCEPTED.** Nine review blockers have code-level remediation; manual auto-tracking POST, readback and kill-switch behavior were verified by the operator.
+- Execution/design: `docs/plans/2026-09-07-w21-review-closure.md`; detailed evidence and Git packaging: `docs/execution/w21-tracking-acceptance-2026-09-07.md`.
+- Supabase migration evidence is now recorded: 47 journal entries, 36 public tables, exact source/target row-count parity for 23 source tables, W21 tables present, and both workflow switches OFF. The migration ordering defect found during execution is covered by a regression test and fixed before the successful target run.
+- Read-only Cotik GET smoke checks returned HTTP 200/body status 200 on five configured token lanes. Controlled manual auto-tracking POST and readback verification were completed separately; no Seller Center write was executed.
+- Fresh focused gates: Dashboard/CLI/sync/worker/W21 tests passed, including the 16/16 reconcile suite, followed by the final full suite at 146 files / 1,264 tests passed and 74 skipped; typecheck, build and Drizzle check also passed. Doctor still fails only AdsPower connectivity (`fetch failed`); PostgreSQL is OK.
+- W21 packaging is limited to an explicit manifest on the original integration branch; unrelated Dashboard WIP and local artifacts remain uncommitted and untracked outside that manifest.
+
+## Scheduling rule (unchanged)
 
 A dependency unlocks only after its task is accepted/done. READY does not mean scheduled. Bootstrap remains sequential: W0-T01, then W0-T02.

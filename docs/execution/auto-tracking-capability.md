@@ -19,8 +19,11 @@ pnpm auto-tracking
 Example request:
 
 ```json
-{"action":"execute","input":{"spreadsheetId":"<id>","tab":"Tháng 9-US","range":"A1:AC2000","shopId":"<logical-shop-id>","region":"US","fromDate":"2026-09-04"}}
+{"action":"execute","input":{"spreadsheetId":"<id>","tab":"Tháng 9-US","range":"A1:AC2000","region":"US","fromDate":"2026-09-04"}}
 ```
+
+`stage-sheet-date` does not accept `--shop-id`. It reads the account/shop value
+from the Sheet and resolves it to the matching logical shop before staging.
 
 `execute` performs the existing operations in order:
 

@@ -14,6 +14,7 @@
     "dashboard": "pnpm --filter @shop-health/dashboard dev",
     "shop-health": "pnpm --filter @shop-health/cli start",
     "worker": "pnpm --filter @shop-health/worker start",
+    "auto-tracking": "tsx scripts/auto-tracking.mts",
     "db:generate": "drizzle-kit generate --config packages/db/drizzle.config.ts",
     "db:migrate": "tsx --env-file=.env packages/db/src/migrate.ts",
     "db:seed:demo": "tsx --env-file=.env packages/db/src/seed-demo.ts"

@@ -22,7 +22,7 @@ describe("postCotikTrackingBatch", () => {
     };
   });
 
-  it("fails closed when kill switch is OFF without making any network call", async () => {
+  it("fails closed when persisted authorization is OFF without making any network call", async () => {
     const items: CotikTrackingItem[] = [
       {
         orderId: "ord-1",
@@ -34,7 +34,7 @@ describe("postCotikTrackingBatch", () => {
     const result = await postCotikTrackingBatch({
       client: mockClient,
       items,
-      killSwitchEnabled: false
+      isPostAuthorized: vi.fn().mockResolvedValue(false)
     });
 
     expect(result.status).toBe("REFUSED_KILL_SWITCH");
@@ -60,7 +60,7 @@ describe("postCotikTrackingBatch", () => {
     const result = await postCotikTrackingBatch({
       client: mockClient,
       items,
-      killSwitchEnabled: true
+      isPostAuthorized: vi.fn().mockResolvedValue(true)
     });
 
     expect(result.status).toBe("REJECTED_INVALID_PROVIDER");
@@ -91,7 +91,7 @@ describe("postCotikTrackingBatch", () => {
     const result = await postCotikTrackingBatch({
       client: mockClient,
       items,
-      killSwitchEnabled: true
+      isPostAuthorized: vi.fn().mockResolvedValue(true)
     });
 
     expect(result.status).toBe("CONFIRMED");
@@ -128,7 +128,7 @@ describe("postCotikTrackingBatch", () => {
     const result = await postCotikTrackingBatch({
       client: mockClient,
       items,
-      killSwitchEnabled: true
+      isPostAuthorized: vi.fn().mockResolvedValue(true)
     });
 
     expect(result.status).toBe("FAILED");
@@ -163,12 +163,50 @@ describe("postCotikTrackingBatch", () => {
     const result = await postCotikTrackingBatch({
       client: mockClient,
       items,
-      killSwitchEnabled: true
+      isPostAuthorized: vi.fn().mockResolvedValue(true)
     });
 
     expect(result.status).toBe("PARTIALLY_CONFIRMED");
     expect(result.confirmedOrders).toEqual(["ord-timeout"]);
     expect(result.unconfirmedOrders).toHaveLength(0);
+  });
+
+  it("fails closed when the authorization callback errors immediately before POST", async () => {
+    const result = await postCotikTrackingBatch({
+      client: mockClient,
+      items: [{
+        orderId: "ord-auth-error",
+        tracking: "GFU123456789012345",
+        providerId: "7352739623900022544"
+      }],
+      isPostAuthorized: vi.fn().mockRejectedValue(new Error("database unavailable"))
+    });
+
+    expect(result.status).toBe("REFUSED_KILL_SWITCH");
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(mockGet).not.toHaveBeenCalled();
+  });
+
+  it("checks authorization after provider validation and immediately before the POST", async () => {
+    const order: string[] = [];
+    const isPostAuthorized = vi.fn().mockImplementation(async () => {
+      order.push("authorize");
+      return true;
+    });
+    mockPost.mockImplementation(async () => {
+      order.push("post");
+      return { logUpdate: [] };
+    });
+    mockGet.mockResolvedValue({ listorders: [{ apiOrderId: "ord-order", tracking_number: "GFU123456789012345" }] });
+
+    await postCotikTrackingBatch({
+      client: mockClient,
+      items: [{ orderId: "ord-order", tracking: "GFU123456789012345", providerId: "7352739623900022544" }],
+      isPostAuthorized
+    });
+
+    expect(order).toEqual(["authorize", "post"]);
+    expect(isPostAuthorized).toHaveBeenCalledOnce();
   });
 });
 
@@ -190,8 +228,11 @@ describe("checkOrderTrackingReady", () => {
 
   it.each([
     ["status", { apiOrderId: "ord-ready", status: "AWAITING_SHIPMENT", tracking_number: "" }],
-    ["order_status", { order_id: "ord-ready", order_status: "AWAITING_SHIPMENT", tracking_number: "GFU123456789012345" }]
-  ])("accepts a unique %s AWAITING_SHIPMENT order with empty or matching tracking", async (_field, order) => {
+    ["order_status", { order_id: "ord-ready", order_status: "AWAITING_SHIPMENT", tracking_number: "GFU123456789012345" }],
+    ["combined lifecycle fields", { apiOrderId: "ord-ready", status: "AWAITING_SHIPMENT", order_status: "new", tracking_number: "" }],
+    ["awaiting collection", { apiOrderId: "ord-ready", status: "AWAITING_COLLECTION", tracking_number: "" }],
+    ["new", { apiOrderId: "ord-ready", status: "new", tracking_number: "" }]
+  ])("accepts a unique %s tracking-write order with empty or matching tracking", async (_field, order) => {
     mockGet.mockResolvedValue({ listorders: [order] });
 
     await expect(checkOrderTrackingReady(mockClient, "ord-ready", "GFU123456789012345")).resolves.toBe(true);

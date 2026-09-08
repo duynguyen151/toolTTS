@@ -10,7 +10,8 @@ export interface CotikTrackingSheetRow {
 }
 
 export interface CotikTrackingSheetBatchRequest extends CotikTrackingSheetRequest {
-  readonly targetDate: string;
+  readonly targetDate?: string | undefined;
+  readonly fromDate?: string | undefined;
   readonly dateColumn?: string | undefined;
   readonly cotikOrderIdColumn?: string | undefined;
   readonly dateFormat?: "MDY" | "DMY" | undefined;
@@ -18,19 +19,41 @@ export interface CotikTrackingSheetBatchRequest extends CotikTrackingSheetReques
 
 export interface CotikTrackingSheetBatchRow {
   readonly rowNumber: number;
+  readonly account: string;
   readonly orderId: string;
   readonly sheinOrderId: string;
   readonly tracking: string;
   readonly trackingColumn: "Z";
   readonly providerNote: string;
+  readonly result: string;
+}
+
+export type CotikTrackingSheetGroupRow = Omit<CotikTrackingSheetBatchRow, "trackingColumn">;
+
+export type CotikTrackingSheetGroupReason =
+  | "MISSING_ACCOUNT"
+  | "MISSING_SHEIN_ORDER_ID"
+  | "MISSING_TRACKING"
+  | "MISSING_PROVIDER_NOTE"
+  | "MULTIPLE_PROVIDER_NOTES"
+  | "SPLIT_ORDER_REVIEW_REQUIRED";
+
+export interface CotikTrackingSheetOrderGroup {
+  readonly account: string;
+  readonly orderId: string;
+  readonly rows: CotikTrackingSheetBatchRow[];
+  readonly status: "READY" | "PAUSED";
+  readonly tracking?: string;
+  readonly providerNote?: string;
+  readonly reason?: CotikTrackingSheetGroupReason;
 }
 
 export type CotikTrackingSheetSkipReason =
   | "DATE_NOT_SELECTED"
-  | "RESULT_ALREADY_PRESENT"
   | "MISSING_ORDER_ID"
   | "MISSING_PROVIDER_NOTE"
-  | "MISSING_TRACKING";
+  | "MISSING_TRACKING"
+  | CotikTrackingSheetGroupReason;
 
 export interface CotikTrackingSheetSkippedRow {
   readonly rowNumber: number;
@@ -40,7 +63,82 @@ export interface CotikTrackingSheetSkippedRow {
 export interface CotikTrackingSheetBatchResult {
   readonly headerRow: number;
   readonly rows: CotikTrackingSheetBatchRow[];
+  readonly groupRows?: CotikTrackingSheetGroupRow[] | undefined;
   readonly skippedRows: CotikTrackingSheetSkippedRow[];
+}
+
+function uniqueNonBlank(values: readonly string[]): string[] {
+  const unique = new Map<string, string>();
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toUpperCase();
+    if (!unique.has(key)) unique.set(key, trimmed);
+  }
+  return [...unique.values()];
+}
+
+export function groupCotikTrackingRows(
+  rows: readonly CotikTrackingSheetBatchRow[],
+  contextRows: readonly CotikTrackingSheetGroupRow[] = rows
+): CotikTrackingSheetOrderGroup[] {
+  const grouped = new Map<string, CotikTrackingSheetBatchRow[]>();
+  for (const row of rows) {
+    const key = `${row.account}\u0000${row.orderId}`;
+    const list = grouped.get(key) ?? [];
+    list.push(row);
+    grouped.set(key, list);
+  }
+
+  const groupedContext = new Map<string, CotikTrackingSheetGroupRow[]>();
+  for (const row of contextRows) {
+    const key = `${row.account}\u0000${row.orderId}`;
+    const list = groupedContext.get(key) ?? [];
+    list.push(row);
+    groupedContext.set(key, list);
+  }
+
+  return [...grouped.entries()].map(([key, groupRows]) => {
+    const separatorIndex = key.indexOf("\u0000");
+    const account = separatorIndex < 0 ? key : key.slice(0, separatorIndex);
+    const orderId = separatorIndex < 0 ? "" : key.slice(separatorIndex + 1);
+    const context = groupedContext.get(key) ?? groupRows;
+    if (!account) {
+      return { account, orderId, rows: groupRows, status: "PAUSED", reason: "MISSING_ACCOUNT" };
+    }
+    const sheinOrderIds = uniqueNonBlank(context.map((row) => row.sheinOrderId));
+    if (context.some((row) => row.sheinOrderId.trim().length === 0)) {
+      return { account, orderId, rows: groupRows, status: "PAUSED", reason: "MISSING_SHEIN_ORDER_ID" };
+    }
+    if (sheinOrderIds.length > 1) {
+      return { account, orderId, rows: groupRows, status: "PAUSED", reason: "SPLIT_ORDER_REVIEW_REQUIRED" };
+    }
+
+    const trackingValues = uniqueNonBlank(context.map((row) => row.tracking));
+    if (trackingValues.length === 0) {
+      return { account, orderId, rows: groupRows, status: "PAUSED", reason: "MISSING_TRACKING" };
+    }
+    if (trackingValues.length > 1) {
+      return { account, orderId, rows: groupRows, status: "PAUSED", reason: "SPLIT_ORDER_REVIEW_REQUIRED" };
+    }
+
+    const providerValues = uniqueNonBlank(context.map((row) => row.providerNote));
+    if (providerValues.length === 0) {
+      return { account, orderId, rows: groupRows, status: "PAUSED", reason: "MISSING_PROVIDER_NOTE" };
+    }
+    if (providerValues.length > 1) {
+      return { account, orderId, rows: groupRows, status: "PAUSED", reason: "MULTIPLE_PROVIDER_NOTES" };
+    }
+
+    return {
+      account,
+      orderId,
+      rows: groupRows,
+      status: "READY",
+      tracking: trackingValues[0]!,
+      providerNote: providerValues[0]!
+    };
+  });
 }
 
 export interface CotikTrackingSheetWriteRequest {
@@ -50,8 +148,7 @@ export interface CotikTrackingSheetWriteRequest {
 }
 
 export type CotikTrackingSheetWriteResult =
-  | { readonly rowNumber: number; readonly status: "WRITTEN" }
-  | { readonly rowNumber: number; readonly status: "SKIPPED_NONBLANK" };
+  | { readonly rowNumber: number; readonly status: "WRITTEN" };
 
 export interface GoogleSheetsReadAdapter {
   readonly accessToken: string;
@@ -216,13 +313,14 @@ function findBatchHeaderRow(
 }
 
 function validateFixedBatchHeaders(header: unknown[]): void {
-  const expected = [
+  const expected: ReadonlyArray<{ column: string; label: string; candidates: readonly string[] }> = [
     { column: "A", label: "date", candidates: ["date", "createddate", "createdat", "orderdate", "ordercreateddate", "ngaytao", "ngaydat"] },
     { column: "B", label: "Cotik OrderID", candidates: ["orderid", "cotikorderid", "apiorderid", "oderid"] },
+    { column: "Q", label: "account", candidates: ["acc"] },
     { column: "W", label: "result", candidates: ["result", "done", "status", "writeback", "ketqua", "note"] },
     { column: "Y", label: "Shein OrderID", candidates: ["sheinorderid", "sheinorder", "orderid", "oderid"] },
     { column: "Z", label: "tracking", candidates: ["tracking", "trackingid", "trackingnumber", "trackingno"] },
-    { column: "AC", label: "provider", candidates: ["provider", "carrier", "shippingprovider", "transportprovider", "shipper", "note"] }
+    { column: "AC", label: "provider", candidates: ["provider", "carrier", "shippingprovider", "transportprovider", "shipper", "note", "done"] }
   ] as const;
 
   for (const item of expected) {
@@ -249,6 +347,16 @@ function parseTargetDate(value: unknown, dateFormat: "MDY" | "DMY" | undefined):
   const day = dateFormat === "DMY" ? first : second;
   if (month < 1 || month > 12 || day < 1 || day > 31) return null;
   return match[3] + "-" + String(month).padStart(2, "0") + "-" + String(day).padStart(2, "0");
+}
+
+function requireIsoDate(value: string | undefined, label: string): string {
+  const clean = value?.trim() ?? "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) throw invalid(`${label} must use YYYY-MM-DD`);
+  const parsed = new Date(`${clean}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== clean) {
+    throw invalid(`${label} must be a valid calendar date`);
+  }
+  return clean;
 }
 
 function readSingleCell(payload: unknown): string {
@@ -337,8 +445,14 @@ export async function readCotikTrackingSheetBatch(
   request: CotikTrackingSheetBatchRequest,
   adapter: GoogleSheetsReadAdapter
 ): Promise<CotikTrackingSheetBatchResult> {
-  const targetDate = requireNonBlank(request.targetDate, "targetDate");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) throw invalid("targetDate must use YYYY-MM-DD");
+  if (request.targetDate !== undefined && request.fromDate !== undefined) {
+    throw invalid("targetDate and fromDate are mutually exclusive");
+  }
+  const targetDate = request.targetDate === undefined ? undefined : requireIsoDate(request.targetDate, "targetDate");
+  const fromDate = request.fromDate === undefined ? undefined : requireIsoDate(request.fromDate, "fromDate");
+  if (targetDate === undefined && fromDate === undefined) {
+    throw invalid("one of targetDate or fromDate is required");
+  }
   if (request.dateColumn !== undefined && columnIndex(request.dateColumn) !== columnIndex("A")) {
     throw invalid("date-scoped contract fixes date column A");
   }
@@ -353,45 +467,42 @@ export async function readCotikTrackingSheetBatch(
   const header = rows[headerRowIndex] ?? [];
   validateFixedBatchHeaders(header);
   const resultIndex = columnIndex("W");
+  const accountIndex = columnIndex("Q");
   const trackingYIndex = columnIndex("Y");
   const trackingZIndex = columnIndex("Z");
   const providerIndex = columnIndex("AC");
   if (header.length <= providerIndex) throw invalid("Google Sheet range must include columns through AC");
   const selected: CotikTrackingSheetBatchRow[] = [];
+  const groupRows: CotikTrackingSheetGroupRow[] = [];
   const skippedRows: CotikTrackingSheetSkippedRow[] = [];
   rows.slice(headerRowIndex + 1).forEach((row, offset) => {
     const rowNumber = headerRowIndex + offset + 2;
-    if (parseTargetDate(row[dateIndex], request.dateFormat) !== targetDate) return;
-    const result = cellText(row, resultIndex);
-    if (result) {
-      skippedRows.push({ rowNumber, reason: "RESULT_ALREADY_PRESENT" });
-      return;
-    }
+    const rowDate = parseTargetDate(row[dateIndex], request.dateFormat);
+    if (rowDate === null) return;
+    if (fromDate !== undefined ? rowDate < fromDate : rowDate !== targetDate) return;
     const orderId = cellText(row, cotikOrderIdIndex);
     if (!orderId) {
       skippedRows.push({ rowNumber, reason: "MISSING_ORDER_ID" });
       return;
     }
+    const account = cellText(row, accountIndex);
+    const sheinOrderId = cellText(row, trackingYIndex);
     const providerNote = cellText(row, providerIndex);
-    if (!providerNote) {
-      skippedRows.push({ rowNumber, reason: "MISSING_PROVIDER_NOTE" });
-      return;
-    }
     const tracking = cellText(row, trackingZIndex);
-    if (!tracking) {
-      skippedRows.push({ rowNumber, reason: "MISSING_TRACKING" });
-      return;
-    }
+    const result = cellText(row, resultIndex);
+    groupRows.push({ rowNumber, account, orderId, sheinOrderId, tracking, providerNote, result });
     selected.push({
       rowNumber,
+      account,
       orderId,
-      sheinOrderId: cellText(row, columnIndex("Y")),
+      sheinOrderId,
       tracking,
       trackingColumn: "Z",
-      providerNote
+      providerNote,
+      result
     });
   });
-  return { headerRow: headerRowIndex + 1, rows: selected, skippedRows };
+  return { headerRow: headerRowIndex + 1, rows: selected, groupRows, skippedRows };
 }
 
 export async function writeCotikTrackingSheetResults(
@@ -417,11 +528,6 @@ export async function writeCotikTrackingSheetResults(
     const readUrl = new URL(SHEETS_API_BASE + "/spreadsheets/" + encodeURIComponent(spreadsheetId) + "/values/" + encodeURIComponent(cellRange));
     readUrl.searchParams.set("majorDimension", "ROWS");
     readUrl.searchParams.set("valueRenderOption", "UNFORMATTED_VALUE");
-    const current = readSingleCell(await readJson(readUrl, accessToken, fetchImpl, timeoutMs, "values"));
-    if (current) {
-      results.push({ rowNumber: item.rowNumber, status: "SKIPPED_NONBLANK" });
-      continue;
-    }
     const writeUrl = new URL(SHEETS_API_BASE + "/spreadsheets/" + encodeURIComponent(spreadsheetId) + "/values/" + encodeURIComponent(cellRange));
     writeUrl.searchParams.set("valueInputOption", "RAW");
     const controller = new AbortController();

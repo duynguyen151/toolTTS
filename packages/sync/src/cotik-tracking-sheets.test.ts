@@ -128,16 +128,18 @@ describe("date-scoped Cotik tracking Sheets workflow", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("requires the fixed B/Y/Z/AC headers before selecting rows", async () => {
+  it("requires the fixed B/Q/Y/Z/AC headers before selecting rows", async () => {
     const row = Array.from({ length: 29 }, () => "");
     row[0] = "2026-09-04";
     row[1] = "cotik-order-1";
+    row[16] = "acc-1";
     row[24] = "shein-order-1";
     row[25] = "TRACK-Z";
     row[28] = "USPS";
     const header = Array.from({ length: 29 }, () => "");
     header[0] = "Created date";
     header[1] = "Cotik Order ID";
+    header[16] = "Acc";
     header[22] = "Result";
     header[24] = "Shein Order ID";
     header[25] = "Tracking ID";
@@ -152,26 +154,30 @@ describe("date-scoped Cotik tracking Sheets workflow", () => {
     )).rejects.toThrow("AC provider header");
   });
 
-  it("selects 2026-09-04 rows from B as Cotik OrderID and Z as tracking, skipping nonblank W", async () => {
+  it("selects 2026-09-04 rows from Q/B and retains W", async () => {
     const row = Array.from({ length: 29 }, () => "");
     row[0] = "2026-09-04";
     row[1] = "cotik-order-1";
+    row[16] = "acc-1";
     row[24] = "shein-order-1";
     row[25] = "TRACK-Z";
     row[28] = "Gofo Express";
     const second = [...row];
     second[0] = "2026-09-03";
     second[1] = "cotik-order-2";
+    second[16] = "acc-2";
     second[24] = "shein-order-2";
     second[25] = "TRACK-Z2";
     const third = [...row];
     third[1] = "cotik-order-3";
+    third[16] = "acc-1";
     third[24] = "shein-order-3";
     third[22] = "already written";
     third[25] = "TRACK-Z3";
     const header = Array.from({ length: 29 }, () => "");
     header[0] = "Created date";
     header[1] = "Cotik Order ID";
+    header[16] = "Acc";
     header[22] = "Result";
     header[24] = "Shein Order ID";
     header[25] = "Tracking ID";
@@ -193,19 +199,111 @@ describe("date-scoped Cotik tracking Sheets workflow", () => {
       { accessToken: "server-token", fetch }
     )).resolves.toMatchObject({
       headerRow: 2,
-      rows: [{ rowNumber: 3, orderId: "cotik-order-1", sheinOrderId: "shein-order-1", tracking: "TRACK-Z", trackingColumn: "Z", providerNote: "Gofo Express" }],
-      skippedRows: [{ rowNumber: 5, reason: "RESULT_ALREADY_PRESENT" }]
+      rows: [
+        { rowNumber: 3, account: "acc-1", orderId: "cotik-order-1", sheinOrderId: "shein-order-1", tracking: "TRACK-Z", trackingColumn: "Z", providerNote: "Gofo Express", result: "" },
+        { rowNumber: 5, account: "acc-1", orderId: "cotik-order-3", sheinOrderId: "shein-order-3", tracking: "TRACK-Z3", trackingColumn: "Z", providerNote: "Gofo Express", result: "already written" }
+      ],
+      groupRows: [
+        { rowNumber: 3, account: "acc-1", orderId: "cotik-order-1", sheinOrderId: "shein-order-1", tracking: "TRACK-Z", providerNote: "Gofo Express", result: "" },
+        { rowNumber: 5, account: "acc-1", orderId: "cotik-order-3", sheinOrderId: "shein-order-3", tracking: "TRACK-Z3", providerNote: "Gofo Express", result: "already written" }
+      ],
+      skippedRows: []
     });
   });
-  it("treats Shein OrderID in Y without tracking in Z as missing tracking", async () => {
+
+  it("selects every eligible row on or after fromDate through the end of the source range", async () => {
+    const makeRow = (date: string, orderId: string, tracking: string, provider: string) => {
+      const row = Array.from({ length: 29 }, () => "");
+      row[0] = date;
+      row[1] = orderId;
+      row[16] = "acc-1";
+      row[24] = `shein-${orderId}`;
+      row[25] = tracking;
+      row[28] = provider;
+      return row;
+    };
+    const header = Array.from({ length: 29 }, () => "");
+    header[0] = "Created date";
+    header[1] = "Cotik Order ID";
+    header[16] = "Acc";
+    header[22] = "Result";
+    header[24] = "Shein Order ID";
+    header[25] = "Tracking ID";
+    header[28] = "Provider";
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(response(200, { sheets: [{ properties: { title: "Tháng 9-US" } }] }))
+      .mockResolvedValueOnce(response(200, {
+        values: [
+          header,
+          makeRow("2026-09-03", "before", "TRACK-0", "USPS"),
+          makeRow("2026-09-04", "start", "TRACK-1", "USPS"),
+          makeRow("2026-09-05", "after", "TRACK-2", "USPS")
+        ]
+      }));
+
+    await expect(readCotikTrackingSheetBatch(
+      { spreadsheetId: "sheet-1", tabTitle: "Tháng 9-US", range: "A1:AC4", fromDate: "2026-09-04" },
+      { accessToken: "server-token", fetch }
+    )).resolves.toMatchObject({
+      rows: [
+        { rowNumber: 3, orderId: "start" },
+        { rowNumber: 4, orderId: "after" }
+      ]
+    });
+  });
+
+  it("requires exactly one date selector", async () => {
+    const fetch = vi.fn();
+    await expect(readCotikTrackingSheetBatch(
+      { spreadsheetId: "sheet-1", tabTitle: "Tháng 9-US", range: "A1:AC2" },
+      { accessToken: "server-token", fetch }
+    )).rejects.toThrow("one of targetDate or fromDate");
+    await expect(readCotikTrackingSheetBatch(
+      { spreadsheetId: "sheet-1", tabTitle: "Tháng 9-US", range: "A1:AC2", targetDate: "2026-09-04", fromDate: "2026-09-04" },
+      { accessToken: "server-token", fetch }
+    )).rejects.toThrow("mutually exclusive");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("accepts the live sheet's Done header in AC while reading the explicit provider value", async () => {
+    const header = Array.from({ length: 29 }, () => "");
+    header[0] = "Date";
+    header[1] = "Order ID";
+    header[16] = "Acc";
+    header[22] = "Note";
+    header[24] = "Oder ID";
+    header[25] = "Tracking ID ";
+    header[28] = "Done";
+    const row = Array.from({ length: 29 }, () => "");
+    row[0] = "2026-09-01";
+    row[1] = "cotik-order-1";
+    row[16] = "acc-1";
+    row[24] = "shein-order-1";
+    row[25] = "TRACK-1";
+    row[28] = "USPS";
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(response(200, { sheets: [{ properties: { title: "Tháng 9-US" } }] }))
+      .mockResolvedValueOnce(response(200, { values: [header, row] }));
+
+    await expect(readCotikTrackingSheetBatch(
+      { spreadsheetId: "sheet-1", tabTitle: "Tháng 9-US", range: "A1:AC2", fromDate: "2026-09-01" },
+      { accessToken: "server-token", fetch }
+    )).resolves.toMatchObject({
+      rows: [{ orderId: "cotik-order-1", providerNote: "USPS" }]
+    });
+  });
+
+  it("keeps Shein OrderID in Y without tracking in Z for order grouping", async () => {
     const row = Array.from({ length: 29 }, () => "");
     row[0] = "2026-09-04";
     row[1] = "cotik-order-1";
+    row[16] = "acc-1";
     row[24] = "shein-order-1";
     row[28] = "Provider";
     const header = Array.from({ length: 29 }, () => "");
     header[0] = "Created date";
     header[1] = "Cotik Order ID";
+    header[16] = "Acc";
     header[22] = "Result";
     header[24] = "Shein Order ID";
     header[25] = "Tracking ID";
@@ -216,19 +314,21 @@ describe("date-scoped Cotik tracking Sheets workflow", () => {
     await expect(readCotikTrackingSheetBatch(
       { spreadsheetId: "sheet-1", tabTitle: "Tháng 9-US", range: "A1:AC2", targetDate: "2026-09-04" },
       { accessToken: "server-token", fetch }
-    )).resolves.toMatchObject({ rows: [], skippedRows: [{ rowNumber: 2, reason: "MISSING_TRACKING" }] });
+    )).resolves.toMatchObject({
+      rows: [{ rowNumber: 2, account: "acc-1", orderId: "cotik-order-1", sheinOrderId: "shein-order-1", tracking: "", trackingColumn: "Z", providerNote: "Provider", result: "" }],
+      skippedRows: []
+    });
   });
-  it("writes a blank W cell using a nested matrix and verifies the readback", async () => {
+  it("overwrites W unconditionally using a nested matrix and verifies the readback", async () => {
     const fetch = vi.fn()
       .mockResolvedValueOnce(response(200, { sheets: [{ properties: { title: "Tháng 9-US" } }] }))
-      .mockResolvedValueOnce(response(200, { values: [[""]] }))
       .mockResolvedValueOnce(response(200, { updatedRange: "'Tháng 9-US'!W195" }))
       .mockResolvedValueOnce(response(200, { values: [["POST_CONFIRMED"]] }));
     await expect(writeCotikTrackingSheetResults(
       { spreadsheetId: "sheet-1", tabTitle: "Tháng 9-US", results: [{ rowNumber: 195, result: "POST_CONFIRMED" }] },
       { accessToken: "server-token", fetch }
     )).resolves.toEqual([{ rowNumber: 195, status: "WRITTEN" }]);
-    expect(fetch.mock.calls[2]?.[1]).toMatchObject({
+    expect(fetch.mock.calls[1]?.[1]).toMatchObject({
       method: "PUT",
       body: JSON.stringify({ range: "'Tháng 9-US'!W195", majorDimension: "ROWS", values: [["POST_CONFIRMED"]] })
     });

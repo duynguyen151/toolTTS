@@ -5,13 +5,17 @@ import type { Database, DatabaseTransaction } from "../client.js";
 import {
   cotikPostAttempts,
   cotikPostIntents,
+  cotikTrackingRuns,
   cotikTrackingCandidates,
   type CotikPostAttemptRow,
   type CotikPostIntentRow,
+  type CotikTrackingRunRow,
   type CotikTrackingCandidateRow
 } from "../schema.js";
 
 type TrackingDatabase = Database | DatabaseTransaction;
+
+export const LEGACY_COTIK_TRACKING_RUN_ID = "00000000-0000-4000-8000-000000000021";
 
 function withTrackingTransaction<T>(
   db: TrackingDatabase,
@@ -42,6 +46,7 @@ export interface CreateTrackingCandidateInput {
   providerId: string;
   accountId: string;
   logicalShopId: string;
+  runId?: string | undefined;
   region: "US" | "UK";
   status?: "PENDING" | "POSTED" | "REJECTED" | "FAILED" | undefined;
 }
@@ -64,6 +69,7 @@ export async function createTrackingCandidate(
       providerId: input.providerId.trim(),
       accountId: input.accountId,
       logicalShopId: input.logicalShopId,
+      runId: input.runId ?? LEGACY_COTIK_TRACKING_RUN_ID,
       region: input.region,
       fingerprint,
       status: input.status ?? "PENDING"
@@ -76,7 +82,10 @@ export async function createTrackingCandidate(
   const [existing] = await db
     .select()
     .from(cotikTrackingCandidates)
-    .where(eq(cotikTrackingCandidates.fingerprint, fingerprint))
+    .where(and(
+      eq(cotikTrackingCandidates.fingerprint, fingerprint),
+      eq(cotikTrackingCandidates.runId, input.runId ?? LEGACY_COTIK_TRACKING_RUN_ID)
+    ))
     .limit(1);
 
   if (!existing) {
@@ -119,6 +128,7 @@ export interface CreatePostIntentInput {
   providerId: string;
   accountId: string;
   logicalShopId: string;
+  runId?: string | undefined;
   region: "US" | "UK";
   maxAttempts?: number | undefined;
 }
@@ -143,6 +153,7 @@ export async function createOrGetPostIntent(
       providerId: input.providerId.trim(),
       accountId: input.accountId,
       logicalShopId: input.logicalShopId,
+      runId: input.runId ?? LEGACY_COTIK_TRACKING_RUN_ID,
       region: input.region,
       status: "PENDING",
       attemptCount: 0,
@@ -158,7 +169,10 @@ export async function createOrGetPostIntent(
   const [existing] = await db
     .select()
     .from(cotikPostIntents)
-    .where(eq(cotikPostIntents.fingerprint, fingerprint))
+    .where(and(
+      eq(cotikPostIntents.fingerprint, fingerprint),
+      eq(cotikPostIntents.runId, input.runId ?? LEGACY_COTIK_TRACKING_RUN_ID)
+    ))
     .limit(1);
 
   if (!existing) {
@@ -196,6 +210,79 @@ export async function createOrGetPostIntent(
     .returning();
 
   return rerouted ?? existing;
+}
+
+export interface CreateCotikTrackingReplayRunInput {
+  sourceRunId: string;
+}
+
+export async function createCotikTrackingReplayRun(
+  db: TrackingDatabase,
+  input: CreateCotikTrackingReplayRunInput
+): Promise<CotikTrackingRunRow> {
+  const [run] = await db
+    .insert(cotikTrackingRuns)
+    .values({ mode: "REPLAY", sourceRunId: input.sourceRunId })
+    .returning();
+  if (!run) throw new Error("Failed to create Cotik tracking replay run");
+  return run;
+}
+
+export async function getCotikTrackingRunById(
+  db: TrackingDatabase,
+  runId: string
+): Promise<CotikTrackingRunRow | null> {
+  const [run] = await db
+    .select()
+    .from(cotikTrackingRuns)
+    .where(eq(cotikTrackingRuns.id, runId))
+    .limit(1);
+  return run ?? null;
+}
+
+export interface StageConfirmedPostIntentForReplayInput {
+  sourceIntentId: string;
+  runId: string;
+}
+
+export async function stageConfirmedPostIntentForReplay(
+  db: TrackingDatabase,
+  input: StageConfirmedPostIntentForReplayInput
+): Promise<{ candidate: CotikTrackingCandidateRow; intent: CotikPostIntentRow }> {
+  return await withTrackingTransaction(db, async (tx) => {
+    const [source] = await tx
+      .select()
+      .from(cotikPostIntents)
+      .where(eq(cotikPostIntents.id, input.sourceIntentId))
+      .for("update")
+      .limit(1);
+    if (!source || source.status !== "CONFIRMED") {
+      throw new Error("Only a confirmed Cotik post intent can be staged for replay");
+    }
+    const [run] = await tx
+      .select()
+      .from(cotikTrackingRuns)
+      .where(and(
+        eq(cotikTrackingRuns.id, input.runId),
+        eq(cotikTrackingRuns.mode, "REPLAY"),
+        eq(cotikTrackingRuns.sourceRunId, source.runId)
+      ))
+      .for("update")
+      .limit(1);
+    if (!run) throw new Error("Cotik replay run does not belong to the confirmed source run");
+    const replayInput: CreatePostIntentInput = {
+      orderId: source.orderId,
+      tracking: source.tracking,
+      providerId: source.providerId,
+      accountId: source.accountId,
+      logicalShopId: source.logicalShopId,
+      region: source.region as "US" | "UK",
+      runId: input.runId
+    };
+    const candidate = await createTrackingCandidate(tx, replayInput);
+    const intent = await createOrGetPostIntent(tx, replayInput);
+    return { candidate, intent };
+  });
 }
 
 export interface RecordPostAttemptInput {
@@ -282,10 +369,10 @@ export async function recordPostAttempt(
       nextStatus = "CONFIRMED";
     } else if (input.abort === true) {
       nextStatus = "ABORTED";
-    } else if (input.keepInProgress === true) {
-      nextStatus = "IN_PROGRESS";
     } else if (input.attemptNo >= intent.maxAttempts) {
       nextStatus = "FAILED";
+    } else if (input.keepInProgress === true) {
+      nextStatus = "IN_PROGRESS";
     } else {
       nextStatus = "PENDING";
     }
@@ -306,15 +393,55 @@ export async function recordPostAttempt(
   });
 }
 
+export async function reopenPostIntentForReplay(
+  db: TrackingDatabase,
+  intentId: string
+): Promise<CotikPostIntentRow | null> {
+  return await withTrackingTransaction(db, async (tx) => {
+    const [intent] = await tx
+      .select()
+      .from(cotikPostIntents)
+      .where(eq(cotikPostIntents.id, intentId))
+      .for("update")
+      .limit(1);
+
+    if (!intent) return null;
+    if (
+      !["CONFIRMED", "FAILED", "ABORTED"].includes(intent.status) ||
+      intent.attemptCount >= intent.maxAttempts
+    ) {
+      return intent;
+    }
+
+    const [reopened] = await tx
+      .update(cotikPostIntents)
+      .set({ status: "PENDING", confirmedAt: null, updatedAt: new Date() })
+      .where(
+        and(
+          eq(cotikPostIntents.id, intentId),
+          inArray(cotikPostIntents.status, ["CONFIRMED", "FAILED", "ABORTED"]),
+          lt(cotikPostIntents.attemptCount, cotikPostIntents.maxAttempts)
+        )
+      )
+      .returning();
+
+    return reopened ?? intent;
+  });
+}
+
 export async function listInProgressPostIntents(
   db: TrackingDatabase,
-  limit = 50
+  limit = 50,
+  options: { runId?: string | undefined } = {}
 ): Promise<CotikPostIntentRow[]> {
   const boundedLimit = Math.min(Math.max(limit, 1), 50);
   return await db
     .select()
     .from(cotikPostIntents)
-    .where(eq(cotikPostIntents.status, "IN_PROGRESS"))
+    .where(and(
+      eq(cotikPostIntents.status, "IN_PROGRESS"),
+      ...(options.runId ? [eq(cotikPostIntents.runId, options.runId)] : [])
+    ))
     .orderBy(asc(cotikPostIntents.lastAttemptAt), asc(cotikPostIntents.createdAt))
     .limit(boundedLimit);
 }
@@ -324,18 +451,21 @@ export async function listPendingPostIntents(
   limit = 50,
   options: {
     reserve?: boolean | undefined;
+    runId?: string | undefined;
     intentIds?: string[] | undefined;
     requestPayloadByIntent?: Record<string, Record<string, unknown>> | undefined;
   } = {}
 ): Promise<CotikPostIntentRow[]> {
   const boundedLimit = Math.min(Math.max(limit, 1), 50);
+  if (options.intentIds?.length === 0) return [];
   const intentFilter = options.intentIds && options.intentIds.length > 0
     ? inArray(cotikPostIntents.id, options.intentIds)
     : undefined;
   const pendingWhere = and(
     eq(cotikPostIntents.status, "PENDING"),
     lt(cotikPostIntents.attemptCount, cotikPostIntents.maxAttempts),
-    ...(intentFilter ? [intentFilter] : [])
+    ...(intentFilter ? [intentFilter] : []),
+    ...(options.runId ? [eq(cotikPostIntents.runId, options.runId)] : [])
   );
 
   if (options.reserve !== true) {
@@ -426,6 +556,7 @@ export interface FindPostIntentForTrackingInput {
   orderId: string;
   tracking: string;
   region: "US" | "UK";
+  runId?: string | undefined;
 }
 
 export async function findPostIntentForTracking(
@@ -439,7 +570,8 @@ export async function findPostIntentForTracking(
       eq(cotikPostIntents.logicalShopId, input.logicalShopId),
       eq(cotikPostIntents.orderId, input.orderId.trim()),
       eq(cotikPostIntents.tracking, input.tracking.trim()),
-      eq(cotikPostIntents.region, input.region)
+      eq(cotikPostIntents.region, input.region),
+      ...(input.runId ? [eq(cotikPostIntents.runId, input.runId)] : [])
     ))
     .orderBy(desc(cotikPostIntents.updatedAt))
     .limit(2);

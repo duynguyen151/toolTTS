@@ -59,6 +59,10 @@ describe("tracking staging boundary", () => {
     mocks.listObservationsForOrder.mockResolvedValue([{ accountId: "latest", orderStatus: "UNKNOWN" }]);
     expect((await stageCotikTracking(db, input)).status).toBe("PAUSED");
   });
+  it.each(["AWAITING_COLLECTION", "new"])("accepts Cotik tracking-write status %s", async (orderStatus) => {
+    mocks.listObservationsForOrder.mockResolvedValue([{ accountId: "latest", orderStatus, tracking: null }]);
+    expect(await resolveCotikTrackingInput(db, input)).toMatchObject({ status: "RESOLVED" });
+  });
   it("pauses conflicting existing tracking", async () => {
     mocks.listObservationsForOrder.mockResolvedValue([{ accountId: "latest", orderStatus: "AWAITING_SHIPMENT", tracking: "OTHER" }]);
     expect((await stageCotikTracking(db, input)).status).toBe("PAUSED");

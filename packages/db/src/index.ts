@@ -391,9 +391,11 @@ export {
 // --- W21 Phase 2B Cotik POST Writer & Tracking exports ---
 export {
   cotikTrackingCandidates,
+  cotikTrackingRuns,
   cotikPostIntents,
   cotikPostAttempts,
   type CotikTrackingCandidateRow,
+  type CotikTrackingRunRow,
   type CotikPostIntentRow,
   type CotikPostAttemptRow
 } from "./schema.js";
@@ -409,9 +411,13 @@ export {
 
 export {
   computeTrackingFingerprint,
+  LEGACY_COTIK_TRACKING_RUN_ID,
+  createCotikTrackingReplayRun,
+  getCotikTrackingRunById,
   createTrackingCandidate,
   createOrGetPostIntent,
   recordPostAttempt,
+  stageConfirmedPostIntentForReplay,
   listPendingPostIntents,
   listInProgressPostIntents,
   getPostIntentById,
@@ -419,7 +425,9 @@ export {
   findPostIntentForTracking,
   listAttemptsForIntent,
   type CreateTrackingCandidateInput,
+  type CreateCotikTrackingReplayRunInput,
   type CreatePostIntentInput,
+  type StageConfirmedPostIntentForReplayInput,
   type FindPostIntentForTrackingInput,
   type RecordPostAttemptInput
 } from "./queries/cotik-tracking.js";

@@ -70,7 +70,9 @@ export async function resolveCotikTrackingInput(
   const account = eligible[0];
   if (!account) return pause("ACTIVE_DISCOVERED_ACCOUNT_UNPROVEN");
   const observation = observations.find((item) => item.accountId === account.id)!;
-  if (observation.orderStatus !== "AWAITING_SHIPMENT") return pause("ORDER_NOT_AWAITING_SHIPMENT");
+  if (!new Set(["AWAITING_SHIPMENT", "AWAITING_COLLECTION", "NEW"]).has(observation.orderStatus.trim().toUpperCase())) {
+    return pause("ORDER_NOT_TRACKING_WRITE_ELIGIBLE");
+  }
   if (observation.tracking?.trim() && observation.tracking.trim().toUpperCase() !== clean.tracking.toUpperCase())
     return pause("EXISTING_TRACKING_CONFLICT");
   const provider = resolveExplicitProvider(clean.provider, clean.region, catalog);

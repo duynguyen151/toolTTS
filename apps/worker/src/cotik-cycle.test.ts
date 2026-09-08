@@ -5,6 +5,7 @@ const mockDb = vi.hoisted(() => ({
   createOrGetPostIntent: vi.fn(),
   ensureCotikWorkflowSettings: vi.fn(),
   findCotikAccountById: vi.fn(),
+  getCotikTrackingRunById: vi.fn(),
   getDecryptedCotikToken: vi.fn(),
   listAttemptsForIntent: vi.fn(),
   listInProgressPostIntents: vi.fn(),
@@ -43,6 +44,7 @@ beforeEach(() => {
   );
   mockDb.listInProgressPostIntents.mockResolvedValue([]);
   mockDb.findCotikAccountById.mockResolvedValue({ status: "ACTIVE", lastSeenAt: new Date("2026-01-01") });
+  mockDb.getCotikTrackingRunById.mockResolvedValue({ mode: "REPLAY" });
   mockSync.resolveCotikTrackingInput.mockImplementation(
     async (_db: unknown, input: { logicalShopId: string; orderId: string; tracking: string; region: "US" | "UK" }) => ({
       status: "RESOLVED",
@@ -52,6 +54,22 @@ beforeEach(() => {
 });
 
 describe("runCotikWorkerCycle", () => {
+  it("can run POST-only without discovery or order GET sync", async () => {
+    mockDb.resetCotikWorkflowSettingsForDeployment.mockResolvedValue({ reset: false });
+    mockDb.ensureCotikWorkflowSettings.mockResolvedValue({ cotikSyncEnabled: true, cotikPostEnabled: true });
+    mockDb.listPendingPostIntents.mockResolvedValue([]);
+
+    await runCotikWorkerCycle({
+      context: { db: {} } as DatabaseContext,
+      deploymentId: "dep-post-only",
+      skipDiscovery: true,
+      skipOrderSync: true
+    });
+
+    expect(mockSync.runCotikDiscoverySync).not.toHaveBeenCalled();
+    expect(mockSync.runCotikMultiAccountOrdersSync).not.toHaveBeenCalled();
+  });
+
   it("persists a changed winner before reserving an untouched intent", async () => {
     mockDb.resetCotikWorkflowSettingsForDeployment.mockResolvedValue({ reset: false });
     mockDb.ensureCotikWorkflowSettings.mockResolvedValue({ cotikSyncEnabled: true, cotikPostEnabled: true });
@@ -91,14 +109,38 @@ describe("runCotikWorkerCycle", () => {
     expect(mockDb.resetCotikWorkflowSettingsForDeployment).not.toHaveBeenCalled();
   });
 
-  it("fails closed when deploymentId is blank", async () => {
+  it("allows a manual cycle without a deployment version when both switches are enabled", async () => {
+    mockDb.ensureCotikWorkflowSettings.mockResolvedValue({
+      cotikSyncEnabled: true,
+      cotikPostEnabled: true
+    });
+    mockDb.listPendingPostIntents.mockResolvedValue([]);
+
     const result = await runCotikWorkerCycle({
       context: { db: {} } as unknown as DatabaseContext,
-      deploymentId: "   "
+      skipDiscovery: true,
+      skipOrderSync: true
+    } as Parameters<typeof runCotikWorkerCycle>[0]);
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.deploymentReset).toBe(false);
+    expect(mockDb.resetCotikWorkflowSettingsForDeployment).not.toHaveBeenCalled();
+  });
+
+  it("reports that manual POST is paused when either kill switch is off", async () => {
+    mockDb.ensureCotikWorkflowSettings.mockResolvedValue({
+      cotikSyncEnabled: true,
+      cotikPostEnabled: false
     });
 
-    expect(result.status).toBe("SKIPPED");
-    expect(mockDb.resetCotikWorkflowSettingsForDeployment).not.toHaveBeenCalled();
+    const result = await runCotikWorkerCycle({
+      context: { db: {} } as unknown as DatabaseContext,
+      skipDiscovery: true,
+      skipOrderSync: true
+    });
+
+    expect(result.status).toBe("COMPLETED");
+    expect(result.message).toBe("Cotik POST skipped: enable both kill switches before manual POST.");
     expect(mockCotik.postCotikTrackingBatch).not.toHaveBeenCalled();
   });
 
@@ -128,6 +170,7 @@ describe("runCotikWorkerCycle", () => {
     expect(result.deploymentReset).toBe(true);
     expect(result.syncEnabled).toBe(false);
     expect(result.postEnabled).toBe(false);
+    expect(result.message).toBe("Cotik POST skipped: enable both kill switches before manual POST.");
     expect(mockCotik.postCotikTrackingBatch).not.toHaveBeenCalled();
   });
 
@@ -213,7 +256,7 @@ describe("runCotikWorkerCycle", () => {
     expect(result.postEnabled).toBe(true);
     expect(mockCotik.postCotikTrackingBatch).toHaveBeenCalledWith(
       expect.objectContaining({
-        killSwitchEnabled: true,
+        isPostAuthorized: expect.any(Function),
         items: [
           {
             orderId: "ord-1",
@@ -223,6 +266,10 @@ describe("runCotikWorkerCycle", () => {
         ]
       })
     );
+    const postInput = mockCotik.postCotikTrackingBatch.mock.calls[0]?.[0] as {
+      isPostAuthorized: () => Promise<boolean>;
+    };
+    await expect(postInput.isPostAuthorized()).resolves.toBe(true);
     expect(mockDb.recordPostAttempt).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -238,6 +285,131 @@ describe("runCotikWorkerCycle", () => {
       50,
       expect.objectContaining({ reserve: false })
     );
+  });
+
+  it("processes only the requested replay run in account batches capped at 50", async () => {
+    mockDb.resetCotikWorkflowSettingsForDeployment.mockResolvedValue({ reset: false });
+    mockDb.ensureCotikWorkflowSettings.mockResolvedValue({ cotikSyncEnabled: true, cotikPostEnabled: true });
+    const replayIntents = Array.from({ length: 51 }, (_, index) => ({
+      ...intentFixture(),
+      id: `intent-${index + 1}`,
+      orderId: `order-${index + 1}`,
+      region: "US",
+      runId: "replay-run-1"
+    }));
+    mockDb.listPendingPostIntents.mockImplementation(
+      async (_db: unknown, _limit: number, options?: { reserve?: boolean }) =>
+        options?.reserve === true
+          ? replayIntents.slice(0, 50).map((intent) => ({ ...intent, status: "IN_PROGRESS", attemptCount: 1 }))
+          : replayIntents
+    );
+    mockDb.listProviderCatalog.mockResolvedValue([]);
+    mockDb.getDecryptedCotikToken.mockResolvedValue("token-123");
+    mockDb.listAttemptsForIntent.mockResolvedValue([]);
+    mockCotik.createMultiAccountCotikClient.mockReturnValue({ accountId: "acc-1" });
+    mockCotik.postCotikTrackingBatch.mockResolvedValue({
+      status: "CONFIRMED",
+      confirmedOrders: replayIntents.slice(0, 50).map((intent) => intent.orderId),
+      unconfirmedOrders: [], failedOrders: [], rejectedItems: [], logUpdate: []
+    });
+    mockDb.recordPostAttempt.mockResolvedValue({});
+
+    await runCotikWorkerCycle({
+      context: { db: {} } as DatabaseContext,
+      deploymentId: "dep-replay",
+      trackingRunId: "replay-run-1",
+      skipDiscovery: true,
+      skipOrderSync: true
+    });
+
+    expect(mockDb.listPendingPostIntents).toHaveBeenCalledWith(
+      expect.anything(),
+      50,
+      expect.objectContaining({ reserve: false, runId: "replay-run-1" })
+    );
+    expect(mockCotik.postCotikTrackingBatch).toHaveBeenCalledTimes(1);
+    expect(mockCotik.postCotikTrackingBatch.mock.calls[0]?.[0].items).toHaveLength(50);
+  });
+
+  it("processes replay accounts sequentially", async () => {
+    mockDb.resetCotikWorkflowSettingsForDeployment.mockResolvedValue({ reset: false });
+    mockDb.ensureCotikWorkflowSettings.mockResolvedValue({ cotikSyncEnabled: true, cotikPostEnabled: true });
+    const replayIntents = [
+      { ...intentFixture(), id: "intent-a", orderId: "order-a", accountId: "acc-a", region: "US", runId: "replay-run-1" },
+      { ...intentFixture(), id: "intent-b", orderId: "order-b", accountId: "acc-b", region: "US", runId: "replay-run-1" }
+    ];
+    mockDb.listPendingPostIntents.mockImplementation(
+      async (_db: unknown, _limit: number, options?: { reserve?: boolean }) =>
+        options?.reserve === true
+          ? replayIntents.map((intent) => ({ ...intent, status: "IN_PROGRESS", attemptCount: 1 }))
+          : replayIntents
+    );
+    mockDb.getDecryptedCotikToken.mockResolvedValue("token-123");
+    mockDb.listAttemptsForIntent.mockResolvedValue([]);
+    mockDb.recordPostAttempt.mockResolvedValue({});
+    mockSync.resolveCotikTrackingInput.mockImplementation(
+      async (_db: unknown, input: { orderId: string }) => ({
+        status: "RESOLVED",
+        input: {
+          logicalShopId: "shop-1", orderId: input.orderId, tracking: "GFU123456789012345",
+          provider: "Gofo", providerId: "7352739623900022544", region: "US",
+          accountId: input.orderId === "order-a" ? "acc-a" : "acc-b"
+        }
+      })
+    );
+    mockCotik.createMultiAccountCotikClient.mockImplementation(({ accountId }: { accountId: string }) => ({ accountId }));
+    const events: string[] = [];
+    mockCotik.postCotikTrackingBatch.mockImplementation(async ({ client, items }: { client: { accountId: string }; items: Array<{ orderId: string }> }) => {
+      events.push(`start:${client.accountId}`);
+      await Promise.resolve();
+      events.push(`end:${client.accountId}`);
+      return { status: "CONFIRMED", confirmedOrders: items.map((item) => item.orderId), unconfirmedOrders: [], failedOrders: [], rejectedItems: [], logUpdate: [] };
+    });
+
+    await runCotikWorkerCycle({
+      context: { db: {} } as DatabaseContext,
+      deploymentId: "dep-replay-sequential",
+      trackingRunId: "replay-run-1",
+      skipDiscovery: true,
+      skipOrderSync: true
+    });
+
+    expect(events).toEqual(["start:acc-a", "end:acc-a", "start:acc-b", "end:acc-b"]);
+  });
+
+  it("does not read back a non-US replay intent", async () => {
+    mockDb.resetCotikWorkflowSettingsForDeployment.mockResolvedValue({ reset: false });
+    mockDb.ensureCotikWorkflowSettings.mockResolvedValue({ cotikSyncEnabled: true, cotikPostEnabled: true });
+    mockDb.listInProgressPostIntents.mockResolvedValue([{ ...intentFixture(), region: "UK", runId: "replay-run-1", attemptCount: 1 }]);
+    mockDb.listPendingPostIntents.mockResolvedValue([]);
+
+    await runCotikWorkerCycle({
+      context: { db: {} } as DatabaseContext,
+      deploymentId: "dep-replay-us-only",
+      trackingRunId: "replay-run-1",
+      skipDiscovery: true,
+      skipOrderSync: true
+    });
+
+    expect(mockCotik.confirmOrderTrackingReadback).not.toHaveBeenCalled();
+  });
+
+  it("does not dispatch a tracking run that is not an authorized replay run", async () => {
+    mockDb.resetCotikWorkflowSettingsForDeployment.mockResolvedValue({ reset: false });
+    mockDb.ensureCotikWorkflowSettings.mockResolvedValue({ cotikSyncEnabled: true, cotikPostEnabled: true });
+    mockDb.getCotikTrackingRunById.mockResolvedValue(null);
+
+    const result = await runCotikWorkerCycle({
+      context: { db: {} } as DatabaseContext,
+      deploymentId: "dep-replay-unauthorized",
+      trackingRunId: "unknown-run",
+      skipDiscovery: true,
+      skipOrderSync: true
+    });
+
+    expect(result.message).toBe("Cotik tracking run is not an authorized replay run");
+    expect(mockDb.listPendingPostIntents).not.toHaveBeenCalled();
+    expect(mockCotik.postCotikTrackingBatch).not.toHaveBeenCalled();
   });
 
   it("rechecks both switches immediately before dispatch and fails closed", async () => {

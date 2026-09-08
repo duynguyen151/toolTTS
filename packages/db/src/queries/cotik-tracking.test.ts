@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createCotikTrackingReplayRun,
+  computeTrackingFingerprint,
   createOrGetPostIntent,
   findPostIntentForTracking,
   listPendingPostIntents,
+  reopenPostIntentForReplay,
+  stageConfirmedPostIntentForReplay,
   type CreatePostIntentInput
 } from "./cotik-tracking.js";
 
@@ -25,6 +29,7 @@ function intent(overrides: Record<string, unknown> = {}) {
     providerId: intentInput.providerId,
     accountId: "account-old",
     logicalShopId: "shop-old",
+    runId: "00000000-0000-4000-8000-000000000021",
     region: "US",
     status: "PENDING",
     attemptCount: 0,
@@ -95,6 +100,157 @@ function createReservationDb(rows: Array<ReturnType<typeof intent>>) {
 }
 
 describe("Cotik tracking intent safety", () => {
+  it("creates a fresh replay run that preserves the source run identity", async () => {
+    let values: Record<string, unknown> | undefined;
+    const db = {
+      insert: () => ({
+        values: (input: Record<string, unknown>) => {
+          values = input;
+          return { returning: async () => [{ id: "replay-run-1", ...input }] };
+        }
+      })
+    };
+
+    const run = await createCotikTrackingReplayRun(db as never, { sourceRunId: "source-run-1" });
+
+    expect(run).toMatchObject({ id: "replay-run-1", mode: "REPLAY", sourceRunId: "source-run-1" });
+    expect(values).toMatchObject({ mode: "REPLAY", sourceRunId: "source-run-1" });
+  });
+
+  it("keeps the historical fingerprint stable while replay is scoped by a new run", () => {
+    const historical = computeTrackingFingerprint("order-1", "GFU123456789012345", "provider-1");
+    const replay = computeTrackingFingerprint("order-1", "GFU123456789012345", "provider-1");
+
+    expect(replay).toBe(historical);
+  });
+
+  it("refuses to clone a non-confirmed intent into a replay run", async () => {
+    const source = intent({ status: "PENDING" });
+    const db = {
+      transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
+        select: () => ({
+          from: () => ({
+            where: () => ({ for: () => ({ limit: async () => [source] }) })
+          })
+        })
+      })
+    };
+
+    await expect(stageConfirmedPostIntentForReplay(db as never, {
+      sourceIntentId: source.id,
+      runId: "replay-run-1"
+    })).rejects.toThrow("Only a confirmed Cotik post intent can be staged for replay");
+  });
+
+  it("clones a confirmed intent into a new replay run", async () => {
+    const source = intent({ status: "CONFIRMED" });
+    const inserted: Record<string, unknown>[] = [];
+    const candidate = { ...source, id: "candidate-replay", runId: "replay-run-1" };
+    const replayIntent = { ...source, id: "intent-replay", status: "PENDING", attemptCount: 0, runId: "replay-run-1" };
+    let selectCount = 0;
+    const db = {
+      transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
+        select: () => ({
+          from: () => ({
+            where: () => ({
+              for: () => ({
+                limit: async () => ++selectCount === 1
+                  ? [source]
+                  : [{ id: "replay-run-1", mode: "REPLAY", sourceRunId: source.runId }]
+              })
+            })
+          })
+        }),
+        insert: () => ({
+          values: (values: Record<string, unknown>) => {
+            inserted.push(values);
+            return {
+              onConflictDoNothing: () => ({
+                returning: async () => [inserted.length === 1 ? candidate : replayIntent]
+              })
+            };
+          }
+        })
+      })
+    };
+
+    const result = await stageConfirmedPostIntentForReplay(db as never, {
+      sourceIntentId: source.id,
+      runId: "replay-run-1"
+    });
+
+    expect(result.intent).toMatchObject({ id: "intent-replay", status: "PENDING", runId: "replay-run-1" });
+    expect(inserted).toHaveLength(2);
+    expect(inserted.every((values) => values.runId === "replay-run-1")).toBe(true);
+  });
+
+  it("reopens a terminal intent without resetting its attempt history", async () => {
+    const existing = intent({
+      status: "FAILED",
+      attemptCount: 2,
+      maxAttempts: 3,
+      lastAttemptAt: new Date("2026-01-01T00:01:00.000Z"),
+      confirmedAt: new Date("2026-01-01T00:01:00.000Z")
+    });
+    let updateCalled = false;
+    const db = {
+      transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
+        select: () => ({
+          from: () => ({
+            where: () => ({
+              for: () => ({ limit: async () => [existing] })
+            })
+          })
+        }),
+        update: () => ({
+          set: (values: Record<string, unknown>) => ({
+            where: () => ({
+              returning: async () => {
+                updateCalled = true;
+                Object.assign(existing, values);
+                return [existing];
+              }
+            })
+          })
+        })
+      })
+    };
+
+    const result = await reopenPostIntentForReplay(db as never, existing.id);
+
+    expect(updateCalled).toBe(true);
+    expect(result).toMatchObject({
+      status: "PENDING",
+      attemptCount: 2,
+      maxAttempts: 3,
+      lastAttemptAt: new Date("2026-01-01T00:01:00.000Z"),
+      confirmedAt: null
+    });
+  });
+
+  it("leaves an exhausted terminal intent unchanged", async () => {
+    const existing = intent({ status: "ABORTED", attemptCount: 3, maxAttempts: 3 });
+    let updateCalled = false;
+    const db = {
+      transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
+        select: () => ({
+          from: () => ({
+            where: () => ({
+              for: () => ({ limit: async () => [existing] })
+            })
+          })
+        }),
+        update: () => {
+          updateCalled = true;
+          return { set: () => ({ where: () => ({ returning: async () => [existing] }) }) };
+        }
+      })
+    };
+
+    await expect(reopenPostIntentForReplay(db as never, existing.id)).resolves.toEqual(existing);
+    expect(updateCalled).toBe(false);
+  });
+
   it("rejects a legacy delimiter collision instead of reusing another order tuple", async () => {
     const existing = intent({ logicalShopId: "shop-1", region: "UK", orderId: "a:b", tracking: "c", providerId: "d" });
     const db = {

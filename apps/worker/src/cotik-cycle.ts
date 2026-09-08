@@ -3,6 +3,7 @@ import {
   createOrGetPostIntent,
   ensureCotikWorkflowSettings,
   findCotikAccountById,
+  getCotikTrackingRunById,
   getDecryptedCotikToken,
   listAttemptsForIntent,
   listInProgressPostIntents,
@@ -29,13 +30,17 @@ import type { Logger } from "pino";
 
 export interface CotikCycleOptions {
   readonly context: DatabaseContext;
-  readonly deploymentId: string;
+  readonly deploymentId?: string | undefined;
   readonly vaultKeyHex?: string | undefined;
   readonly baseUrl?: string | undefined;
   readonly logger?: Logger | undefined;
   readonly now?: (() => Date) | undefined;
   readonly forceDiscovery?: boolean | undefined;
   readonly forceOrderSync?: boolean | undefined;
+  readonly skipDiscovery?: boolean | undefined;
+  readonly skipOrderSync?: boolean | undefined;
+  readonly trackingRunId?: string | undefined;
+  readonly trackingIntentIds?: readonly string[] | undefined;
 }
 
 export interface CotikCycleResult {
@@ -60,25 +65,15 @@ export async function runCotikWorkerCycle(
   options: CotikCycleOptions
 ): Promise<CotikCycleResult> {
   const { context, deploymentId, logger } = options;
-  if (deploymentId.trim().length === 0) {
-    return {
-      status: "SKIPPED",
-      deploymentReset: false,
-      syncEnabled: false,
-      postEnabled: false,
-      message: "Cotik worker cycle skipped: deployment ID is required"
-    };
-  }
   const now = options.now ? options.now() : new Date();
   const nowMs = now.getTime();
 
   return (
     (await withCotikCycleExecutionLock(context, async () => {
       // 1. Deployment Reset: dual kill switch resets to OFF on new deployment
-      const resetResult = await resetCotikWorkflowSettingsForDeployment(
-        context.db,
-        deploymentId
-      );
+      const resetResult = deploymentId?.trim()
+        ? await resetCotikWorkflowSettingsForDeployment(context.db, deploymentId)
+        : { reset: false, previousDeploymentId: null, currentDeploymentId: null };
 
       if (resetResult.reset) {
         logger?.warn(
@@ -97,9 +92,10 @@ export async function runCotikWorkerCycle(
       // 3. Discovery: runs on start, daily, or when forced
       let discoveryResult: CotikMultiAccountDiscoveryResult | undefined;
       const isDiscoveryDue =
-        options.forceDiscovery === true ||
+        options.skipDiscovery !== true &&
+        (options.forceDiscovery === true ||
         lastDiscoveryRunMs === 0 ||
-        nowMs - lastDiscoveryRunMs >= ONE_DAY_MS;
+        nowMs - lastDiscoveryRunMs >= ONE_DAY_MS);
 
       if (isDiscoveryDue) {
         logger?.info("Starting Cotik multi-account discovery cycle");
@@ -116,6 +112,7 @@ export async function runCotikWorkerCycle(
       // 4. Order sync: runs every 60m if cotikSyncEnabled is ON
       let ordersSyncResult: CotikMultiAccountOrdersSyncResult | undefined;
       const isOrderSyncDue =
+        options.skipOrderSync !== true &&
         cotikSyncEnabled &&
         (options.forceOrderSync === true ||
           lastOrderSyncRunMs === 0 ||
@@ -137,10 +134,32 @@ export async function runCotikWorkerCycle(
       // 5. Tracking POST cycle: ONLY executes when cotikPostEnabled is TRUE
       let trackingBatchesExecuted = 0;
       let trackingOrdersConfirmed = 0;
+      const killSwitchMessage = !cotikSyncEnabled || !cotikPostEnabled
+        ? "Cotik POST skipped: enable both kill switches before manual POST."
+        : undefined;
 
       if (cotikSyncEnabled && cotikPostEnabled) {
-        const inProgressIntents = await listInProgressPostIntents(context.db, 50);
+        if (options.trackingRunId) {
+          const trackingRun = await getCotikTrackingRunById(context.db, options.trackingRunId);
+          if (trackingRun?.mode !== "REPLAY") {
+            return {
+              status: "COMPLETED",
+              deploymentReset: resetResult.reset,
+              syncEnabled: cotikSyncEnabled,
+              postEnabled: cotikPostEnabled,
+              discoveryResult,
+              ordersSyncResult,
+              trackingBatchesExecuted,
+              trackingOrdersConfirmed,
+              message: "Cotik tracking run is not an authorized replay run"
+            };
+          }
+        }
+        const inProgressIntents = await listInProgressPostIntents(context.db, 50, {
+          ...(options.trackingRunId ? { runId: options.trackingRunId } : {})
+        });
         for (const intent of inProgressIntents) {
+          if (options.trackingRunId && intent.region !== "US") continue;
           const account = await findCotikAccountById(context.db, intent.accountId);
           if (account?.status !== "ACTIVE" || account.lastSeenAt === null) continue;
           const token = await getDecryptedCotikToken(context.db, intent.accountId, options.vaultKeyHex);
@@ -165,7 +184,11 @@ export async function runCotikWorkerCycle(
           });
           trackingOrdersConfirmed++;
         }
-        const pendingIntents = await listPendingPostIntents(context.db, 50, { reserve: false });
+        const pendingIntents = await listPendingPostIntents(context.db, 50, {
+          reserve: false,
+          ...(options.trackingRunId ? { runId: options.trackingRunId } : {}),
+          ...(options.trackingIntentIds ? { intentIds: [...options.trackingIntentIds] } : {})
+        });
 
         if (pendingIntents.length > 0) {
           logger?.info(
@@ -183,6 +206,10 @@ export async function runCotikWorkerCycle(
               logger?.warn({ intentId: intent.id, region: intent.region }, "Cotik tracking intent has unknown region");
               continue;
             }
+            if (options.trackingRunId && intentRegion !== "US") {
+              logger?.warn({ intentId: intent.id, region: intent.region }, "Cotik replay intent is outside the US boundary");
+              continue;
+            }
             const resolution = await resolveCotikTrackingInput(context.db, {
               logicalShopId: intent.logicalShopId,
               orderId: intent.orderId,
@@ -194,7 +221,10 @@ export async function runCotikWorkerCycle(
               if (resolution.input.providerId !== intent.providerId) continue;
               if (resolution.input.accountId !== intent.accountId) {
                 if (intent.attemptCount !== 0) continue;
-                const rerouted = await createOrGetPostIntent(context.db, resolution.input);
+                const rerouted = await createOrGetPostIntent(context.db, {
+                  ...resolution.input,
+                  runId: intent.runId
+                });
                 if (rerouted.accountId !== resolution.input.accountId || rerouted.status !== "PENDING" || rerouted.attemptCount !== 0) continue;
                 resolvedIntents.push({ intent: rerouted, resolution });
               } else {
@@ -207,7 +237,7 @@ export async function runCotikWorkerCycle(
 
           const intentsByAccount = new Map<string, typeof resolvedIntents>();
           for (const resolved of resolvedIntents) {
-            const key = `${resolved.resolution.input.accountId}:${resolved.resolution.input.logicalShopId}:${resolved.resolution.input.region}`;
+            const key = resolved.resolution.input.accountId;
             const list = intentsByAccount.get(key) ?? [];
             list.push(resolved);
             intentsByAccount.set(key, list);
@@ -284,8 +314,9 @@ export async function runCotikWorkerCycle(
                 retryableIntents.push(entry);
               }
               if (retryableIntents.length === 0) continue;
-              const reservedIntents = await listPendingPostIntents(context.db, accountIntents.length, {
+              const reservedIntents = await listPendingPostIntents(context.db, Math.min(accountIntents.length, 50), {
                 reserve: true,
+                ...(options.trackingRunId ? { runId: options.trackingRunId } : {}),
                 intentIds: retryableIntents.map(({ intent }) => intent.id),
                 requestPayloadByIntent: Object.fromEntries(
                   retryableIntents.map(({ intent, resolution }) => [intent.id, {
@@ -374,7 +405,14 @@ export async function runCotikWorkerCycle(
                 postResult = await postCotikTrackingBatch({
                   client,
                   items: trackingItems,
-                  killSwitchEnabled: dispatchSettings.cotikPostEnabled && dispatchSettings.cotikSyncEnabled
+                  isPostAuthorized: async () => {
+                    try {
+                      const latestSettings = await ensureCotikWorkflowSettings(context.db);
+                      return latestSettings.cotikSyncEnabled && latestSettings.cotikPostEnabled;
+                    } catch {
+                      return false;
+                    }
+                  }
                 });
               } catch (error) {
                 for (const { intent, input } of postIntents) {
@@ -448,7 +486,8 @@ export async function runCotikWorkerCycle(
         ...(discoveryResult !== undefined ? { discoveryResult } : {}),
         ...(ordersSyncResult !== undefined ? { ordersSyncResult } : {}),
         trackingBatchesExecuted,
-        trackingOrdersConfirmed
+        trackingOrdersConfirmed,
+        ...(killSwitchMessage === undefined ? {} : { message: killSwitchMessage })
       };
     })) ?? {
       status: "LOCKED",

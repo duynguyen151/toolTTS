@@ -13,7 +13,7 @@ export interface CotikTrackingItem {
 export interface PostCotikTrackingBatchInput {
   client: MultiAccountCotikClient;
   items: CotikTrackingItem[];
-  killSwitchEnabled: boolean;
+  isPostAuthorized: () => Promise<boolean>;
 }
 
 export const CotikLogUpdateItemSchema = z.object({
@@ -135,10 +135,11 @@ export async function checkOrderTrackingReady(
     if (matches.length !== 1) return false;
 
     const match = matches[0]!;
-    const statuses = [match.status, match.order_status]
-      .filter((status): status is string => status !== undefined)
-      .map((status) => status.trim().toUpperCase());
-    if (statuses.length === 0 || statuses.some((status) => status !== "AWAITING_SHIPMENT")) return false;
+    const operationalStatus = [match.status, match.order_status]
+      .find((status): status is string => status !== undefined && status.trim().length > 0)
+      ?.trim()
+      .toUpperCase() ?? "";
+    if (!new Set(["AWAITING_SHIPMENT", "AWAITING_COLLECTION", "NEW"]).has(operationalStatus)) return false;
 
     const existingTrackings = [match.tracking_number, match.tracking]
       .filter((tracking): tracking is string => tracking !== undefined)
@@ -163,20 +164,6 @@ export async function checkOrderTrackingReady(
 export async function postCotikTrackingBatch(
   input: PostCotikTrackingBatchInput
 ): Promise<PostCotikTrackingResult> {
-  // RULE 1: Kill switch check - FAIL CLOSED
-  if (input.killSwitchEnabled !== true) {
-    return {
-      status: "REFUSED_KILL_SWITCH",
-      sentItemsCount: 0,
-      confirmedOrders: [],
-      unconfirmedOrders: [],
-      failedOrders: [],
-      rejectedItems: [],
-      logUpdate: [],
-      error: "Dual kill switch cotikPostEnabled is OFF. No tracking write allowed."
-    };
-  }
-
   // RULE 3: Max batch size check
   if (input.items.length > MAX_TRACKING_BATCH_SIZE) {
     throw new Error(
@@ -232,6 +219,28 @@ export async function postCotikTrackingBatch(
       provider: item.providerId
     }))
   };
+
+  // RULE 1: Re-read the persisted dual kill switch immediately before the
+  // transport call. Authorization failures are fail-closed and never reach
+  // the COTIK POST endpoint.
+  let authorized = false;
+  try {
+    authorized = await input.isPostAuthorized();
+  } catch {
+    authorized = false;
+  }
+  if (!authorized) {
+    return {
+      status: "REFUSED_KILL_SWITCH",
+      sentItemsCount: 0,
+      confirmedOrders: [],
+      unconfirmedOrders: [],
+      failedOrders: [],
+      rejectedItems,
+      logUpdate: [],
+      error: "Persisted Cotik POST authorization is OFF or unavailable. No tracking write allowed."
+    };
+  }
 
   let logUpdate: Array<{ apiOrderId: string; status: string }> = [];
   const confirmedOrders: string[] = [];

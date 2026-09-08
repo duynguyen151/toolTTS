@@ -1,27 +1,24 @@
 import {
   ensureCotikWorkflowSettings,
-  findCotikAccountById,
-  findPostIntentForTracking,
-  getDecryptedCotikToken,
   listProviderCatalog,
   seedProviderCatalog,
   setCotikWorkflowSettings
 } from "@shop-health/db";
 import {
-  confirmOrderTrackingReadback,
-  createMultiAccountCotikClient,
-} from "@shop-health/cotik";
-import {
   runCotikDiscoverySync,
   runCotikMultiAccountOrdersSync,
-  readCotikTrackingSheetBatch,
-  stageCotikTracking,
-  writeCotikTrackingSheetResults
+  stageCotikTracking
 } from "@shop-health/sync";
 import type { Command } from "commander";
 
 import { withDatabase } from "../db-runtime.js";
 import { CliError } from "../errors.js";
+import {
+  createAutoTrackingCapability,
+  reconcileAutoTrackingSheet,
+  stageAutoTrackingSheet,
+  type AutoTrackingSheetInput
+} from "../cotik-tracking-workflow.js";
 import { formatDate, printJson, printKeyValues, printTable } from "../presentation/output.js";
 import type { CliRuntime } from "../runtime.js";
 
@@ -45,25 +42,12 @@ function parseRegion(value: string): Region {
   return value;
 }
 
-function requireGoogleSheetsAccessToken(): string {
-  const token = process.env.GOOGLE_SHEETS_ACCESS_TOKEN?.trim();
-  if (!token) {
-    throw new CliError({
-      failureType: "GOOGLE_SHEETS_NOT_CONFIGURED",
-      message: "GOOGLE_SHEETS_ACCESS_TOKEN is required for this command"
-    });
+function parseUsRegion(value: string): "US" {
+  const region = parseRegion(value);
+  if (region !== "US") {
+    throw new CliError({ failureType: "INVALID_ARGUMENT", message: "This V1 Sheet workflow supports region US only" });
   }
-  return token;
-}
-
-function printStageResult(result: Awaited<ReturnType<typeof stageCotikTracking>>, json: boolean): void {
-  if (json) {
-    printJson({ schemaVersion: "cotik-tracking-stage.v1", result });
-    return;
-  }
-  printKeyValues(result.status === "STAGED"
-    ? [["Status", result.status], ["Candidate ID", result.candidateId], ["Intent ID", result.intentId]]
-    : [["Status", result.status], ["Reason", result.reason]]);
+  return region;
 }
 
 export function registerCotikTrackingCommands(program: Command, runtime: CliRuntime): void {
@@ -123,7 +107,7 @@ export function registerCotikTrackingCommands(program: Command, runtime: CliRunt
         printKeyValues([
           ["Cotik Sync Enabled", settings.cotikSyncEnabled ? "ON" : "OFF"],
           ["Cotik POST Enabled", settings.cotikPostEnabled ? "ON" : "OFF"],
-          ["Active Deployment ID", settings.deploymentId ?? "(none)"],
+          ["Active Deploy Version", settings.deploymentId ?? "(none)"],
           ["Last Reset At", formatDate(settings.lastResetAt, runtime.config.DISPLAY_TIME_ZONE)],
           ["Updated At", formatDate(settings.updatedAt, runtime.config.DISPLAY_TIME_ZONE)]
         ]);
@@ -182,84 +166,50 @@ export function registerCotikTrackingCommands(program: Command, runtime: CliRunt
       tracking: string;
       provider: string;
       region: string;
-    }) => {
-      const region = parseRegion(options.region);
-      const result = await withDatabase(runtime, ({ db }) => stageCotikTracking(db, {
-        logicalShopId: options.shopId,
-        orderId: options.orderId,
-        tracking: options.tracking,
-        provider: options.provider,
-        region
-      }));
-      printStageResult(result, options.json === true);
-    });
+      }) => {
+        const region = parseRegion(options.region);
+        const result = await withDatabase(runtime, ({ db }) => stageCotikTracking(db, {
+          logicalShopId: options.shopId,
+          orderId: options.orderId,
+          tracking: options.tracking,
+          provider: options.provider,
+          region
+        }));
+        if (options.json === true) printJson({ schemaVersion: "cotik-tracking-stage.v1", result });
+        else printKeyValues(result.status === "STAGED"
+          ? [["Status", result.status], ["Candidate ID", result.candidateId], ["Intent ID", result.intentId]]
+          : [["Status", result.status], ["Reason", result.reason]]);
+      });
 
   cotikTracking
     .command("stage-sheet-date")
     .requiredOption("--spreadsheet-id <spreadsheetId>")
     .requiredOption("--tab <tabTitle>")
     .requiredOption("--range <range>")
-    .requiredOption("--shop-id <logicalShopId>")
     .requiredOption("--region <region>")
-    .requiredOption("--target-date <YYYY-MM-DD>")
+    .option("--target-date <YYYY-MM-DD>", "Select exactly one date")
+    .option("--from-date <YYYY-MM-DD>", "Select rows on or after this date")
     .option("--date-format <format>", "Interpret slash dates as MDY or DMY")
     .option("--json")
     .action(async (options: JsonOption & {
       spreadsheetId: string;
       tab: string;
       range: string;
-      shopId: string;
       region: string;
-      targetDate: string;
+      targetDate?: string | undefined;
+      fromDate?: string | undefined;
       dateFormat?: string | undefined;
-    }) => {
-      const region = parseRegion(options.region);
-      if (options.dateFormat !== undefined && options.dateFormat !== "MDY" && options.dateFormat !== "DMY") {
-        throw new CliError({ failureType: "INVALID_ARGUMENT", message: "date-format must be MDY or DMY" });
-      }
-      const batch = await readCotikTrackingSheetBatch(
-        {
+      }) => {
+        const region = parseUsRegion(options.region);
+        const payload = await stageAutoTrackingSheet(runtime, {
           spreadsheetId: options.spreadsheetId,
-          tabTitle: options.tab,
+          tab: options.tab,
           range: options.range,
-          targetDate: options.targetDate,
-          ...(options.dateFormat === undefined ? {} : { dateFormat: options.dateFormat })
-        },
-        { accessToken: requireGoogleSheetsAccessToken() }
-      );
-      if (batch.rows.length > 50) {
-        throw new CliError({ failureType: "INPUT_TOO_LARGE", message: "At most 50 rows may be staged per invocation" });
-      }
-      const results = await withDatabase(runtime, async ({ db }) => {
-        const staged = [];
-        for (const row of batch.rows) {
-          const result = await stageCotikTracking(db, {
-            logicalShopId: options.shopId,
-            orderId: row.orderId,
-            tracking: row.tracking,
-            provider: row.providerNote,
-            region
-          });
-          staged.push({
-            rowNumber: row.rowNumber,
-            status: result.status,
-            ...(result.status === "STAGED"
-              ? { candidateId: result.candidateId, intentId: result.intentId }
-              : { reason: result.reason })
-          });
-        }
-        return staged;
-      });
-      const payload = {
-        schemaVersion: "cotik-tracking-stage-sheet-date.v1",
-        targetDate: options.targetDate,
-        rowsRead: batch.rows.length + batch.skippedRows.length,
-        rowsEligible: batch.rows.length,
-        rowsSkipped: batch.skippedRows.length,
-        rowsStaged: results.filter((result) => result.status === "STAGED").length,
-        skipped: batch.skippedRows.map(({ rowNumber, reason }) => ({ rowNumber, reason })),
-        results
-      };
+          region,
+          ...(options.targetDate === undefined ? {} : { targetDate: options.targetDate }),
+          ...(options.fromDate === undefined ? {} : { fromDate: options.fromDate }),
+          ...(options.dateFormat === undefined ? {} : { dateFormat: options.dateFormat as "MDY" | "DMY" })
+        });
       if (options.json === true) printJson(payload);
       else printKeyValues([
         ["Rows Read", String(payload.rowsRead)],
@@ -275,113 +225,109 @@ export function registerCotikTrackingCommands(program: Command, runtime: CliRunt
     .requiredOption("--spreadsheet-id <spreadsheetId>")
     .requiredOption("--tab <tabTitle>")
     .requiredOption("--range <range>")
-    .requiredOption("--shop-id <logicalShopId>")
     .requiredOption("--region <region>")
-    .requiredOption("--target-date <YYYY-MM-DD>")
-    .option("--date-column <column>", "Explicit date column when the header is ambiguous")
-    .option("--cotik-order-id-column <column>", "Cotik OrderID column (defaults to B)")
+    .option("--target-date <YYYY-MM-DD>", "Select exactly one date")
+    .option("--from-date <YYYY-MM-DD>", "Select rows on or after this date")
     .option("--date-format <format>", "Interpret slash dates as MDY or DMY")
     .option("--json")
     .action(async (options: JsonOption & {
       spreadsheetId: string;
       tab: string;
       range: string;
-      shopId: string;
       region: string;
-      targetDate: string;
+      targetDate?: string | undefined;
+      fromDate?: string | undefined;
       dateFormat?: string | undefined;
-    }) => {
-      const region = parseRegion(options.region);
-      if (options.dateFormat !== undefined && options.dateFormat !== "MDY" && options.dateFormat !== "DMY") {
-        throw new CliError({ failureType: "INVALID_ARGUMENT", message: "date-format must be MDY or DMY" });
-      }
-      const batch = await readCotikTrackingSheetBatch(
-        {
+      }) => {
+        const region = parseUsRegion(options.region);
+        const payload = await reconcileAutoTrackingSheet(runtime, {
           spreadsheetId: options.spreadsheetId,
-          tabTitle: options.tab,
+          tab: options.tab,
           range: options.range,
-          targetDate: options.targetDate,
-          ...(options.dateFormat === undefined ? {} : { dateFormat: options.dateFormat })
-        },
-        { accessToken: requireGoogleSheetsAccessToken() }
-      );
-      if (batch.rows.length > 50) {
-        throw new CliError({ failureType: "INPUT_TOO_LARGE", message: "At most 50 rows may be reconciled per invocation" });
-      }
-
-      const reconciliation = await withDatabase(runtime, async ({ db }) => {
-        const results: Array<Record<string, unknown>> = [];
-        const writeResults: Array<{ rowNumber: number; result: string }> = [];
-        for (const row of batch.rows) {
-          const intent = await findPostIntentForTracking(db, {
-            logicalShopId: options.shopId,
-            orderId: row.orderId,
-            tracking: row.tracking,
-            region
-          });
-          if (!intent) {
-            results.push({ rowNumber: row.rowNumber, status: "PAUSED", reason: "INTENT_NOT_FOUND" });
-            continue;
-          }
-          if (intent.status === "PENDING" || intent.status === "IN_PROGRESS") {
-            results.push({ rowNumber: row.rowNumber, status: "DEFERRED", intentStatus: intent.status, attemptCount: intent.attemptCount });
-            continue;
-          }
-
-          if (intent.status === "CONFIRMED" || intent.status === "FAILED" || intent.status === "ABORTED") {
-            const account = await findCotikAccountById(db, intent.accountId);
-            const token = account?.status === "ACTIVE" ? await getDecryptedCotikToken(db, intent.accountId) : null;
-            if (!token) {
-              results.push({ rowNumber: row.rowNumber, status: "PAUSED", reason: "ACCOUNT_TOKEN_UNAVAILABLE" });
-              continue;
-            }
-            const client = createMultiAccountCotikClient({ accountId: intent.accountId, token });
-            const confirmed = await confirmOrderTrackingReadback(client, intent.orderId, intent.tracking);
-            if (intent.status === "CONFIRMED") {
-              if (!confirmed) {
-                results.push({ rowNumber: row.rowNumber, status: "PAUSED", reason: "READBACK_NOT_CONFIRMED", attemptCount: intent.attemptCount });
-                continue;
-              }
-              const result = `CONFIRMED | READBACK=OK | ATTEMPTS=${intent.attemptCount}`;
-              writeResults.push({ rowNumber: row.rowNumber, result });
-              results.push({ rowNumber: row.rowNumber, status: "CONFIRMED", readback: "OK", attemptCount: intent.attemptCount });
-              continue;
-            }
-
-            const readback = confirmed ? "CONFLICT" : "NOT_CONFIRMED";
-            const result = `${intent.status} | READBACK=${readback} | ATTEMPTS=${intent.attemptCount}`;
-            writeResults.push({ rowNumber: row.rowNumber, result });
-            results.push({ rowNumber: row.rowNumber, status: intent.status, readback, attemptCount: intent.attemptCount });
-            continue;
-          }
-        }
-        return { results, writeResults };
-      });
-
-      const writeback = reconciliation.writeResults.length === 0
-        ? []
-        : await writeCotikTrackingSheetResults(
-            { spreadsheetId: options.spreadsheetId, tabTitle: options.tab, results: reconciliation.writeResults },
-            { accessToken: requireGoogleSheetsAccessToken() }
-          );
-      const payload = {
-        schemaVersion: "cotik-tracking-reconcile-sheet-date.v1",
-        targetDate: options.targetDate,
-        rowsRead: batch.rows.length + batch.skippedRows.length,
-        rowsEligible: batch.rows.length,
-        rowsSkipped: batch.skippedRows.length,
-        writeCandidates: reconciliation.writeResults.length,
-        writeback,
-        skipped: batch.skippedRows.map(({ rowNumber, reason }) => ({ rowNumber, reason })),
-        results: reconciliation.results
-      };
+          region,
+          ...(options.targetDate === undefined ? {} : { targetDate: options.targetDate }),
+          ...(options.fromDate === undefined ? {} : { fromDate: options.fromDate }),
+          ...(options.dateFormat === undefined ? {} : { dateFormat: options.dateFormat as "MDY" | "DMY" })
+        });
       if (options.json === true) printJson(payload);
       else printKeyValues([
         ["Rows Read", String(payload.rowsRead)],
         ["Rows Eligible", String(payload.rowsEligible)],
         ["Write Candidates", String(payload.writeCandidates)],
-        ["Written", String(writeback.filter((result) => result.status === "WRITTEN").length)]
+        ["Written", String(payload.writeback.filter((result) => result.status === "WRITTEN").length)]
       ]);
+    });
+
+  cotikTracking
+    .command("capability")
+    .description("Invoke the stable auto-tracking capability without changing its safety controls")
+    .requiredOption("--action <action>", "status, execute, or stop")
+    .option("--spreadsheet-id <spreadsheetId>")
+    .option("--tab <tabTitle>")
+    .option("--range <range>")
+    .option("--region <region>")
+    .option("--target-date <YYYY-MM-DD>")
+    .option("--from-date <YYYY-MM-DD>")
+    .option("--date-format <format>")
+    .option("--json")
+    .action(async (options: JsonOption & {
+      action: string;
+      spreadsheetId?: string | undefined;
+      tab?: string | undefined;
+      range?: string | undefined;
+      region?: string | undefined;
+      targetDate?: string | undefined;
+      fromDate?: string | undefined;
+      dateFormat?: string | undefined;
+    }) => {
+      const capability = createAutoTrackingCapability(runtime);
+      let response;
+      if (options.action === "status") {
+        response = await capability.status();
+      } else if (options.action === "stop") {
+        response = await capability.stop();
+      } else if (options.action === "execute") {
+        const required = [
+          ["--spreadsheet-id", options.spreadsheetId],
+          ["--tab", options.tab],
+          ["--range", options.range],
+          ["--region", options.region]
+        ] as const;
+        const missing = required.find(([, value]) => value === undefined || value.trim().length === 0);
+        if (missing) throw new CliError({ failureType: "INVALID_ARGUMENT", message: `${missing[0]} is required for execute` });
+        const region = parseUsRegion(options.region!);
+        const input: AutoTrackingSheetInput = {
+          spreadsheetId: options.spreadsheetId!,
+          tab: options.tab!,
+          range: options.range!,
+          region,
+          ...(options.targetDate === undefined ? {} : { targetDate: options.targetDate }),
+          ...(options.fromDate === undefined ? {} : { fromDate: options.fromDate }),
+          ...(options.dateFormat === undefined ? {} : { dateFormat: options.dateFormat as "MDY" | "DMY" })
+        };
+        response = await capability.execute(input);
+      } else {
+        throw new CliError({ failureType: "INVALID_ARGUMENT", message: "action must be status, execute, or stop" });
+      }
+      if (options.json === true) {
+        printJson(response);
+      } else if (response.action === "execute") {
+        printKeyValues([
+          ["Action", response.action],
+          ["Rows Staged", String(response.stage.rowsStaged)],
+          ["Worker Status", response.worker.status],
+          ["Batches Executed", String(response.worker.trackingBatchesExecuted ?? 0)],
+          ["Orders Confirmed", String(response.worker.trackingOrdersConfirmed ?? 0)],
+          ...(response.worker.message === undefined ? [] : [["Message", response.worker.message] as const]),
+          ["Rows Written", String(response.reconcile.writeback.filter((result) => result.status === "WRITTEN").length)]
+        ]);
+      } else {
+        printKeyValues([
+          ["Action", response.action],
+          ["Cotik Sync Enabled", response.settings.cotikSyncEnabled ? "ON" : "OFF"],
+          ["Cotik POST Enabled", response.settings.cotikPostEnabled ? "ON" : "OFF"]
+        ]);
+      }
     });
 
   cotikTracking

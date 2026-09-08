@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   runCotikDiscoverySync: vi.fn(),
   runCotikMultiAccountOrdersSync: vi.fn(),
   stageCotikTracking: vi.fn(),
+  stageAutoTrackingSheet: vi.fn(),
+  reconcileAutoTrackingSheet: vi.fn(),
+  createAutoTrackingCapability: vi.fn(),
   readCotikTrackingSheetBatch: vi.fn(),
   writeCotikTrackingSheetResults: vi.fn(),
   createMultiAccountCotikClient: vi.fn(),
@@ -43,6 +46,13 @@ vi.mock("@shop-health/sync", () => ({
   runCotikMultiAccountOrdersSync: mocks.runCotikMultiAccountOrdersSync,
   stageCotikTracking: mocks.stageCotikTracking,
   readCotikTrackingSheetBatch: mocks.readCotikTrackingSheetBatch,
+  groupCotikTrackingRows: (rows: Array<Record<string, unknown>>) => rows.map((row) => ({
+    orderId: String(row.orderId ?? ""),
+    rows: [row],
+    status: "READY",
+    tracking: String(row.tracking ?? ""),
+    providerNote: String(row.providerNote ?? "")
+  })),
   writeCotikTrackingSheetResults: mocks.writeCotikTrackingSheetResults
 }));
 
@@ -56,6 +66,12 @@ vi.mock("../presentation/output.js", () => ({
   printJson: mocks.printJson,
   printKeyValues: mocks.printKeyValues,
   printTable: mocks.printTable
+}));
+
+vi.mock("../cotik-tracking-workflow.js", () => ({
+  createAutoTrackingCapability: mocks.createAutoTrackingCapability,
+  reconcileAutoTrackingSheet: mocks.reconcileAutoTrackingSheet,
+  stageAutoTrackingSheet: mocks.stageAutoTrackingSheet
 }));
 
 vi.mock("../db-runtime.js", () => ({
@@ -139,7 +155,7 @@ describe("cotik-tracking CLI commands", () => {
     expect(mocks.printKeyValues).toHaveBeenCalledWith([
       ["Cotik Sync Enabled", "OFF"],
       ["Cotik POST Enabled", "OFF"],
-      ["Active Deployment ID", "dep-prod-1"],
+      ["Active Deploy Version", "dep-prod-1"],
       ["Last Reset At", "2026-09-07 12:00:00"],
       ["Updated At", "2026-09-07 12:00:00"]
     ]);
@@ -228,24 +244,33 @@ describe("cotik-tracking CLI commands", () => {
     expect(tracking?.commands.some((command) => command.name() === "stage-sheet")).toBe(false);
   });
 
-  it("stages date-scoped rows using Cotik OrderID from B, tracking from Z, and provider from AC", async () => {
+  it("stages the Sheet workflow without a shop-id override", async () => {
     const program = new Command();
     registerCotikTrackingCommands(program, dummyRuntime);
-    mocks.readCotikTrackingSheetBatch.mockResolvedValue({
-      headerRow: 2,
-      rows: [{ rowNumber: 3, orderId: "cotik-order-1", sheinOrderId: "shein-order-1", tracking: "TRACK-Z", trackingColumn: "Z", providerNote: "USPS" }],
-      skippedRows: []
+    mocks.stageAutoTrackingSheet.mockResolvedValue({
+      schemaVersion: "cotik-tracking-stage-sheet-date.v1",
+      targetDate: "2026-09-04",
+      rowsRead: 1,
+      rowsEligible: 1,
+      rowsSkipped: 0,
+      rowsStaged: 1,
+      postBatchCount: 1,
+      skipped: [],
+      results: []
     });
-    mocks.stageCotikTracking.mockResolvedValue({ status: "STAGED", candidateId: "candidate-1", intentId: "intent-1" });
 
     await program.parseAsync([
       "node", "cli", "cotik-tracking", "stage-sheet-date",
       "--spreadsheet-id", "sheet-1", "--tab", "Tháng 9-US", "--range", "A1:AC2000",
-      "--shop-id", "shop-1", "--region", "US", "--target-date", "2026-09-04", "--json"
+      "--region", "US", "--target-date", "2026-09-04", "--json"
     ]);
 
-    expect(mocks.stageCotikTracking).toHaveBeenCalledWith({}, {
-      logicalShopId: "shop-1", orderId: "cotik-order-1", tracking: "TRACK-Z", provider: "USPS", region: "US"
+    expect(mocks.stageAutoTrackingSheet).toHaveBeenCalledWith(dummyRuntime, {
+      spreadsheetId: "sheet-1",
+      tab: "Tháng 9-US",
+      range: "A1:AC2000",
+      region: "US",
+      targetDate: "2026-09-04"
     });
   });
 
@@ -259,141 +284,33 @@ describe("cotik-tracking CLI commands", () => {
     expect(stageDate?.options.some((option) => option.long === "--date-column")).toBe(false);
   });
 
-  it("rejects a date-scoped staging batch above the W21 limit before opening the database", async () => {
+  it("reconciles the Sheet workflow without a shop-id override", async () => {
     const program = new Command();
     registerCotikTrackingCommands(program, dummyRuntime);
-    mocks.readCotikTrackingSheetBatch.mockResolvedValue({
-      headerRow: 2,
-      rows: Array.from({ length: 51 }, (_, index) => ({
-        rowNumber: index + 3,
-        orderId: `cotik-order-${index + 1}`,
-        sheinOrderId: `shein-order-${index + 1}`,
-        tracking: `TRACK-${index + 1}`,
-        trackingColumn: "Z",
-        providerNote: "USPS"
-      })),
-      skippedRows: []
+    mocks.reconcileAutoTrackingSheet.mockResolvedValue({
+      schemaVersion: "cotik-tracking-reconcile-sheet-date.v1",
+      targetDate: "2026-09-04",
+      rowsRead: 1,
+      rowsEligible: 1,
+      rowsSkipped: 0,
+      writeCandidates: 1,
+      writeback: [{ rowNumber: 3, status: "WRITTEN" }],
+      skipped: [],
+      results: []
     });
-
-    await expect(program.parseAsync([
-      "node", "cli", "cotik-tracking", "stage-sheet-date",
-      "--spreadsheet-id", "sheet-1", "--tab", "Tháng 9-US", "--range", "A1:AC2000",
-      "--shop-id", "shop-1", "--region", "US", "--target-date", "2026-09-04"
-    ])).rejects.toThrow("At most 50 rows may be staged per invocation");
-    expect(mocks.stageCotikTracking).not.toHaveBeenCalled();
-  });
-
-  it("reconciles confirmed intents by exact B-column readback and writes only blank W cells", async () => {
-    const program = new Command();
-    registerCotikTrackingCommands(program, dummyRuntime);
-    mocks.readCotikTrackingSheetBatch.mockResolvedValue({
-      headerRow: 2,
-      rows: [{ rowNumber: 3, orderId: "cotik-order-1", sheinOrderId: "shein-order-1", tracking: "TRACK-Z", trackingColumn: "Z", providerNote: "USPS" }],
-      skippedRows: []
-    });
-    mocks.findPostIntentForTracking.mockResolvedValue({
-      id: "intent-1",
-      accountId: "account-1",
-      logicalShopId: "shop-1",
-      orderId: "cotik-order-1",
-      tracking: "TRACK-Z",
-      providerId: "7117858858072016686",
-      region: "US",
-      status: "CONFIRMED",
-      attemptCount: 1
-    });
-    mocks.findCotikAccountById.mockResolvedValue({ id: "account-1", status: "ACTIVE" });
-    mocks.getDecryptedCotikToken.mockResolvedValue("server-token");
-    cotikMocks.createMultiAccountCotikClient.mockReturnValue({ accountId: "account-1" });
-    cotikMocks.confirmOrderTrackingReadback.mockResolvedValue(true);
-    mocks.writeCotikTrackingSheetResults.mockResolvedValue([{ rowNumber: 3, status: "WRITTEN" }]);
 
     await program.parseAsync([
       "node", "cli", "cotik-tracking", "reconcile-sheet-date",
       "--spreadsheet-id", "sheet-1", "--tab", "Tháng 9-US", "--range", "A1:AC2000",
-      "--shop-id", "shop-1", "--region", "US", "--target-date", "2026-09-04", "--json"
+      "--region", "US", "--target-date", "2026-09-04", "--json"
     ]);
-
-    expect(cotikMocks.confirmOrderTrackingReadback).toHaveBeenCalledWith(expect.anything(), "cotik-order-1", "TRACK-Z");
-    expect(mocks.writeCotikTrackingSheetResults).toHaveBeenCalledWith(
-      { spreadsheetId: "sheet-1", tabTitle: "Tháng 9-US", results: [{ rowNumber: 3, result: "CONFIRMED | READBACK=OK | ATTEMPTS=1" }] },
-      { accessToken: "server-google-token" }
-    );
-  });
-
-  it.each(["FAILED", "ABORTED"] as const)("reads back %s intents before writing terminal evidence", async (status) => {
-    const program = new Command();
-    registerCotikTrackingCommands(program, dummyRuntime);
-    mocks.readCotikTrackingSheetBatch.mockResolvedValue({
-      headerRow: 2,
-      rows: [{ rowNumber: 3, orderId: "cotik-order-1", sheinOrderId: "shein-order-1", tracking: "TRACK-Z", trackingColumn: "Z", providerNote: "USPS" }],
-      skippedRows: []
-    });
-    mocks.findPostIntentForTracking.mockResolvedValue({
-      id: "intent-1",
-      accountId: "account-1",
-      logicalShopId: "shop-1",
-      orderId: "cotik-order-1",
-      tracking: "TRACK-Z",
-      providerId: "7117858858072016686",
+    expect(mocks.reconcileAutoTrackingSheet).toHaveBeenCalledWith(dummyRuntime, {
+      spreadsheetId: "sheet-1",
+      tab: "Tháng 9-US",
+      range: "A1:AC2000",
       region: "US",
-      status,
-      attemptCount: status === "FAILED" ? 3 : 1
+      targetDate: "2026-09-04"
     });
-    mocks.findCotikAccountById.mockResolvedValue({ id: "account-1", status: "ACTIVE" });
-    mocks.getDecryptedCotikToken.mockResolvedValue("server-token");
-    cotikMocks.createMultiAccountCotikClient.mockReturnValue({ accountId: "account-1" });
-    cotikMocks.confirmOrderTrackingReadback.mockResolvedValue(false);
-    mocks.writeCotikTrackingSheetResults.mockResolvedValue([{ rowNumber: 3, status: "WRITTEN" }]);
-
-    await program.parseAsync([
-      "node", "cli", "cotik-tracking", "reconcile-sheet-date",
-      "--spreadsheet-id", "sheet-1", "--tab", "Tháng 9-US", "--range", "A1:AC2000",
-      "--shop-id", "shop-1", "--region", "US", "--target-date", "2026-09-04", "--json"
-    ]);
-
-    expect(cotikMocks.confirmOrderTrackingReadback).toHaveBeenCalledWith(expect.anything(), "cotik-order-1", "TRACK-Z");
-    expect(mocks.writeCotikTrackingSheetResults).toHaveBeenCalledWith(
-      { spreadsheetId: "sheet-1", tabTitle: "Tháng 9-US", results: [{ rowNumber: 3, result: `${status} | READBACK=NOT_CONFIRMED | ATTEMPTS=${status === "FAILED" ? 3 : 1}` }] },
-      { accessToken: "server-google-token" }
-    );
-  });
-
-  it("records a readback conflict for a failed intent instead of claiming acceptance", async () => {
-    const program = new Command();
-    registerCotikTrackingCommands(program, dummyRuntime);
-    mocks.readCotikTrackingSheetBatch.mockResolvedValue({
-      headerRow: 2,
-      rows: [{ rowNumber: 3, orderId: "cotik-order-1", sheinOrderId: "shein-order-1", tracking: "TRACK-Z", trackingColumn: "Z", providerNote: "USPS" }],
-      skippedRows: []
-    });
-    mocks.findPostIntentForTracking.mockResolvedValue({
-      id: "intent-1",
-      accountId: "account-1",
-      logicalShopId: "shop-1",
-      orderId: "cotik-order-1",
-      tracking: "TRACK-Z",
-      providerId: "7117858858072016686",
-      region: "US",
-      status: "FAILED",
-      attemptCount: 3
-    });
-    mocks.findCotikAccountById.mockResolvedValue({ id: "account-1", status: "ACTIVE" });
-    mocks.getDecryptedCotikToken.mockResolvedValue("server-token");
-    cotikMocks.createMultiAccountCotikClient.mockReturnValue({ accountId: "account-1" });
-    cotikMocks.confirmOrderTrackingReadback.mockResolvedValue(true);
-    mocks.writeCotikTrackingSheetResults.mockResolvedValue([{ rowNumber: 3, status: "WRITTEN" }]);
-
-    await program.parseAsync([
-      "node", "cli", "cotik-tracking", "reconcile-sheet-date",
-      "--spreadsheet-id", "sheet-1", "--tab", "Tháng 9-US", "--range", "A1:AC2000",
-      "--shop-id", "shop-1", "--region", "US", "--target-date", "2026-09-04", "--json"
-    ]);
-
-    expect(mocks.writeCotikTrackingSheetResults).toHaveBeenCalledWith(
-      { spreadsheetId: "sheet-1", tabTitle: "Tháng 9-US", results: [{ rowNumber: 3, result: "FAILED | READBACK=CONFLICT | ATTEMPTS=3" }] },
-      { accessToken: "server-google-token" }
-    );
   });
 
   it("rejects invalid kill-switch boolean strings", async () => {

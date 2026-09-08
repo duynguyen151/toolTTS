@@ -1789,6 +1789,25 @@ export type CotikOrderItemRow = typeof cotikOrderItems.$inferSelect;
 
 // --- W21 Phase 2B Cotik POST Writer & Tracking tables ---
 
+export const cotikTrackingRuns = pgTable(
+  "cotik_tracking_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    mode: text("mode").notNull().default("STANDARD"),
+    sourceRunId: uuid("source_run_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.sourceRunId],
+      foreignColumns: [table.id],
+      name: "cotik_tracking_runs_source_run_id_cotik_tracking_runs_id_fk"
+    }).onDelete("restrict"),
+    check("cotik_tracking_runs_mode_check", sql`${table.mode} IN ('STANDARD', 'REPLAY')`),
+    check("cotik_tracking_runs_replay_source_check", sql`${table.mode} <> 'REPLAY' OR ${table.sourceRunId} IS NOT NULL`)
+  ]
+);
+
 export const cotikTrackingCandidates = pgTable(
   "cotik_tracking_candidates",
   {
@@ -1802,6 +1821,7 @@ export const cotikTrackingCandidates = pgTable(
     logicalShopId: uuid("logical_shop_id")
       .notNull()
       .references(() => cotikLogicalShops.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").notNull().default("00000000-0000-4000-8000-000000000021").references(() => cotikTrackingRuns.id, { onDelete: "restrict" }),
     region: text("region").notNull(),
     fingerprint: text("fingerprint").notNull(),
     status: text("status").notNull().default("PENDING"),
@@ -1809,7 +1829,7 @@ export const cotikTrackingCandidates = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => [
-    uniqueIndex("cotik_tracking_candidates_fingerprint_idx").on(table.fingerprint),
+    uniqueIndex("cotik_tracking_candidates_fingerprint_idx").on(table.runId, table.fingerprint),
     index("cotik_tracking_candidates_order_idx").on(table.orderId),
     index("cotik_tracking_candidates_status_idx").on(table.status),
     check(
@@ -1845,6 +1865,7 @@ export const cotikPostIntents = pgTable(
     logicalShopId: uuid("logical_shop_id")
       .notNull()
       .references(() => cotikLogicalShops.id, { onDelete: "restrict" }),
+    runId: uuid("run_id").notNull().default("00000000-0000-4000-8000-000000000021").references(() => cotikTrackingRuns.id, { onDelete: "restrict" }),
     region: text("region").notNull(),
     status: text("status").notNull().default("PENDING"),
     attemptCount: integer("attempt_count").notNull().default(0),
@@ -1855,7 +1876,7 @@ export const cotikPostIntents = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => [
-    uniqueIndex("cotik_post_intents_fingerprint_idx").on(table.fingerprint),
+    uniqueIndex("cotik_post_intents_fingerprint_idx").on(table.runId, table.fingerprint),
     index("cotik_post_intents_order_idx").on(table.orderId),
     index("cotik_post_intents_status_idx").on(table.status),
     check(
@@ -1902,5 +1923,6 @@ export const cotikPostAttempts = pgTable(
 );
 
 export type CotikTrackingCandidateRow = typeof cotikTrackingCandidates.$inferSelect;
+export type CotikTrackingRunRow = typeof cotikTrackingRuns.$inferSelect;
 export type CotikPostIntentRow = typeof cotikPostIntents.$inferSelect;
 export type CotikPostAttemptRow = typeof cotikPostAttempts.$inferSelect;

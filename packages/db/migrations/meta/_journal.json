@@ -330,6 +330,13 @@
       "when": 1788770000000,
       "tag": "0046_w21_persistence_corrective",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1788859365437,
+      "tag": "0047_tricky_marten_broadcloak",
+      "breakpoints": true
     }
   ]
 }

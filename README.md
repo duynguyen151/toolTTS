@@ -19,9 +19,9 @@ Read these in order before selecting or accepting work:
    WIP boundaries.
 5. Current Git status, source, tests, and migrations - implementation reality.
 
-The historical `CURRENT_IMPLEMENTATION_STATUS.md`, `CODEX_MASTER_CONTEXT.md`,
-and dated plans record earlier decisions and evidence. They do not override the
-sources above.
+The historical `docs/context/current-implementation-status.md`,
+`docs/context/codex-master-context.md`, and dated plans record earlier
+decisions and evidence. They do not override the sources above.
 
 ## V1 Boundaries
 

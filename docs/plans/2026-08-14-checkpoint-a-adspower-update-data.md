@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Preserve the accepted Phase 1 visual baseline and screenshot `output/playwright/dashboard-phase1-final-1440x900.png`.
+- Preserve the accepted Phase 1 visual baseline and screenshot `docs/screenshots/baselines/dashboard-phase1-final-1440x900.png`.
 - Reuse existing Seller Center extraction and `@shop-health/sync`; do not rewrite collectors, pagination, reconciliation, risk rules, or AI.
 - Client-visible data must not contain AdsPower `user_id`, CDP/WebSocket/debug endpoints, API keys, cookies, sessions, proxies, usernames, passwords, or raw profile names.
 - UI states are exactly truthful: `READY`, `OPENING_PROFILE`, `CONNECTING`, `SYNCING_ORDERS`, `SYNCING_FINANCE`, `RECONCILING`, `SUCCESS`, `PARTIAL`, `ERROR`, `LOGIN_REQUIRED`, `SECURITY_CHECK_REQUIRED`.
@@ -297,7 +297,7 @@
 
 - [ ] **Step 5: Capture and review 1440x900**
 
-  Compare against `output/playwright/dashboard-phase1-final-1440x900.png` for shell, spacing, density, typography, radius, shadows, KPI language, Decision Trace grammar, and anti-AI gate.
+  Compare against `docs/screenshots/baselines/dashboard-phase1-final-1440x900.png` for shell, spacing, density, typography, radius, shadows, KPI language, Decision Trace grammar, and anti-AI gate.
 
 - [ ] **Step 6: Run read-only reviewer**
 

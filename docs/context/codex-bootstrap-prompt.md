@@ -8,10 +8,10 @@ Read the project context before doing any implementation.
 
 Required reading, in this order:
 
-1. `CODEX_MASTER_CONTEXT.md`
-2. `CURRENT_IMPLEMENTATION_STATUS.md`
-3. `UI_DASHBOARD_REQUIREMENTS.md` if the task touches frontend/dashboard/UI
-4. every applicable rule/instruction under `.agent`
+1. `docs/context/codex-master-context.md`
+2. `docs/context/current-implementation-status.md`
+3. `docs/context/ui-dashboard-requirements.md` if the task touches frontend/dashboard/UI
+4. every applicable rule/instruction under `.agents`
 
 Then inspect the actual repository and reconcile the documents with the current source.
 
@@ -26,7 +26,7 @@ Rules for this session:
 - Keep AI reasoning outside deterministic domain rules.
 - Holiday Mode remains `DRY_RUN` unless I explicitly approve otherwise.
 - V1 now REQUIRES a dashboard where BA sees metrics + Rule + AI recommendation, makes a decision, and that decision is recorded for V2.
-- If a UI reference image is attached, inspect it first and follow `UI_DASHBOARD_REQUIREMENTS.md`.
+- If a UI reference image is attached, inspect it first and follow `docs/context/ui-dashboard-requirements.md`.
 - Use subagents for bounded exploration/review/implementation where useful; avoid multiple writers editing the same area.
 - Optimize for correctness, maintainability, simplicity, then performance/scale.
 - Do not add frameworks/dependencies without stating the concrete problem they solve and whether ADD/DEFER/REJECT is appropriate.

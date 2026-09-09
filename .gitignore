@@ -14,7 +14,6 @@ test-results/
 .playwright-cli/
 *.tsbuildinfo
 output/playwright/*
-!output/playwright/dashboard-phase1-final-1440x900.png
 database-dumps/
 backups/
 *.dump

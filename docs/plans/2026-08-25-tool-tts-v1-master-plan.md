@@ -7,7 +7,7 @@
 **Goal:** Extend the existing Tool_TTS system into a provider-aware, Official-Finance-On-Hold-driven, policy-configurable, CLI-first V1 while preserving every proven Seller Center, persistence, deterministic-rule, AI-safety, BA-history, and DRY_RUN foundation.
 **Architecture:** Extend the existing `SellerDataSource` and canonical-domain seams rather than introducing microservices, an event bus, Redis, or a distributed queue. Use COTIK as the primary normal-path candidate for Orders and as supplementary Finance only. Seller Center remains the currently proven authoritative Official Finance On Hold source. Every review follows deterministic facts → effective policy → deterministic Rule → requested AI task resolution → frozen immutable Decision Case and `AiDecisionContext` → linked AI Decision → append-only BA revision.
 **Tech stack:** Node.js 22+, pnpm 11, strict TypeScript/ESM, Zod, PostgreSQL 16, Drizzle ORM, Vitest, Commander, Next.js 16, React 19, Playwright CDP, AdsPower Local API, and configurable server-side AI providers.
-**Authoritative inputs:** `Tool_TTS_V1_Master_Prompt_revised.md`, the approved Project Reality Report, `docs/integrations/cotik/public-api-guide.md`, `AGENTS.md`, `docs/V1_MASTER_CONTEXT.md`, and current source/tests.
+**Authoritative inputs:** `Tool_TTS_V1_Master_Prompt_revised.md`, the approved Project Reality Report, `docs/integrations/cotik/public-api-guide.md`, `AGENTS.md`, `docs/context/v1-master-context.md`, and current source/tests.
 
 **Locked amendment (2026-08-28):** W9-T02 accepts manual bootstrap as its V1 completion mode: after an operator completes ordinary login outside Tool_TTS, Tool_TTS must rerun canonical Seller Center verification and prove the exact linked TikTok Shop identity before collection. Safe autofill auto-login remains conditional on a verified real capability and is not a V1 acceptance blocker. This amendment does not permit credential reading/injection, selector guessing, challenge bypass, trusting manual completion without re-proof, or identity guessing.
 
@@ -669,7 +669,7 @@ W10 optional Cloak research runs independently after W0-T01 and is non-gating
 
 **Dependencies:** None.
 
-**Verified files/modules:** `AGENTS.md`, `docs/V1_MASTER_CONTEXT.md`, `CURRENT_IMPLEMENTATION_STATUS.md`, `README.md`, `docs/plans/**`.
+**Verified files/modules:** `AGENTS.md`, `docs/context/v1-master-context.md`, `docs/context/current-implementation-status.md`, `README.md`, `docs/plans/**`.
 
 **Verified symbols/contracts:** `SellerDataSource`, `DecisionCaseInputSchema`, `RISK_CONTROL_POLICY_V1`.
 

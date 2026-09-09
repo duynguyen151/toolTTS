@@ -31,8 +31,8 @@ Only one implementation worker may edit each shared integration seam at a time:
 
 - `README.md`, **Risk Rule V1** (lines 70-114): describes operational Onhold/Holiday Mode terminology and is superseded for new V1 reviews by Official On Hold plus authoritative Delivery Rate.
 - `README.md` lines 14 and 158: says V1 has no web UI / describes Dashboard as deferred; locked V1 includes minimal functional Dashboard work.
-- `CURRENT_IMPLEMENTATION_STATUS.md`, **Master Roadmap** (lines 29-33) and **V1 CLI decision workflow / Current semantics** (lines 139-151): reflects the previous roadmap and four-decision BA model; `SLOW_SELL` and the locked V1 ordering supersede this for new work.
-- `CURRENT_IMPLEMENTATION_STATUS.md` line 21: historical RAG wording is deferred under locked V1 scope.
+- `docs/context/current-implementation-status.md`, **Master Roadmap** (lines 29-33) and **V1 CLI decision workflow / Current semantics** (lines 139-151): reflects the previous roadmap and four-decision BA model; `SLOW_SELL` and the locked V1 ordering supersede this for new work.
+- `docs/context/current-implementation-status.md` line 21: historical RAG wording is deferred under locked V1 scope.
 
 ## Git baseline captured before W0-T01
 

@@ -56,11 +56,11 @@ Manual `cotik-tracking stage --shop-id` remains a supported diagnostic/manual co
 
 ### Commit 4 - auto-tracking v1.0
 
-- Auto-tracking CLI contracts/workflow and `scripts/auto-tracking.mts`.
+- Auto-tracking CLI contracts/workflow and `scripts/tracking/auto-tracking.mts`.
 - Sheet date staging/reconciliation and tracking-run persistence, including `run_id`, per-run fingerprints, and explicit replay source.
 - Worker-cycle, tracking-writer, DB query/schema, and CLI tests required by the auto-tracking path.
 - `packages/db/migrations/0047_tricky_marten_broadcloak.sql`, its snapshot, and the journal update.
-- `scripts/test-cotik-tracking.ps1` as the bounded verification helper.
+- `scripts/tracking/test-cotik-tracking.ps1` as the bounded verification helper.
 - `package.json` entry `auto-tracking` only.
 - `docs/execution/auto-tracking-capability.md` initial capability contract.
 
@@ -68,11 +68,11 @@ Manual `cotik-tracking stage --shop-id` remains a supported diagnostic/manual co
 
 ### Commit 5 - Gmail to Sheet pipeline
 
-- `scripts/email-order-extractor.mts`
-- `scripts/gmail-api-reader.mts`
-- `scripts/sync-shein-sheets.mts`
-- `scripts/exchange-gmail-token.mts`
-- `scripts/email-order-extractor.test.ts`
+- `scripts/gmail/email-order-extractor.mts`
+- `scripts/gmail/gmail-api-reader.mts`
+- `scripts/gmail/sync-shein-sheets.mts`
+- `scripts/gmail/exchange-gmail-token.mts`
+- `scripts/gmail/email-order-extractor.test.ts`
 - `vitest.config.ts` inclusion for `scripts/**/*.test.ts`
 - `package.json` entries `sync:shein-sheets` and `sync:shein-sheets:schedule`
 
@@ -81,7 +81,7 @@ The extractor test is outside `packages/sync/src`, so the package typecheck no l
 ### Commit 6 - Dashboard consolidation
 
 - The final tracked and untracked Dashboard implementation under `apps/dashboard`, including routes, settings, shops, orders, operations, landing pages, theme/assets, and tests.
-- `scripts/audit-dom-ux.ts` and `scripts/capture-ui-screenshots.ts`.
+- `scripts/ui/audit-dom-ux.ts` and `scripts/ui/capture-ui-screenshots.ts`.
 - The 30 approved screenshots under `docs/screenshots/ui-consolidation/`.
 - `apps/dashboard/lib/dashboard-read.integration.test.ts` is deleted because the current project uses Supabase and the disposable `TEST_DATABASE_URL` integration gate is no longer part of the accepted Dashboard test boundary.
 
@@ -90,7 +90,7 @@ The approved screenshot set contains 30 PNG files and totals 6,565,060 bytes (ap
 ### Commit 7 - acceptance and documentation
 
 - `README.md`, with the COTIK tracking-write exception described as controlled by `AGENTS.md` rather than incorrectly prohibited wholesale.
-- `CURRENT_IMPLEMENTATION_STATUS.md`, retained as historical implementation evidence rather than current operational authority.
+- `docs/context/current-implementation-status.md`, retained as historical implementation evidence rather than current operational authority.
 - `docs/execution/tool-tts-v1-execution-ledger.md`, using the final W21/live-acceptance wording.
 - `docs/execution/w21-tracking-acceptance-2026-09-07.md`, recording the operator-confirmed `LIVE ACCEPTED` state.
 - `docs/execution/auto-tracking-capability.md`, with the Sheet-driven shop resolution example.
@@ -103,11 +103,11 @@ The approved screenshot set contains 30 PNG files and totals 6,565,060 bytes (ap
 | `packages/db/migrations/0045_cotik_account_status_expand.sql` | Duplicate migration number; not present in the journal. |
 | Migration `0047` from commits 1-3 | It is packaged only with the auto-tracking release in commit 4. |
 | `scripts/playwright-chrome-session.mts` | Manual experiment tool, not part of the Gmail-to-Sheet pipeline. |
-| `scripts/email-order-extractor.mjs`, `scripts/email-order-extractor.d.mts`, `scripts/email-order-extractor.mjs.map` | Generated artifacts; source is the `.mts` file. |
+| `scripts/gmail/email-order-extractor.mjs`, `scripts/gmail/email-order-extractor.d.mts`, `scripts/gmail/email-order-extractor.mjs.map` | Generated artifacts; source is the `.mts` file. |
 | `packages/domain/src/**/*.js`, `*.d.ts`, and `*.map` generated beside TypeScript | Generated source artifacts; TypeScript remains authoritative. |
 | `apps/dashboard/lib/dashboard-read.integration.test.ts` | Removed from the accepted Dashboard boundary; it depends on `TEST_DATABASE_URL`. |
 | 30 root-level trial PNG files | Wrong location and approximately 22.44 MiB of exploratory output. |
-| `.playwright-mcp/**/*.png`, `output/playwright/*` except existing approved output rules | Local browser/tool captures, not product evidence for this package. |
+| `.playwright-mcp/**/*.png`, remaining `output/playwright/*` | Local browser/tool captures, not product evidence for this package; the approved tracked baseline was relocated to `docs/screenshots/baselines/`. |
 | `TOOL_TTS_DEEPSEEK_HARNESS_CONTEXT.md` | Historical context prompt, not current operational documentation. |
 | `Tool_TTS_V1_Master_Prompt_revised.md` | Historical prompt, not current operational documentation. |
 | `docs/execution/ui-consolidation-codex-review-handoff.md` | Review handoff scratch/context, not part of the seven-commit package scope. |

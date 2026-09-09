@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node.js 22, pnpm, TypeScript ESM, Next.js dashboard, PostgreSQL/Drizzle, AdsPower/CDP, 9Router DeepSeek runtime, Vitest.
 
-**Spec:** `docs/V1_MASTER_CONTEXT.md`; `packages/domain/src/contracts/v1-freeze.ts`; user-provided Boss Dashboard integration goal.
+**Spec:** `docs/context/v1-master-context.md`; `packages/domain/src/contracts/v1-freeze.ts`; user-provided Boss Dashboard integration goal.
 
 ## Global Constraints
 

@@ -135,7 +135,7 @@ async function handleSuccessToken(tokenData: any) {
 const arg = process.argv[2];
 if (arg) {
   exchangeCodeForTokens(arg)
-    .then(() => console.log("\nSẵn sàng chạy đọc Gmail bằng lệnh: pnpm exec tsx scripts/gmail-api-reader.mts"))
+    .then(() => console.log("\nSẵn sàng chạy đọc Gmail bằng lệnh: pnpm exec tsx scripts/gmail/gmail-api-reader.mts"))
     .catch((err) => {
       console.error("\n❌ [Lỗi]:", err.message);
       process.exit(1);

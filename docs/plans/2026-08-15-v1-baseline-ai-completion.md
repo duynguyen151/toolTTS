@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node.js 22+, pnpm, strict TypeScript, ESM, Zod, Vitest, PostgreSQL, Drizzle ORM, Commander.
 
-**Spec:** `CODEX_MASTER_CONTEXT.md` section 16, the current user Definition of Done, and the existing working-tree diff from `b483484`.
+**Spec:** `docs/context/codex-master-context.md` section 16, the current user Definition of Done, and the existing working-tree diff from `b483484`.
 
 ## Global Constraints
 
@@ -68,7 +68,7 @@ pnpm --filter @shop-health/db typecheck
 - Review/modify if evidence requires: `apps/cli/src/commands/doctor.ts`
 - Review/modify if evidence requires: `apps/cli/src/review-workflow.ts`
 - Review/modify if evidence requires: `apps/cli/src/presentation/review.ts`
-- Review/modify if stale: `.env.example`, `README.md`, `CURRENT_IMPLEMENTATION_STATUS.md`
+- Review/modify if stale: `.env.example`, `README.md`, `docs/context/current-implementation-status.md`
 - Test: corresponding existing CLI/workflow/presentation tests
 
 **Interfaces:**
@@ -102,7 +102,7 @@ pnpm exec vitest run packages/decision-ai/src/runtime-v2.test.ts
 - [x] **Step 5: Update only documentation that contradicts the verified implementation**
 
 ```powershell
-rg -n "opencode-zen|TOOL_AI_MODEL|MISSING_API_KEY|9router|TOOL_AI_DEFAULT_MODEL" README.md CURRENT_IMPLEMENTATION_STATUS.md .env.example
+rg -n "opencode-zen|TOOL_AI_MODEL|MISSING_API_KEY|9router|TOOL_AI_DEFAULT_MODEL" README.md docs/context/current-implementation-status.md .env.example
 ```
 
 ### Task 3: Repository Gates
@@ -174,6 +174,6 @@ git diff --check
 - [ ] **Step 4: Create one local commit and do not push**
 
 ```powershell
-git add -- .env.example CURRENT_IMPLEMENTATION_STATUS.md README.md apps/cli packages/db packages/decision-ai packages/decision-workflow packages/domain docs/plans/2026-08-15-v1-baseline-ai-completion.md
+git add -- .env.example docs/context/current-implementation-status.md README.md apps/cli packages/db packages/decision-ai packages/decision-workflow packages/domain docs/plans/2026-08-15-v1-baseline-ai-completion.md
 git commit -m "feat: complete V1 baseline AI runtime"
 ```

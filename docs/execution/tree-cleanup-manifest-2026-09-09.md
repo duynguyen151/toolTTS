@@ -33,6 +33,7 @@ docs/
   integrations/
   plans/
   screenshots/
+    baselines/
 ```
 
 ## File decisions
@@ -53,6 +54,7 @@ Operational entry points and repository configuration stay at the root:
 | `CURRENT_IMPLEMENTATION_STATUS.md` | `docs/context/current-implementation-status.md` | Historical implementation evidence |
 | `UI_DASHBOARD_REQUIREMENTS.md` | `docs/context/ui-dashboard-requirements.md` | UI reference context |
 | `docs/V1_MASTER_CONTEXT.md` | `docs/context/v1-master-context.md` | Keep all context documents together |
+| `output/playwright/dashboard-phase1-final-1440x900.png` | `docs/screenshots/baselines/dashboard-phase1-final-1440x900.png` | Approved visual baseline belongs with documentation evidence, not generated output |
 
 ### Move scripts by responsibility
 
@@ -73,8 +75,8 @@ Operational entry points and repository configuration stay at the root:
 - `apps/`, `packages/`, database migrations, and Dashboard route structure.
 - `docs/plans/`, `docs/execution/`, `docs/integrations/`, and approved screenshots.
 - Ignored local folders such as `.claude/`, `.playwright-mcp/`, `backups/`,
-  `output/`, and `node_modules/`; they are not product source and are handled
-  separately from this tracked tree cleanup.
+  `output/`, and `node_modules/`; they are not product source. The previously
+  tracked baseline under `output/playwright/` is now under `docs/screenshots/`.
 - AdsPower/Seller Center code; tree cleanup does not remove a product
   dependency.
 

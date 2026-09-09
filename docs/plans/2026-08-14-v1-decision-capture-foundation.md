@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node.js 22, strict TypeScript, ESM, Zod, PostgreSQL 16+, Drizzle ORM, Vitest, pnpm.
 
-**Spec:** `CODEX_MASTER_CONTEXT.md` sections 12-15 and `UI_DASHBOARD_REQUIREMENTS.md` sections 12-14.
+**Spec:** `docs/context/codex-master-context.md` sections 12-15 and `docs/context/ui-dashboard-requirements.md` sections 12-14.
 
 ## Global Constraints
 
@@ -38,7 +38,7 @@
 ## 2. Context Conflicts
 
 - `AGENTS.md` and `README.md` describe V1 as having no web UI or LLM, while the master context, UI requirements, and current user request explicitly expand V1 to require a dashboard and AI recommendation. The current request authorizes that expansion; deterministic domain and no-automatic-action boundaries remain in force.
-- Historical live-profile claims in `CURRENT_IMPLEMENTATION_STATUS.md` cannot be reproduced in the current environment because AdsPower is unavailable and `DATABASE_URL` is not configured.
+- Historical live-profile claims in `docs/context/current-implementation-status.md` cannot be reproduced in the current environment because AdsPower is unavailable and `DATABASE_URL` is not configured.
 
 ## 3. V1 Gap Map
 
@@ -83,7 +83,7 @@ This is the smallest path to a trustworthy demo because the dashboard cannot sav
 - Modify `packages/db/src/index.ts`.
 - Create the next generated migration under `packages/db/migrations/` and its Drizzle metadata.
 - Create `packages/db/src/queries/decisions.test.ts` only if a database-independent query contract test can assert real behavior; otherwise test the atomic query against live PostgreSQL when `DATABASE_URL` becomes available.
-- Update `CURRENT_IMPLEMENTATION_STATUS.md` after verification.
+- Update `docs/context/current-implementation-status.md` after verification.
 
 ## 7. Dependencies
 
@@ -135,7 +135,7 @@ This is the smallest path to a trustworthy demo because the dashboard cannot sav
 
 **Goal:** Verify the increment and record only proven state.
 
-**Implementation scope:** Independent review, full commands, and `CURRENT_IMPLEMENTATION_STATUS.md` update.
+**Implementation scope:** Independent review, full commands, and `docs/context/current-implementation-status.md` update.
 
 **Acceptance criteria:** No required review findings remain; status file distinguishes code/schema validation from unavailable live DB E2E.
 

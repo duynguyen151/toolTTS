@@ -2,7 +2,7 @@ import {
   matchTrackingToProvider,
   SEED_PROVIDER_CATALOG,
   SEED_PROVIDER_RULES
-} from "../packages/domain/src/provider-matcher.js";
+} from "../../packages/domain/src/provider-matcher.js";
 
 export interface ExtractedEmailOrder {
   orderNumber: string | null;

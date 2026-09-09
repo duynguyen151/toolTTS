@@ -300,7 +300,7 @@ pnpm typecheck: PASS
 pnpm build: PASS
 pnpm exec drizzle-kit check --config packages/db/drizzle.config.ts: PASS
 git diff --check: PASS
-pnpm shop-health doctor --json: Node / baseline AI / AdsPower / PostgreSQL OK
+Legacy `shop-health doctor --json` diagnostic was previously green; the AdsPower health-check command was removed during the 2026-09-09 packaging handoff.
 desktop/mobile visual verification: PASS
 accessibility/keyboard verification: PASS
 reviewer-luna final independent review: APPROVE (no findings)

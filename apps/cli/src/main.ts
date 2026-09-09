@@ -3,7 +3,6 @@ import { Command } from "commander";
 import { registerAiTaskCommands } from "./commands/ai-task.js";
 import { createDefaultJourneyRunner, registerJourneyCommands } from "./commands/journey.js";
 import { registerDataCommands } from "./commands/data.js";
-import { registerDoctorCommand } from "./commands/doctor.js";
 import { registerReviewCommands } from "./commands/review.js";
 import { registerProfileCommands } from "./commands/profile.js";
 import { registerPolicyCommands } from "./commands/policy.js";
@@ -30,7 +29,6 @@ program
   .version("0.1.0")
   .showHelpAfterError();
 
-registerDoctorCommand(program, runtime);
 registerShopCommands(program, runtime);
 registerCotikAccountCommands(program, runtime);
 registerCotikTrackingCommands(program, runtime);

@@ -25,7 +25,6 @@ Keep extraction, normalization, persistence, domain decisions, and presentation 
 - Test: `pnpm test`
 - Build: `pnpm build`
 - Schema check: `pnpm exec drizzle-kit check --config packages/db/drizzle.config.ts`
-- CLI diagnostics: `pnpm shop-health doctor --json`
 
 ## Engineering Rules
 

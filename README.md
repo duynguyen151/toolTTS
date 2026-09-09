@@ -47,7 +47,6 @@ pnpm typecheck
 pnpm test
 pnpm build
 pnpm exec drizzle-kit check --config packages/db/drizzle.config.ts
-pnpm shop-health doctor --json
 ```
 
 Use the narrowest relevant package or test command while iterating. Record

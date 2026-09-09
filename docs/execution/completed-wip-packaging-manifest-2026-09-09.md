@@ -127,7 +127,7 @@ The approved screenshot set contains 30 PNG files and totals 6,565,060 bytes (ap
 - `pnpm test`: PASS with 150 test files and 1,304 tests passed; 18 database-dependent test files and 73 tests were skipped because the target worktree intentionally has no `.env`/`TEST_DATABASE_URL`.
 - `pnpm build`: PASS across packages, apps, Dashboard production build, and CLI postbuild help.
 - `pnpm exec drizzle-kit check --config packages/db/drizzle.config.ts`: PASS.
-- `pnpm shop-health doctor --json`: environment-pending in the target worktree; Node and baseline AI passed, AdsPower returned `fetch failed`, and PostgreSQL was skipped because `DATABASE_URL` was not configured. No secret file was copied to change this result.
+- The obsolete `shop-health doctor` command was removed after packaging because the AdsPower health-check flow is no longer used. No replacement diagnostic command was added.
 - Dashboard-only verification: PASS with 41 test files, 238 tests passed, and 0 skipped.
 - Repository-wide stale W21 acceptance-wording scan: PASS; no outdated not-live status remains.
 - Git hygiene scan: PASS for OAuth JSON, Gmail token/state, generated extractor artifacts, trial root PNGs, and local scratch/tool folders; approved existing `output/playwright` and Dashboard runtime assets remain intentional.
@@ -151,3 +151,8 @@ The following actions are deliberately outside commit creation and must happen i
 5. Only after those gates pass, stash the original source worktree as `recovery/pre-package-2026-09-09` and switch the main workspace to `codex/package-completed-wip-2026-09-09`.
 
 Because the read-only preflight found an already-advanced database and enabled switches, steps 2-5 were not executed in this pass.
+
+## Post-packaging cleanup
+
+- Commit `chore(cli): remove obsolete health doctor` removes the unused AdsPower health-check command and its tests.
+- Current CLI guidance no longer advertises `shop-health doctor`.

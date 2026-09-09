@@ -135,7 +135,7 @@ The approved screenshot set contains 30 PNG files and totals 6,565,060 bytes (ap
 ## Initial read-only database preflight result
 
 - The database was inspected without writing through the environment kept in the source worktree; no secret value was printed or copied into this worktree.
-- The inspected database has a Drizzle journal with 90 entries, already has `cotik_tracking_runs`, and contains 267 candidates and 267 intents with zero missing `run_id` values.
+- The inspected database has a Drizzle journal with 48 entries, already has `cotik_tracking_runs`, and contains 267 candidates and 267 intents with zero missing `run_id` values.
 - Before the handoff, the inspected workflow row had `cotikSyncEnabled=true` and `cotikPostEnabled=true`, with a deployment ID present.
 - These facts did not satisfy the planned migration gate requiring a database exactly through `0046` with both switches OFF. The preflight therefore stopped before backup, `pnpm db:migrate`, or any migration write.
 - The packaging process did not enable either switch and did not perform a live Cotik POST. The switch state was changed to OFF later during the explicit workspace handoff below.

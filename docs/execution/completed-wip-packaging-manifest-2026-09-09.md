@@ -140,17 +140,15 @@ The approved screenshot set contains 30 PNG files and totals 6,565,060 bytes (ap
 - These facts do not satisfy the migration gate requiring a database exactly through `0046` with both switches OFF. The preflight therefore stopped before backup, `pnpm db:migrate`, or any migration write.
 - The packaging process did not enable either switch and did not perform a live Cotik POST. Existing switch state was left unchanged.
 
-## Migration and cleanup gates still required
+## Database and workspace handoff
 
-The following actions are deliberately outside commit creation and must happen in order:
-
-1. Finish commit 7 and verify the branch.
-2. Create the external backup at `C:\DUY - DoWorks\Tool_TTS-boss-merge-db-backup\2026-09-09-0047`.
-3. Confirm the database is at migration `0046`, both `cotikSyncEnabled` and `cotikPostEnabled` are OFF, and the backup hashes are recorded.
-4. Apply `0047` once with `pnpm db:migrate`, then verify journal, run, candidate/intent, unique-index, foreign-key, replay, and switch state invariants.
-5. Only after those gates pass, stash the original source worktree as `recovery/pre-package-2026-09-09` and switch the main workspace to `codex/package-completed-wip-2026-09-09`.
-
-Because the read-only preflight found an already-advanced database and enabled switches, steps 2-5 were not executed in this pass.
+- The database journal already contained migration `0047_tricky_marten_broadcloak` and `cotik_tracking_runs` already existed, so `pnpm db:migrate` was not run again.
+- On 2026-09-09, `cotik_sync_enabled` and `cotik_post_enabled` were updated in one transaction to `false`; readback confirmed one workflow row with both switches OFF.
+- The external backup is at `C:\DUY - DoWorks\Tool_TTS-boss-merge-db-backup\2026-09-09-0047`.
+- The backup contains candidates, intents, tracking runs, workflow settings, the migration journal, schema/index/constraint metadata, backup metadata, and `SHA256SUMS.txt`.
+- Backup readback recorded 267 candidates, 267 intents, zero missing `run_id` values, two tracking runs including the legacy run, and migration `0047` present in the journal.
+- No migration write or live Cotik POST was performed during this handoff.
+- The original source worktree still requires the recovery stash and branch switch before this handoff is complete.
 
 ## Post-packaging cleanup
 

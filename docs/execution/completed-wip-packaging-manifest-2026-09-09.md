@@ -148,7 +148,8 @@ The approved screenshot set contains 30 PNG files and totals 6,565,060 bytes (ap
 - The backup contains candidates, intents, tracking runs, workflow settings, the migration journal, schema/index/constraint metadata, backup metadata, and `SHA256SUMS.txt`.
 - Backup readback recorded 267 candidates, 267 intents, zero missing `run_id` values, two tracking runs including the legacy run, and migration `0047` present in the journal.
 - No migration write or live Cotik POST was performed during this handoff.
-- The original source worktree still requires the recovery stash and branch switch before this handoff is complete.
+- The original WIP is preserved in the Git stash `recovery/pre-package-2026-09-09`; ignored local OAuth and fixture artifacts are preserved separately in `recovery/pre-package-2026-09-09-local-artifacts` and are not part of the branch history.
+- The packaging worktree was removed after verification, and `C:\DUY - DoWorks\Tool_TTS-boss-merge` now runs `codex/package-completed-wip-2026-09-09`.
 
 ## Post-packaging cleanup
 

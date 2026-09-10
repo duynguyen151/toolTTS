@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import type { CotikOrderItemContract } from "@shop-health/domain";
 
 import type { Database, DatabaseTransaction } from "../client.js";
@@ -242,6 +242,32 @@ export async function findCotikOrderById(
     .limit(1);
 
   return order ?? null;
+}
+
+export interface CotikOrderStatusRow {
+  orderId: string;
+  orderStatus: string;
+  orderUpdateTime: Date;
+  updatedAt: Date;
+}
+
+export async function listCotikOrderStatusesByIds(
+  db: Database,
+  orderIds: readonly string[]
+): Promise<CotikOrderStatusRow[]> {
+  const normalizedOrderIds = [...new Set(orderIds.map((orderId) => orderId.trim()).filter(Boolean))];
+  if (normalizedOrderIds.length === 0) return [];
+
+  return await db
+    .select({
+      orderId: cotikOrders.orderId,
+      orderStatus: cotikOrders.orderStatus,
+      orderUpdateTime: cotikOrders.orderUpdateTime,
+      updatedAt: cotikOrders.updatedAt
+    })
+    .from(cotikOrders)
+    .where(inArray(cotikOrders.orderId, normalizedOrderIds))
+    .orderBy(desc(cotikOrders.orderUpdateTime), desc(cotikOrders.updatedAt), asc(cotikOrders.orderId));
 }
 
 export async function listCotikOrderItems(

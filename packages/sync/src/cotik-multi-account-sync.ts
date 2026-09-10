@@ -27,6 +27,7 @@ import type { Logger } from "pino";
 
 export interface RunCotikMultiAccountDiscoveryInput {
   readonly context: DatabaseContext;
+  readonly accountId?: string | undefined;
   readonly vaultKeyHex?: string | undefined;
   readonly baseUrl?: string | undefined;
   readonly logger?: Logger | undefined;
@@ -51,8 +52,10 @@ export interface CotikMultiAccountDiscoveryResult {
 export async function runCotikDiscoverySync(
   input: RunCotikMultiAccountDiscoveryInput
 ): Promise<CotikMultiAccountDiscoveryResult> {
+  const requestedAccountId = input.accountId?.trim();
   const accounts = (await listCotikAccounts(input.context.db)).filter((account) =>
-    ["ACTIVE", "UNKNOWN", "NETWORK_ERROR", "RATE_LIMITED", "SHOP_DISCONNECTED"].includes(account.status)
+    ["ACTIVE", "UNKNOWN", "NETWORK_ERROR", "RATE_LIMITED", "SHOP_DISCONNECTED"].includes(account.status) &&
+    (requestedAccountId === undefined || account.id === requestedAccountId)
   );
   const now = input.now ? input.now() : new Date();
 
@@ -162,6 +165,7 @@ export type CotikMultiAccountSyncMode = "incremental" | "reconcile";
 
 export interface RunCotikMultiAccountOrdersSyncInput {
   readonly context: DatabaseContext;
+  readonly accountId?: string | undefined;
   readonly vaultKeyHex?: string | undefined;
   readonly baseUrl?: string | undefined;
   readonly mode?: CotikMultiAccountSyncMode | undefined;
@@ -206,7 +210,10 @@ export async function runCotikMultiAccountOrdersSync(
   const overlapMs = input.overlapMs ?? DEFAULT_OVERLAP_MS;
   const pageSize = input.pageSize ?? 100;
 
-  const accounts = await listActiveCotikAccounts(input.context.db);
+  const requestedAccountId = input.accountId?.trim();
+  const accounts = (await listActiveCotikAccounts(input.context.db)).filter((account) =>
+    requestedAccountId === undefined || account.id === requestedAccountId
+  );
 
   let totalObservationsRead = 0;
   let totalOrdersProjected = 0;

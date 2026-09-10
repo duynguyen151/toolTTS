@@ -384,7 +384,9 @@ export {
   shouldPersistCotikOrderItems,
   type CotikWinningObservationCandidate,
   findCotikOrderById,
+  listCotikOrderStatusesByIds,
   listCotikOrderItems,
+  type CotikOrderStatusRow,
   type ProjectWinningOrderInput
 } from "./queries/cotik-orders-multi.js";
 

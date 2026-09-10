@@ -199,6 +199,8 @@ pnpm shop-health -- cotik-tracking stage `
 ```powershell
 pnpm sync:shein-sheets
 pnpm sync:shein-sheets:schedule
+pnpm sync:shein-sheets --status-only
+pnpm sync:shein-sheets --status-only --dry-run
 ```
 
 The Gmail pipeline supplies Sheet data. It does not perform the COTIK tracking

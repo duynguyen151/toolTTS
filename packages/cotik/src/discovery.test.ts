@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  DiscoveredShopRawSchema,
   deriveMaShopNoiBo,
   discoverAccountShops,
   normalizeShopRegion
@@ -54,6 +55,63 @@ describe("Shop Discovery (2A)", () => {
     expect(result.shops[1]!.region).toBe("UK");
   });
 
+  it("accepts the current Cotik shop response shape", async () => {
+    let requestedPath = "";
+    const mockClient: MultiAccountCotikClient = {
+      accountId: "acc-123",
+      async get(path) {
+        requestedPath = path;
+        return {
+          data: [
+            DiscoveredShopRawSchema.parse({ _id: "shop-1", name: "Shop One", note: "714US-hoang", region: "US" })
+          ],
+          total: 1
+        };
+      },
+      diagnoseHealth() {
+        return { state: "ACTIVE", message: "ok" };
+      }
+    };
+
+    const result = await discoverAccountShops(mockClient);
+
+    expect(result.state).toBe("COMPLETE");
+    expect(requestedPath).toBe("/analytic/shop?limit=100");
+    expect(result.shops).toMatchObject([
+      { cotikShopId: "shop-1", shopName: "Shop One", maShopNoiBo: "714", region: "US" }
+    ]);
+  });
+
+  it("expands the request when Cotik reports more shops than the initial response", async () => {
+    const requestedPaths: string[] = [];
+    const shops = Array.from({ length: 101 }, (unused, index) => ({
+      shop_id: `shop-${index + 1}`,
+      shop_name: `Shop ${index + 1}`,
+      note: `${index + 1} Shop ${index + 1}`,
+      region: "US"
+    }));
+    const mockClient: MultiAccountCotikClient = {
+      accountId: "acc-123",
+      async get(path) {
+        requestedPaths.push(path);
+        return {
+          data: path.endsWith("limit=100") ? shops.slice(0, 100) : shops,
+          total: shops.length
+        };
+      },
+      diagnoseHealth() {
+        return { state: "ACTIVE", message: "ok" };
+      }
+    };
+
+    const result = await discoverAccountShops(mockClient);
+
+    expect(requestedPaths).toEqual(["/analytic/shop?limit=100", "/analytic/shop?limit=101"]);
+    expect(result.state).toBe("COMPLETE");
+    expect(result.totalReported).toBe(101);
+    expect(result.shops).toHaveLength(101);
+  });
+
   it("returns DISCOVERY_INCOMPLETE state when total mismatch", async () => {
     const mockClient: MultiAccountCotikClient = {
       accountId: "acc-123",
@@ -85,7 +143,7 @@ describe("Shop Discovery (2A)", () => {
         return {
           data: [
             { shop_id: "shop-1", shop_name: "Shop One", note: "100 Shop One", region: "US" },
-            { shop_id: "shop-2", shop_name: "Shop Unknown", region: "XX" }, // unknown
+            { shop_id: "shop-2", shop_name: "Shop Unknown", note: "200 Shop Unknown", region: "XX" }, // unknown
             { shop_id: "shop-3", shop_name: "Shop UK", note: "300 Shop UK", region: "UK" }
           ],
           total: 3
@@ -99,6 +157,7 @@ describe("Shop Discovery (2A)", () => {
     const result = await discoverAccountShops(mockClient, logger);
     // shop-2 with unknown region "XX" must be skipped
     expect(result.shops).toHaveLength(2);
+    expect(result.state).toBe("DISCOVERY_INSUFFICIENT");
     expect(result.shops.map(s => s.cotikShopId)).toEqual(["shop-1", "shop-3"]);
     // Warning must be logged for skipped shop
     expect(warnSpy).toHaveBeenCalledOnce();

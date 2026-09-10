@@ -209,6 +209,31 @@ describe("cotik-tracking CLI commands", () => {
     ]);
   });
 
+  it("passes an account filter to manual Cotik discovery and reconcile", async () => {
+    const program = new Command();
+    registerCotikTrackingCommands(program, dummyRuntime);
+    mocks.runCotikDiscoverySync.mockResolvedValue({ accountsProcessed: 1, shopsDiscovered: 1, accountsFailed: 0 });
+    mocks.runCotikMultiAccountOrdersSync.mockResolvedValue({
+      mode: "reconcile",
+      accountsProcessed: 1,
+      totalObservationsRead: 1,
+      totalOrdersProjected: 1,
+      accountSummaries: []
+    });
+
+    await program.parseAsync([
+      "node", "cli", "cotik-tracking", "sync", "--discovery", "--reconcile",
+      "--account-id", "acc-failed", "--json"
+    ]);
+
+    expect(mocks.runCotikDiscoverySync).toHaveBeenCalledWith({ context: { db: {} }, accountId: "acc-failed" });
+    expect(mocks.runCotikMultiAccountOrdersSync).toHaveBeenCalledWith({
+      context: { db: {} },
+      mode: "reconcile",
+      accountId: "acc-failed"
+    });
+  });
+
   it("stages an explicit tracking input", async () => {
     const program = new Command();
     registerCotikTrackingCommands(program, dummyRuntime);

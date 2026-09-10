@@ -1,7 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
+import { closeDatabase, createDatabase, listCotikOrderStatusesByIds } from "../../packages/db/src/index.ts";
 import { extractEmailOrderDetails, type ExtractedEmailOrder } from "./email-order-extractor.mts";
 import { getSavedAccounts, getValidAccessToken } from "./gmail-api-reader.mts";
+import {
+  buildStatusBatchPayload,
+  groupOrderStatusRows,
+  type OrderStatusGroup,
+  type SheetOrderIdRow
+} from "./order-status-sheet.mts";
 
 const REPO_ROOT = process.cwd();
 const OAUTH_DIR = path.join(REPO_ROOT, "OauthGoogle");
@@ -134,6 +141,30 @@ async function fetchWithRetry(url: string, options: any, retries = 4): Promise<R
     return res;
   }
   return await fetch(url, options);
+}
+
+async function loadOrderStatuses(orderIds: readonly string[]): Promise<Map<string, string>> {
+  try {
+    process.loadEnvFile(path.join(REPO_ROOT, ".env"));
+  } catch {
+    // The process may already have its environment loaded by the caller.
+  }
+
+  const databaseUrl = process.env.DATABASE_URL?.trim() || process.env.SUPABASE_DATABASE_URL?.trim();
+  if (!databaseUrl) throw new Error("DATABASE_URL is required to update Sheet order statuses");
+
+  const context = createDatabase(databaseUrl);
+  try {
+    const rows = await listCotikOrderStatusesByIds(context.db, orderIds);
+    const statuses = new Map<string, string>();
+    for (const row of rows) {
+      const orderId = row.orderId.trim().toUpperCase();
+      if (!statuses.has(orderId)) statuses.set(orderId, row.orderStatus);
+    }
+    return statuses;
+  } finally {
+    await closeDatabase(context);
+  }
 }
 
 /**
@@ -351,6 +382,109 @@ async function readSheetYtoAC(accessToken: string, spreadsheetId: string, tabTit
   return result;
 }
 
+async function readSheetOrderIds(
+  accessToken: string,
+  spreadsheetId: string,
+  tabTitle: string
+): Promise<SheetOrderIdRow[]> {
+  const range = `'${tabTitle.replace(/'/g, "''")}'!B2:AI10000`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?majorDimension=ROWS`;
+  const res = await fetchWithRetry(url, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Google Sheets OrderID read failed: ${err}`);
+  }
+
+  const data = await res.json() as { values?: unknown[][] };
+  return (data.values ?? []).map((row, index) => ({
+    rowNumber: index + 2,
+    orderId: String(row[0] ?? "").trim(),
+    currentStatus: String(row[33] ?? "").trim()
+  }));
+}
+
+async function verifyOrderStatusGroups(
+  accessToken: string,
+  spreadsheetId: string,
+  tabTitle: string,
+  groups: readonly OrderStatusGroup[]
+): Promise<void> {
+  const rowNumbers = groups.flatMap((group) => group.rowNumbers);
+  if (rowNumbers.length === 0) return;
+  const firstRow = Math.min(...rowNumbers);
+  const lastRow = Math.max(...rowNumbers);
+  const range = `'${tabTitle.replace(/'/g, "''")}'!AI${firstRow}:AI${lastRow}`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?majorDimension=ROWS`;
+  const res = await fetchWithRetry(url, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Google Sheets order status readback failed: ${err}`);
+  }
+
+  const data = await res.json() as { values?: unknown[][] };
+  const values = data.values ?? [];
+  for (const group of groups) {
+    for (const rowNumber of group.rowNumbers) {
+      const actual = String(values[rowNumber - firstRow]?.[0] ?? "").trim();
+      if (actual !== group.status) {
+        throw new Error(`Google Sheets order status readback mismatch at AI${rowNumber}: expected ${group.status}, got ${actual || "[blank]"}`);
+      }
+    }
+  }
+}
+
+async function updateSheetOrderStatuses(
+  accessToken: string,
+  spreadsheetId: string,
+  tabTitle: string,
+  groups: readonly OrderStatusGroup[]
+): Promise<number> {
+  const batchUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`;
+  let updatedCount = 0;
+
+  for (const group of groups) {
+    const data = buildStatusBatchPayload(tabTitle, group);
+    if (data.length === 0) continue;
+
+    const res = await fetchWithRetry(batchUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ valueInputOption: "RAW", data })
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Google Sheets order status batchUpdate failed: ${err}`);
+    }
+
+    const response = await res.json() as {
+      updatedRange?: unknown;
+      responses?: Array<{ updatedRange?: unknown }>;
+    };
+    const updatedRange = typeof response.updatedRange === "string"
+      ? response.updatedRange
+      : response.responses?.find((item) => typeof item.updatedRange === "string")?.updatedRange;
+    if (typeof updatedRange !== "string" || updatedRange.length === 0) {
+      throw new Error(`Google Sheets order status batchUpdate returned no updatedRange for ${group.status}`);
+    }
+
+    updatedCount += group.rowNumbers.length;
+  }
+
+  await verifyOrderStatusGroups(accessToken, spreadsheetId, tabTitle, groups);
+
+  return updatedCount;
+}
+
 /**
  * Cập nhật Cột Z (Tracking) và Cột AC (Provider) cho các dòng khớp
  */
@@ -403,6 +537,33 @@ async function updateSheetRows(
   return updates.length;
 }
 
+async function syncOrderStatusesOnSheet(
+  accessToken: string,
+  tabTitle: string,
+  options: { dryRun?: boolean } = {}
+): Promise<void> {
+  const statusSheetRows = await readSheetOrderIds(accessToken, SPREADSHEET_ID, tabTitle);
+  const statusByOrderId = await loadOrderStatuses(statusSheetRows.map((row) => row.orderId));
+  const statusGroups = groupOrderStatusRows(statusSheetRows, statusByOrderId);
+  const statusRowsToUpdate = statusGroups.reduce((total, group) => total + group.rowNumbers.length, 0);
+
+  console.log(`- Cập nhật trạng thái Order vào cột AI: ${statusRowsToUpdate} dòng, ${statusGroups.length} nhóm.`);
+  if (statusRowsToUpdate > 0 && !options.dryRun) {
+    const statusUpdatedCount = await updateSheetOrderStatuses(accessToken, SPREADSHEET_ID, tabTitle, statusGroups);
+    console.log(`Đã cập nhật ${statusUpdatedCount} trạng thái Order vào cột AI.`);
+  } else if (options.dryRun && statusRowsToUpdate > 0) {
+    console.log(`[DRY RUN] Bỏ qua ghi ${statusRowsToUpdate} trạng thái Order vào cột AI.`);
+  }
+}
+
+export async function executeOrderStatusSheetSync(options: { dryRun?: boolean } = {}): Promise<void> {
+  const clientConfig = loadClientConfig();
+  const accessToken = await getValidAccessToken(clientConfig, SHEETS_TARGET_ACCOUNT);
+  const tabTitle = await resolveTabTitle(accessToken, SPREADSHEET_ID, TARGET_GID);
+  console.log(`Đang cập nhật trạng thái Order trong Sheet "${tabTitle}" (cột B -> AI)...`);
+  await syncOrderStatusesOnSheet(accessToken, tabTitle, options);
+}
+
 const GMAIL_SOURCE_ACCOUNT = "luongbui25072008@gmail.com";
 const SHEETS_TARGET_ACCOUNT = "vietnguyen2510.ns@gmail.com";
 
@@ -421,6 +582,9 @@ export async function executeSyncCycle(options: {
 
   const clientConfig = loadClientConfig();
   const state = loadSyncState();
+  const sheetsToken = await getValidAccessToken(clientConfig, SHEETS_TARGET_ACCOUNT);
+  const tabTitle = await resolveTabTitle(sheetsToken, SPREADSHEET_ID, TARGET_GID);
+  await syncOrderStatusesOnSheet(sheetsToken, tabTitle, options);
 
   const bufferSize = options.bufferSize || state.bufferSize || 4;
   state.bufferSize = bufferSize;
@@ -498,8 +662,6 @@ export async function executeSyncCycle(options: {
 
   // 3. Đọc dữ liệu từ Google Sheets
   console.log(`\n[Bước 2] Đang kết nối Google Sheets bằng tài khoản: ${SHEETS_TARGET_ACCOUNT}...`);
-  const sheetsToken = await getValidAccessToken(clientConfig, SHEETS_TARGET_ACCOUNT);
-  const tabTitle = await resolveTabTitle(sheetsToken, SPREADSHEET_ID, TARGET_GID);
   console.log(`- Đang đọc dữ liệu từ Sheet: "${tabTitle}" (GID: ${TARGET_GID})...`);
   const sheetRows = await readSheetYtoAC(sheetsToken, SPREADSHEET_ID, tabTitle);
   console.log(`- Đã đọc ${sheetRows.length} dòng từ Google Sheet.`);
@@ -674,6 +836,7 @@ function startSchedule(intervalHours = 4, options: { dryRun?: boolean; bufferSiz
 async function main() {
   const args = process.argv.slice(2);
   const isSchedule = args.includes("--schedule");
+  const isStatusOnly = args.includes("--status-only");
   const isDryRun = args.includes("--dry-run");
   const isReset = args.includes("--reset");
 
@@ -704,7 +867,9 @@ async function main() {
     saveSyncState(state);
   }
 
-  if (isSchedule) {
+  if (isStatusOnly) {
+    await executeOrderStatusSheetSync({ dryRun: isDryRun });
+  } else if (isSchedule) {
     startSchedule(intervalHours, { dryRun: isDryRun, bufferSize });
   } else {
     await executeSyncCycle({ dryRun: isDryRun, bufferSize });

@@ -336,16 +336,18 @@ export function registerCotikTrackingCommands(program: Command, runtime: CliRunt
     .option("--discovery", "Run discovery sync across all active accounts")
     .option("--orders", "Run order sync across discovered shops")
     .option("--reconcile", "Run reconcile order sync (covers 2 months)")
+    .option("--account-id <id>", "Limit sync to one Cotik account")
     .option("--json")
     .action(
       async (options: JsonOption & {
         discovery?: boolean | undefined;
         orders?: boolean | undefined;
         reconcile?: boolean | undefined;
+        accountId?: string | undefined;
       }) => {
         await withDatabase(runtime, async (context) => {
           if (options.discovery) {
-            const discResult = await runCotikDiscoverySync({ context });
+            const discResult = await runCotikDiscoverySync({ context, accountId: options.accountId });
             if (options.json === true) {
               printJson({ schemaVersion: "cotik-manual-discovery.v1", result: discResult });
             } else {
@@ -361,7 +363,8 @@ export function registerCotikTrackingCommands(program: Command, runtime: CliRunt
             const mode = options.reconcile ? "reconcile" : "incremental";
             const ordersResult = await runCotikMultiAccountOrdersSync({
               context,
-              mode
+              mode,
+              accountId: options.accountId
             });
             if (options.json === true) {
               printJson({ schemaVersion: "cotik-manual-orders.v1", result: ordersResult });

@@ -51,6 +51,22 @@ describe("runCotikDiscoverySync", () => {
     expect(mockDb.getDecryptedCotikToken).toHaveBeenCalledWith(context.db, "recoverable", undefined);
     expect(mockDb.getDecryptedCotikToken).not.toHaveBeenCalledWith(context.db, "disabled", undefined);
   });
+
+  it("limits discovery to the requested account", async () => {
+    const context = { db: {} } as DatabaseContext;
+    mockDb.listCotikAccounts.mockResolvedValue([
+      { id: "target", status: "UNKNOWN" },
+      { id: "other", status: "ACTIVE" }
+    ]);
+    mockDb.getDecryptedCotikToken.mockResolvedValue("test-token");
+    mockCotik.discoverAccountShops.mockResolvedValue({ state: "COMPLETE", shops: [], shopsFound: 0 });
+
+    const result = await runCotikDiscoverySync({ context, accountId: "target", now });
+
+    expect(result.accountsProcessed).toBe(1);
+    expect(mockDb.getDecryptedCotikToken).toHaveBeenCalledWith(context.db, "target", undefined);
+    expect(mockDb.getDecryptedCotikToken).not.toHaveBeenCalledWith(context.db, "other", undefined);
+  });
   it("pauses incomplete discovery and invalidates previously discovered links", async () => {
     const context = { db: {} } as DatabaseContext;
     mockDb.listActiveCotikAccounts.mockResolvedValue([{ id: "acc-1", status: "ACTIVE" }]);
@@ -109,6 +125,41 @@ describe("runCotikDiscoverySync", () => {
     expect(mockDb.updateCotikAccountStatus).toHaveBeenCalledWith(context.db, "acc-1", "ACTIVE", FIXED_NOW);
   });
 
+  it("upserts a newly authenticated shop when Cotik reports a larger total", async () => {
+    const context = { db: {} } as DatabaseContext;
+    mockDb.listActiveCotikAccounts.mockResolvedValue([{ id: "acc-1", status: "ACTIVE" }]);
+    mockDb.getDecryptedCotikToken.mockResolvedValue("token-123");
+    mockCotik.createMultiAccountCotikClient.mockReturnValue({ accountId: "acc-1" });
+    mockDb.listCotikAccountShopsByAccount.mockResolvedValue([
+      { accountId: "acc-1", cotikShopId: "c-shop-1", discoveryState: "DISCOVERED" }
+    ]);
+    mockCotik.discoverAccountShops.mockResolvedValue({
+      state: "COMPLETE",
+      accountId: "acc-1",
+      totalReported: 2,
+      shopsFound: 2,
+      shops: [
+        { cotikShopId: "c-shop-1", shopName: "Existing", maShopNoiBo: "100", region: "US", raw: {} },
+        { cotikShopId: "c-shop-2", shopName: "New", maShopNoiBo: "200", region: "US", raw: {} }
+      ]
+    });
+    mockDb.upsertCotikLogicalShop
+      .mockResolvedValueOnce({ id: "log-1" })
+      .mockResolvedValueOnce({ id: "log-2" });
+
+    const result = await runCotikDiscoverySync({ context, now });
+
+    expect(result.shopsDiscovered).toBe(2);
+    expect(mockDb.upsertCotikAccountShop).toHaveBeenCalledWith(context.db, {
+      accountId: "acc-1",
+      logicalShopId: "log-2",
+      cotikShopId: "c-shop-2",
+      discoveryState: "DISCOVERED",
+      lastDiscoveredAt: FIXED_NOW
+    });
+    expect(mockDb.updateCotikAccountShopDiscoveryState).not.toHaveBeenCalled();
+  });
+
   it("isolates errors per account without blocking subsequent accounts", async () => {
     const context = { db: {} } as DatabaseContext;
     mockDb.listActiveCotikAccounts.mockResolvedValue([
@@ -154,6 +205,22 @@ describe("runCotikDiscoverySync", () => {
 });
 
 describe("runCotikMultiAccountOrdersSync", () => {
+  it("limits order reconcile to the requested account", async () => {
+    const context = { db: {} } as DatabaseContext;
+    mockDb.listActiveCotikAccounts.mockResolvedValue([
+      { id: "target", status: "ACTIVE" },
+      { id: "other", status: "ACTIVE" }
+    ]);
+    mockDb.getDecryptedCotikToken.mockResolvedValue("test-token");
+    mockDb.listCotikAccountShopsByAccount.mockResolvedValue([]);
+
+    const result = await runCotikMultiAccountOrdersSync({ context, accountId: "target", mode: "reconcile", now });
+
+    expect(result.accountsProcessed).toBe(1);
+    expect(mockDb.getDecryptedCotikToken).toHaveBeenCalledWith(context.db, "target", undefined);
+    expect(mockDb.getDecryptedCotikToken).not.toHaveBeenCalledWith(context.db, "other", undefined);
+  });
+
   it("runs incremental sync with 2-hour overlap, records observations, and updates checkpoint", async () => {
     const context = { db: {} } as DatabaseContext;
     mockDb.listActiveCotikAccounts.mockResolvedValue([

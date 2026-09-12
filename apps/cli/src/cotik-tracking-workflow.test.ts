@@ -144,8 +144,23 @@ describe("auto-tracking capability", () => {
       skipOrderSync: true
     }));
     expect(mocks.confirmOrderTrackingReadback).toHaveBeenCalledWith({}, "cotik-order-1", "TRACK-1");
+    expect(mocks.setCotikWorkflowSettings).not.toHaveBeenCalled();
     expect(result.action).toBe("execute");
     expect(result.reconcile.writeback).toEqual([{ rowNumber: 11, status: "WRITTEN" }]);
+  });
+
+  it("stops before reading the sheet when either Cotik switch is off", async () => {
+    mocks.ensureCotikWorkflowSettings.mockResolvedValue({
+      cotikSyncEnabled: true,
+      cotikPostEnabled: false,
+      deploymentId: "deployment-1"
+    });
+
+    await expect(createAutoTrackingCapability(runtime).execute(input)).rejects.toThrow(
+      "Cotik sync and POST switches must both be ON"
+    );
+    expect(mocks.readCotikTrackingSheetBatch).not.toHaveBeenCalled();
+    expect(mocks.setCotikWorkflowSettings).not.toHaveBeenCalled();
   });
 
   it("resolves each group from its Q maShopNoiBo value", async () => {

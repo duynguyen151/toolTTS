@@ -393,6 +393,13 @@ export function createAutoTrackingCapability(runtime: CliRuntime): AutoTrackingC
     },
 
     async execute(input) {
+      const settings = await withDatabase(runtime, ({ db }) => ensureCotikWorkflowSettings(db));
+      if (!settings.cotikSyncEnabled || !settings.cotikPostEnabled) {
+        throw new CliError({
+          failureType: "COTIK_KILL_SWITCH_OFF",
+          message: "Cotik sync and POST switches must both be ON before add-track execution"
+        });
+      }
       const snapshot = await readAutoTrackingSheetSnapshot(input);
       const stage = await stageAutoTrackingSheetSnapshot(runtime, input, snapshot);
       const stagedIntentIds = [...new Set(stage.results

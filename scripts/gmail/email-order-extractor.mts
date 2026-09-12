@@ -1,8 +1,4 @@
-import {
-  matchTrackingToProvider,
-  SEED_PROVIDER_CATALOG,
-  SEED_PROVIDER_RULES
-} from "../../packages/domain/src/provider-matcher.js";
+import { SEED_PROVIDER_CATALOG } from "../../packages/domain/src/provider-matcher.js";
 
 export interface ExtractedEmailOrder {
   orderNumber: string | null;
@@ -32,6 +28,26 @@ function cleanProviderName(value: string): string {
     .replace(/\s*(?:View Details|View More)\s*>?.*$/i, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function cleanTrackingNumber(value: string | null | undefined): string | null {
+  const tracking = value?.trim() ?? "";
+  if (!tracking || tracking.length > 200 || /[\x00-\x1f\x7f]/.test(tracking)) return null;
+  if (/^(?:and|n\/?a|none|not|tracking|will|later|pending|unknown|unavailable|provided|not\s+available)$/i.test(tracking)) return null;
+  return tracking;
+}
+
+function normalizeProviderValue(value: string): string {
+  return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function providerFromTrackingUrl(url: string | null): string | null {
+  if (!url) return null;
+  if (/tracking\.speedx\.io/i.test(url)) return "SpeedX";
+  if (/tools\.usps\.com/i.test(url)) return "USPS";
+  if (/uniuni\.com/i.test(url)) return "UniUni";
+  if (/gofo\.com/i.test(url)) return "Gofo";
+  return null;
 }
 
 /**
@@ -66,35 +82,32 @@ export function extractEmailOrderDetails(rawText: string, htmlContent = ""): Ext
   let trackingUrl: string | null = null;
 
   // Tìm trong text hoặc link tracking
-  const trackingLinkMatch = combined.match(/https?:\/\/(?:tracking\.speedx\.io|tools\.usps\.com|www\.uniuni\.com)[^\s"'<>]+/i);
+  const trackingLinkMatch = combined.match(/https?:\/\/(?:tracking\.speedx\.io|tools\.usps\.com|www\.uniuni\.com|www\.gofo\.com)[^\s"'<>]+/i);
   if (trackingLinkMatch) {
     trackingUrl = trackingLinkMatch[0];
-    const urlCodeMatch = trackingUrl.match(/\b(SPX[A-Z0-9]{18,25})\b/i) || trackingUrl.match(/[?&]track(?:ing)?(?:_?no)?=([A-Z0-9]+)/i);
+    const urlCodeMatch = trackingUrl.match(/[?&](?:track(?:ing)?(?:_?no)?|searchID)=([^?&#\s"'<>]+)/i);
     if (urlCodeMatch) {
-      trackingNumber = urlCodeMatch[1].trim();
+      trackingNumber = cleanTrackingNumber(urlCodeMatch[1]);
     }
   }
 
   if (!trackingNumber) {
-    const uspsLinkMatch = combined.match(/[?&]tLabels=(\d{20,22})/i);
-    if (uspsLinkMatch) trackingNumber = uspsLinkMatch[1].trim();
+    const uspsLinkMatch = combined.match(/[?&]tLabels=([^?&#\s"'<>]+)/i);
+    if (uspsLinkMatch) trackingNumber = cleanTrackingNumber(uspsLinkMatch[1]);
   }
 
   if (!trackingNumber) {
     const trackingRegexes = [
-      /\b(SPX[A-Z0-9]{18,25})\b/i,           // SpeedX (US)
-      /\b(UUS[A-Z0-9]{20,26})\b/i,           // UniUni (US)
-      /\b(GFU[A-Z0-9]{15,20})\b/i,           // Gofo (US)
-      /\b(YT[A-Z0-9]{12,24})\b/i,             // YunExpress
-      /\b(9\d{19,21})\b/,                    // USPS 20-22 digit
-      /Tracking\s*(?:number|#|ID|code)\s*:?\s*([A-Z0-9]{8,30})/i,
-      /Mã\s*vận\s*đơn:\s*([A-Z0-9]+)/i
+      /(?:Tracking\s*(?:number|#|ID|code)|Parcel\s*ID)\s*:?\s*([^\s<>"']{1,200})/i,
+      /Mã\s*vận\s*đơn\s*:?\s*([^\s<>"']{1,200})/i,
+      /\b((?:SPX|UUS|GFU|YT)[A-Z0-9_-]{1,197})\b/i,
+      /\b(9\d{19,21})\b/
     ];
     for (const reg of trackingRegexes) {
       const match = searchableText.match(reg);
       if (match && match[1]) {
-        trackingNumber = match[1].trim();
-        break;
+        trackingNumber = cleanTrackingNumber(match[1]);
+        if (trackingNumber) break;
       }
     }
   }
@@ -102,10 +115,7 @@ export function extractEmailOrderDetails(rawText: string, htmlContent = ""): Ext
   // 3. Trích xuất Delivery Company (Provider)
   let deliveryCompany: string | null = null;
   const carrierRegexes = [
-    /Delivery\s*company\s*:\s*([^\s<][\s\S]*?)(?=\s+(?:View Details|View More|Shipping address|Estimated delivery date)\b|$)/i,
-    /Carrier\s*:\s*([^\s<][\s\S]*?)(?=\s+(?:View Details|View More|Shipping address|Estimated delivery date)\b|$)/i,
-    /Shipping\s*carrier\s*:\s*([^\s<][\s\S]*?)(?=\s+(?:View Details|View More|Shipping address|Estimated delivery date)\b|$)/i,
-    /Đơn\s*vị\s*vận\s*chuyển\s*:\s*([^\s<][\s\S]*?)(?=\s+(?:View Details|View More|Shipping address|Estimated delivery date)\b|$)/i
+    /(?:Logistics\s*Provider|Delivery\s*company|Shipping\s*carrier|Carrier|Đơn\s*vị\s*vận\s*chuyển)\s*:\s*([^\s<][\s\S]*?)(?=\s+(?:View Details|View More|Shipping address|Estimated delivery date|Track(?:\s+your\s+package)?\s*:|Tracking\s*(?:number|ID|code)|Parcel\s*ID|Order\s*(?:number|ID))|$)/i
   ];
   for (const reg of carrierRegexes) {
     const match = searchableText.match(reg);
@@ -114,17 +124,17 @@ export function extractEmailOrderDetails(rawText: string, htmlContent = ""): Ext
       break;
     }
   }
+  if (!deliveryCompany) deliveryCompany = providerFromTrackingUrl(trackingUrl);
 
-  // Kiểm tra đối chiếu với provider rules hệ thống
   let providerId: string | null = null;
-  if (trackingNumber) {
-    const matched = matchTrackingToProvider(trackingNumber, "US", SEED_PROVIDER_RULES, SEED_PROVIDER_CATALOG);
-    if (matched.status === "MATCHED") {
-      providerId = matched.providerId;
-      if (!deliveryCompany || deliveryCompany.toLowerCase() === "unknown") {
-        deliveryCompany = matched.carrierName ?? null;
-      }
-    }
+  if (deliveryCompany) {
+    const requestedProvider = normalizeProviderValue(deliveryCompany);
+    const matches = SEED_PROVIDER_CATALOG.filter((provider) =>
+      provider.region === "US" && provider.isActive !== false &&
+      (normalizeProviderValue(provider.carrierName) === requestedProvider ||
+        normalizeProviderValue(provider.providerId) === requestedProvider)
+    );
+    if (matches.length === 1) providerId = matches[0]!.providerId;
   }
 
   // Các trường bổ sung hỗ trợ

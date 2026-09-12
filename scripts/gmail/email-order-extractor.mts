@@ -19,6 +19,21 @@ export interface ExtractedEmailOrder {
   subject?: string | null;
 }
 
+function stripHtmlTags(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\u200b|\uFEFF/g, " ");
+}
+
+function cleanProviderName(value: string): string {
+  return value
+    .replace(/\s*(?:View Details|View More)\s*>?.*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /**
  * Trích xuất chuẩn hóa 3 keyword chính:
  * 1. Order number
@@ -27,6 +42,7 @@ export interface ExtractedEmailOrder {
  */
 export function extractEmailOrderDetails(rawText: string, htmlContent = ""): ExtractedEmailOrder {
   const combined = `${rawText}\n${htmlContent}`;
+  const searchableText = stripHtmlTags(rawText) + "\n" + stripHtmlTags(htmlContent);
 
   // 1. Trích xuất Order Number
   // Mẫu: Order number: GSU1SC10M001EJL hoặc GSU...
@@ -37,7 +53,7 @@ export function extractEmailOrderDetails(rawText: string, htmlContent = ""): Ext
     /Mã\s*(?:đơn|đơn\s*hàng):\s*([A-Z0-9_-]+)/i
   ];
   for (const reg of orderRegexes) {
-    const match = rawText.match(reg) || htmlContent.match(reg);
+    const match = searchableText.match(reg);
     if (match && match[1]) {
       orderNumber = match[1].trim();
       break;
@@ -60,16 +76,22 @@ export function extractEmailOrderDetails(rawText: string, htmlContent = ""): Ext
   }
 
   if (!trackingNumber) {
+    const uspsLinkMatch = combined.match(/[?&]tLabels=(\d{20,22})/i);
+    if (uspsLinkMatch) trackingNumber = uspsLinkMatch[1].trim();
+  }
+
+  if (!trackingNumber) {
     const trackingRegexes = [
       /\b(SPX[A-Z0-9]{18,25})\b/i,           // SpeedX (US)
       /\b(UUS[A-Z0-9]{20,26})\b/i,           // UniUni (US)
       /\b(GFU[A-Z0-9]{15,20})\b/i,           // Gofo (US)
-      /\b(9400\d{18}|9205\d{18})\b/,         // USPS 22-digit
-      /Tracking\s*(?:number|#|ID|code):\s*([A-Z0-9]+)/i,
+      /\b(YT[A-Z0-9]{12,24})\b/i,             // YunExpress
+      /\b(9\d{19,21})\b/,                    // USPS 20-22 digit
+      /Tracking\s*(?:number|#|ID|code)\s*:?\s*([A-Z0-9]{8,30})/i,
       /Mã\s*vận\s*đơn:\s*([A-Z0-9]+)/i
     ];
     for (const reg of trackingRegexes) {
-      const match = rawText.match(reg) || htmlContent.match(reg);
+      const match = searchableText.match(reg);
       if (match && match[1]) {
         trackingNumber = match[1].trim();
         break;
@@ -80,15 +102,15 @@ export function extractEmailOrderDetails(rawText: string, htmlContent = ""): Ext
   // 3. Trích xuất Delivery Company (Provider)
   let deliveryCompany: string | null = null;
   const carrierRegexes = [
-    /Delivery\s*company:\s*([^\n\r<]+)/i,
-    /Carrier:\s*([^\n\r<]+)/i,
-    /Shipping\s*carrier:\s*([^\n\r<]+)/i,
-    /Đơn\s*vị\s*vận\s*chuyển:\s*([^\n\r<]+)/i
+    /Delivery\s*company\s*:\s*([^\s<][\s\S]*?)(?=\s+(?:View Details|View More|Shipping address|Estimated delivery date)\b|$)/i,
+    /Carrier\s*:\s*([^\s<][\s\S]*?)(?=\s+(?:View Details|View More|Shipping address|Estimated delivery date)\b|$)/i,
+    /Shipping\s*carrier\s*:\s*([^\s<][\s\S]*?)(?=\s+(?:View Details|View More|Shipping address|Estimated delivery date)\b|$)/i,
+    /Đơn\s*vị\s*vận\s*chuyển\s*:\s*([^\s<][\s\S]*?)(?=\s+(?:View Details|View More|Shipping address|Estimated delivery date)\b|$)/i
   ];
   for (const reg of carrierRegexes) {
-    const match = rawText.match(reg) || htmlContent.match(reg);
+    const match = searchableText.match(reg);
     if (match && match[1]) {
-      deliveryCompany = match[1].trim();
+      deliveryCompany = cleanProviderName(match[1]);
       break;
     }
   }
@@ -106,9 +128,9 @@ export function extractEmailOrderDetails(rawText: string, htmlContent = ""): Ext
   }
 
   // Các trường bổ sung hỗ trợ
-  const greetingMatch = rawText.match(/Hi\s+([^,\n\r]+),/i);
-  const deliveryDateMatch = rawText.match(/Estimated delivery date:\s*([^\n\r<]+)/i);
-  const addressMatch = rawText.match(/Shipping address:\s*([\s\S]*?)(?:Bật thông báo|\bItem\(s\)\s*shipped|$)/i);
+  const greetingMatch = searchableText.match(/Hi\s+([^,\n\r]+),/i);
+  const deliveryDateMatch = searchableText.match(/Estimated delivery date:\s*([^\n\r<]+)/i);
+  const addressMatch = searchableText.match(/Shipping address:\s*([\s\S]*?)(?:Bật thông báo|\bItem\(s\)\s*shipped|$)/i);
 
   return {
     orderNumber,

@@ -15,7 +15,9 @@ import {
   getMinimumRunWaitMs,
   getRetryDelayMs,
   isGoogleRateLimitResponse,
+  needsSyncMigration,
   runPacedGoogleRequest,
+  selectCheckpointMessageIds,
   selectIncrementalBatch,
   shouldFillBlankSheetCell,
   splitMessageBatch
@@ -86,9 +88,7 @@ function loadSyncState(): SyncState {
   try {
     const raw = JSON.parse(fs.readFileSync(STATE_PATH, "utf8"));
     if (!raw.syncVersion) raw.syncVersion = "v1.01";
-    if (typeof raw.needsBufferMigration !== "boolean") {
-      raw.needsBufferMigration = raw.syncVersion !== GMAIL_SYNC_INTERFACE_VERSION;
-    }
+    raw.needsBufferMigration = needsSyncMigration(raw.syncVersion, raw.needsBufferMigration === true);
     if (!raw.bufferSize) raw.bufferSize = GMAIL_DEFAULT_INCREMENTAL_BUFFER_SIZE;
     if (!Array.isArray(raw.pendingMessageIds)) raw.pendingMessageIds = [];
     if (!raw.lastProcessedMessageIds) raw.lastProcessedMessageIds = [];
@@ -635,14 +635,13 @@ export async function executeSyncCycle(options: {
   const state = loadSyncState();
   const runWaitMs = getMinimumRunWaitMs(state.lastRunTimestamp);
   if (runWaitMs > 0) {
-    console.log(`- Giãn cách tối thiểu v1.02: chờ ${Math.ceil(runWaitMs / 1_000)}s trước chu kỳ tiếp theo.`);
+    console.log(`- Giãn cách tối thiểu v1.03: chờ ${Math.ceil(runWaitMs / 1_000)}s trước chu kỳ tiếp theo.`);
     await new Promise(resolve => setTimeout(resolve, runWaitMs));
   }
 
   const wasFirstRunCompleted = state.firstRunCompleted;
   const hadPendingQueue = state.pendingMessageIds.length > 0;
   const isInitialFullScan = !wasFirstRunCompleted;
-  const isIncrementalDiscovery = wasFirstRunCompleted && !hadPendingQueue;
   const isLegacyMigration = state.needsBufferMigration && wasFirstRunCompleted && !hadPendingQueue;
   state.syncVersion = GMAIL_SYNC_INTERFACE_VERSION;
   console.log(`- Interface sync: ${GMAIL_SYNC_INTERFACE_VERSION}`);
@@ -669,7 +668,7 @@ export async function executeSyncCycle(options: {
     gmailQuery += " after:2026/08/31";
   } else if (isLegacyMigration) {
     gmailQuery = getLegacyMigrationQuery(gmailQuery, state.lastRunTimestamp);
-    console.log(`- Migrate state v1.01 -> ${GMAIL_SYNC_INTERFACE_VERSION}: chỉ rà tối đa ${GMAIL_MAX_MESSAGES_PER_RUN} email gần nhất.`);
+    console.log(`- Backfill state cũ -> ${GMAIL_SYNC_INTERFACE_VERSION}: rà trong cửa sổ 72 giờ, tối đa ${GMAIL_MAX_DISCOVERY_MESSAGES} email và xử lý theo batch ${GMAIL_MAX_MESSAGES_PER_RUN}.`);
   }
 
   // 2. Thu thập email từ tài khoản Gmail luongbui25072008@gmail.com
@@ -680,6 +679,8 @@ export async function executeSyncCycle(options: {
   let bufferMessages: Array<{ id: string }> = [];
   let messagesToFetch: Array<{ id: string }> = [];
   let pendingAfterBatch: string[] = [];
+  let checkpointMessages: Array<{ id: string }> = [];
+  let shouldRefreshCheckpoint = false;
 
   if (state.pendingMessageIds.length > 0) {
     const pendingBatch = splitMessageBatch(state.pendingMessageIds);
@@ -692,13 +693,16 @@ export async function executeSyncCycle(options: {
     const migrationMessages = await fetchAllMessagesMatchingQuery(
       gmailAccessToken,
       gmailQuery,
-      GMAIL_MAX_MESSAGES_PER_RUN
+      GMAIL_MAX_DISCOVERY_MESSAGES
     );
-    newMessages = [];
-    bufferMessages = migrationMessages;
-    messagesToFetch = migrationMessages;
-    pendingAfterBatch = [];
-    console.log(`- Migration buffer: kiểm tra ${messagesToFetch.length} email gần lần chạy v1.01, gồm cả Spam/Trash.`);
+    const migrationBatch = splitMessageBatch(migrationMessages);
+    newMessages = migrationBatch.batch;
+    bufferMessages = [];
+    messagesToFetch = migrationBatch.batch;
+    pendingAfterBatch = migrationBatch.pending.map(message => message.id);
+    checkpointMessages = migrationMessages;
+    shouldRefreshCheckpoint = true;
+    console.log(`- Backfill v1.03: kiểm tra tối đa ${messagesToFetch.length} email trong cửa sổ 72 giờ, còn ${pendingAfterBatch.length} email chờ lượt sau; gồm cả Spam/Trash.`);
 
   } else if (state.firstRunCompleted && state.lastProcessedMessageIds.length > 0) {
     console.log(`- Nạp ${state.lastProcessedMessageIds.length} ID mốc đệm từ lần chạy trước: ${state.lastProcessedMessageIds.join(", ")}`);
@@ -711,6 +715,8 @@ export async function executeSyncCycle(options: {
     if (!fetched.anchorFound) {
       throw new Error(`Không tìm thấy mốc đệm trong ${GMAIL_MAX_DISCOVERY_MESSAGES} email đầu; dừng để tránh bỏ sót. Chỉ dùng --reset khi muốn full scan có chủ đích.`);
     }
+    checkpointMessages = fetched.allMessages;
+    shouldRefreshCheckpoint = true;
 
     const selected = selectIncrementalBatch(fetched.newMessages, fetched.bufferMessages);
     const newMessageIds = new Set(fetched.newMessages.map(message => message.id));
@@ -732,9 +738,8 @@ export async function executeSyncCycle(options: {
     const all = await fetchAllMessagesMatchingQuery(gmailAccessToken, gmailQuery);
     const initialBatch = splitMessageBatch(all);
     state.pendingMessageIds = all.map(message => message.id);
-    if (state.lastProcessedMessageIds.length === 0) {
-      state.lastProcessedMessageIds = all.slice(0, bufferSize).map(message => message.id);
-    }
+    checkpointMessages = all;
+    shouldRefreshCheckpoint = true;
     pendingAfterBatch = initialBatch.pending.map(message => message.id);
     newMessages = initialBatch.batch;
     bufferMessages = [];
@@ -887,12 +892,14 @@ export async function executeSyncCycle(options: {
       .filter(order => Boolean(order.messageId))
       .map(order => [order.messageId as string, order] as const)
   );
-  const nextBufferMessages: BufferMessageInfo[] = messagesToFetch
-    .slice(0, bufferSize)
-    .map(message => {
-      const order = ordersByMessageId.get(message.id);
+  const checkpointIds = shouldRefreshCheckpoint
+    ? selectCheckpointMessageIds(checkpointMessages, bufferSize)
+    : state.lastProcessedMessageIds;
+  const nextBufferMessages: BufferMessageInfo[] = shouldRefreshCheckpoint
+    ? checkpointIds.map(id => {
+      const order = ordersByMessageId.get(id);
       return {
-        id: message.id,
+        id,
         orderNumber: order?.orderNumber,
         trackingNumber: order?.trackingNumber,
         deliveryCompany: order?.deliveryCompany,
@@ -900,18 +907,16 @@ export async function executeSyncCycle(options: {
         subject: order?.subject,
         date: order?.date
       };
-    });
+    })
+    : state.lastBufferMessages;
 
   if (!options.dryRun) {
-    state.needsBufferMigration = false;
+    state.needsBufferMigration = state.needsBufferMigration && !isLegacyMigration;
     state.firstRunCompleted = isInitialFullScan ? scanComplete : true;
     state.bufferSize = bufferSize;
     state.lastRunTimestamp = new Date().toISOString();
-    if (isIncrementalDiscovery) {
-      state.lastProcessedMessageIds = nextBufferMessages.map(b => b.id);
-      state.lastBufferMessages = nextBufferMessages;
-    } else if (isInitialFullScan && state.lastBufferMessages.length === 0) {
-      state.lastProcessedMessageIds = nextBufferMessages.map(b => b.id);
+    if (shouldRefreshCheckpoint && nextBufferMessages.length > 0) {
+      state.lastProcessedMessageIds = checkpointIds;
       state.lastBufferMessages = nextBufferMessages;
     }
     state.history.unshift({

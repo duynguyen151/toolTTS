@@ -1,4 +1,5 @@
-export const GMAIL_SYNC_INTERFACE_VERSION = 'v1.02';
+export const GMAIL_SYNC_INTERFACE_VERSION = 'v1.03';
+export const GMAIL_INCREMENTAL_BACKFILL_HOURS = 72;
 export const GMAIL_MAX_MESSAGES_PER_RUN = 50;
 export const GMAIL_MAX_DISCOVERY_MESSAGES = 1_000;
 export const GMAIL_LIST_PAGE_SIZE = 50;
@@ -10,6 +11,10 @@ export const GMAIL_MIN_REQUEST_INTERVAL_MS = 1_500;
 export const GMAIL_RETRY_MIN_DELAY_MS = 30_000;
 export const GMAIL_RETRY_MAX_DELAY_MS = 60_000;
 export const GMAIL_MAX_RETRIES = 3;
+
+export function needsSyncMigration(syncVersion: string, flagged: boolean): boolean {
+  return flagged || syncVersion !== GMAIL_SYNC_INTERFACE_VERSION;
+}
 
 export function splitMessageBatch<T>(messages: readonly T[], maxMessages = GMAIL_MAX_MESSAGES_PER_RUN): {
   batch: T[];
@@ -66,7 +71,7 @@ export function getLegacyMigrationQuery(baseQuery: string, lastRunTimestamp?: st
   const lastRunAt = lastRunTimestamp ? Date.parse(lastRunTimestamp) : Number.NaN;
   if (!Number.isFinite(lastRunAt)) return baseQuery;
 
-  const migrationStart = new Date(lastRunAt - 24 * 60 * 60 * 1_000);
+  const migrationStart = new Date(lastRunAt - GMAIL_INCREMENTAL_BACKFILL_HOURS * 60 * 60 * 1_000);
   const year = migrationStart.getUTCFullYear();
   const month = String(migrationStart.getUTCMonth() + 1).padStart(2, '0');
   const day = String(migrationStart.getUTCDate()).padStart(2, '0');
@@ -90,6 +95,22 @@ export function selectIncrementalBatch<T>(
     batch: [...selectedNew, ...selectedBuffer].slice(0, maxMessages),
     pending: [...newMessages].slice(selectedNew.length)
   };
+}
+
+export function selectCheckpointMessageIds<T extends { id: string }>(messages: readonly T[], limit: number): string[] {
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error('limit must be a positive integer');
+  }
+
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const message of messages) {
+    if (!message.id || seen.has(message.id)) continue;
+    seen.add(message.id);
+    ids.push(message.id);
+    if (ids.length === limit) break;
+  }
+  return ids;
 }
 
 export function isGoogleRateLimitResponse(status: number, body: string): boolean {

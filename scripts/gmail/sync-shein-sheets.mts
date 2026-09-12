@@ -2,7 +2,24 @@ import fs from "node:fs";
 import path from "node:path";
 import { closeDatabase, createDatabase, listCotikOrderStatusesByIds } from "../../packages/db/src/index.ts";
 import { extractEmailOrderDetails, type ExtractedEmailOrder } from "./email-order-extractor.mts";
-import { getSavedAccounts, getValidAccessToken } from "./gmail-api-reader.mts";
+import { DEFAULT_GMAIL_ORDER_QUERY, getSavedAccounts, getValidAccessToken } from "./gmail-api-reader.mts";
+import {
+  GMAIL_LIST_PAGE_SIZE,
+  GMAIL_DEFAULT_INCREMENTAL_BUFFER_SIZE,
+  GMAIL_MAX_DISCOVERY_MESSAGES,
+  GMAIL_MAX_MESSAGES_PER_RUN,
+  GMAIL_MAX_RETRIES,
+  GMAIL_SYNC_INTERFACE_VERSION,
+  getIncrementalBufferSize,
+  getLegacyMigrationQuery,
+  getMinimumRunWaitMs,
+  getRetryDelayMs,
+  isGoogleRateLimitResponse,
+  runPacedGoogleRequest,
+  selectIncrementalBatch,
+  shouldFillBlankSheetCell,
+  splitMessageBatch
+} from "./gmail-sync-policy.mts";
 import {
   buildStatusBatchPayload,
   groupOrderStatusRows,
@@ -30,8 +47,11 @@ interface BufferMessageInfo {
 }
 
 interface SyncState {
+  syncVersion: string;
+  needsBufferMigration: boolean;
   firstRunCompleted: boolean;
   bufferSize: number;
+  pendingMessageIds: string[];
   lastRunTimestamp?: string;
   lastProcessedMessageIds: string[];
   lastBufferMessages: BufferMessageInfo[];
@@ -53,8 +73,11 @@ function loadSyncState(): SyncState {
   }
   if (!fs.existsSync(STATE_PATH)) {
     return {
+      syncVersion: GMAIL_SYNC_INTERFACE_VERSION,
+      needsBufferMigration: false,
       firstRunCompleted: false,
-      bufferSize: 4,
+      bufferSize: GMAIL_DEFAULT_INCREMENTAL_BUFFER_SIZE,
+      pendingMessageIds: [],
       lastProcessedMessageIds: [],
       lastBufferMessages: [],
       history: []
@@ -62,15 +85,23 @@ function loadSyncState(): SyncState {
   }
   try {
     const raw = JSON.parse(fs.readFileSync(STATE_PATH, "utf8"));
-    if (!raw.bufferSize) raw.bufferSize = 4;
+    if (!raw.syncVersion) raw.syncVersion = "v1.01";
+    if (typeof raw.needsBufferMigration !== "boolean") {
+      raw.needsBufferMigration = raw.syncVersion !== GMAIL_SYNC_INTERFACE_VERSION;
+    }
+    if (!raw.bufferSize) raw.bufferSize = GMAIL_DEFAULT_INCREMENTAL_BUFFER_SIZE;
+    if (!Array.isArray(raw.pendingMessageIds)) raw.pendingMessageIds = [];
     if (!raw.lastProcessedMessageIds) raw.lastProcessedMessageIds = [];
     if (!raw.lastBufferMessages) raw.lastBufferMessages = [];
     if (!raw.history) raw.history = [];
     return raw;
   } catch {
     return {
+      syncVersion: GMAIL_SYNC_INTERFACE_VERSION,
+      needsBufferMigration: false,
       firstRunCompleted: false,
-      bufferSize: 4,
+      bufferSize: GMAIL_DEFAULT_INCREMENTAL_BUFFER_SIZE,
+      pendingMessageIds: [],
       lastProcessedMessageIds: [],
       lastBufferMessages: [],
       history: []
@@ -126,21 +157,25 @@ function extractBodyContent(payload: any): { rawText: string; htmlContent: strin
   return { rawText, htmlContent };
 }
 
-async function fetchWithRetry(url: string, options: any, retries = 4): Promise<Response> {
+async function fetchWithRetry(url: string, options: RequestInit, retries = GMAIL_MAX_RETRIES): Promise<Response> {
   for (let attempt = 1; attempt <= retries; attempt++) {
-    const res = await fetch(url, options);
-    if (res.status === 429 || res.status === 403) {
-      const text = await res.clone().text();
-      if (text.includes("rateLimitExceeded") || text.includes("Quota exceeded")) {
-        const waitTime = attempt * 6000;
-        console.log(`[Rate Limit] Chạm hạn mức Google API, đợi ${waitTime / 1000}s thử lại (lần ${attempt}/${retries})...`);
-        await new Promise(r => setTimeout(r, waitTime));
-        continue;
+    const res = await runPacedGoogleRequest(() => fetch(url, options));
+    const text = res.status === 429 || res.status === 403 ? await res.clone().text() : "";
+    if (isGoogleRateLimitResponse(res.status, text)) {
+      if (attempt === retries) {
+        throw new Error(`Google API rate limit persisted after ${retries} attempts`);
       }
+
+      const waitTime = getRetryDelayMs(attempt, res.headers.get("retry-after"));
+      console.log(`[Rate Limit] Chạm hạn mức Google API, đợi ${Math.ceil(waitTime / 1000)}s thử lại (lần ${attempt}/${retries})...`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      continue;
     }
+
     return res;
   }
-  return await fetch(url, options);
+
+  throw new Error("Gmail request retry loop ended unexpectedly");
 }
 
 async function loadOrderStatuses(orderIds: readonly string[]): Promise<Map<string, string>> {
@@ -181,16 +216,17 @@ async function fetchMessagesWithBufferStrategy(
   newMessages: Array<{ id: string }>;
   bufferMessages: Array<{ id: string }>;
   allMessages: Array<{ id: string }>;
+  anchorFound: boolean;
 }> {
   const allFetched: Array<{ id: string }> = [];
   let pageToken: string | undefined = undefined;
   let firstBufferIndex = -1;
 
-  // Lấy email cho đến khi tìm thấy mốc đệm từ lần chạy trước (tối đa 150 email)
+  // Lấy email cho đến khi tìm thấy mốc đệm từ lần chạy trước.
   do {
     const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
     url.searchParams.set("q", query);
-    url.searchParams.set("maxResults", "50");
+    url.searchParams.set("maxResults", String(GMAIL_LIST_PAGE_SIZE));
     if (pageToken) url.searchParams.set("pageToken", pageToken);
 
     const res = await fetchWithRetry(url.toString(), {
@@ -204,7 +240,7 @@ async function fetchMessagesWithBufferStrategy(
 
     const data = await res.json() as any;
     if (data.messages && Array.isArray(data.messages)) {
-      allFetched.push(...data.messages);
+      allFetched.push(...data.messages.slice(0, GMAIL_MAX_DISCOVERY_MESSAGES - allFetched.length));
     }
 
     if (prevBufferIds.length > 0) {
@@ -216,37 +252,46 @@ async function fetchMessagesWithBufferStrategy(
     }
 
     pageToken = data.nextPageToken;
-  } while (pageToken && allFetched.length < 150);
+  } while (pageToken && allFetched.length < GMAIL_MAX_DISCOVERY_MESSAGES);
 
   if (prevBufferIds.length > 0 && firstBufferIndex !== -1) {
     const newMessages = allFetched.slice(0, firstBufferIndex);
-    const bufferMessages = allFetched.slice(firstBufferIndex, firstBufferIndex + bufferSize);
+    const bufferMessages = allFetched.slice(
+      firstBufferIndex,
+      firstBufferIndex + Math.min(bufferSize, GMAIL_MAX_MESSAGES_PER_RUN)
+    );
     return {
       newMessages,
       bufferMessages,
-      allMessages: [...newMessages, ...bufferMessages]
+      allMessages: [...newMessages, ...bufferMessages],
+      anchorFound: true
     };
   }
 
-  // Fallback nếu không khớp mốc đệm: lấy top email
+  // Fallback nếu không khớp mốc đệm: giữ toàn bộ discovery để không bỏ sót mail.
   return {
-    newMessages: allFetched.slice(0, Math.max(10, bufferSize)),
+    newMessages: allFetched,
     bufferMessages: [],
-    allMessages: allFetched.slice(0, Math.max(10, bufferSize))
+    allMessages: allFetched,
+    anchorFound: false
   };
 }
 
 /**
  * Lấy danh sách email từ Gmail API có phân trang (dùng cho Full Scan lần đầu)
  */
-async function fetchAllMessagesMatchingQuery(accessToken: string, query: string, maxMessages = 200): Promise<Array<{ id: string }>> {
+async function fetchAllMessagesMatchingQuery(
+  accessToken: string,
+  query: string,
+  maxMessages = GMAIL_MAX_DISCOVERY_MESSAGES
+): Promise<Array<{ id: string }>> {
   let messages: Array<{ id: string }> = [];
   let pageToken: string | undefined = undefined;
 
   do {
     const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
     url.searchParams.set("q", query);
-    url.searchParams.set("maxResults", "100");
+    url.searchParams.set("maxResults", String(GMAIL_LIST_PAGE_SIZE));
     if (pageToken) url.searchParams.set("pageToken", pageToken);
 
     const res = await fetchWithRetry(url.toString(), {
@@ -260,22 +305,22 @@ async function fetchAllMessagesMatchingQuery(accessToken: string, query: string,
 
     const data = await res.json() as any;
     if (data.messages && Array.isArray(data.messages)) {
-      messages.push(...data.messages);
+      messages.push(...data.messages.slice(0, Math.max(0, maxMessages - messages.length)));
     }
 
     pageToken = data.nextPageToken;
-  } while (pageToken && messages.length < maxMessages);
+    if (messages.length >= maxMessages) break;
+  } while (pageToken);
 
-  return messages;
+  return messages.slice(0, maxMessages);
 }
 
 /**
- * Đọc chi tiết từng email và trích xuất Order, Tracking, Provider kèm Header (song song 10 thư/lần)
+ * Đọc tuần tự từng email và trích xuất Order, Tracking, Provider kèm Header.
  */
 async function fetchOrderDetailsFromMessages(accessToken: string, messages: Array<{ id: string }>): Promise<ExtractedEmailOrder[]> {
   const orders: ExtractedEmailOrder[] = [];
-  const chunkSize = 10;
-
+  const chunkSize = 1;
   for (let i = 0; i < messages.length; i += chunkSize) {
     const chunk = messages.slice(i, i + chunkSize);
     const chunkResults = await Promise.all(chunk.map(async (m) => {
@@ -301,7 +346,8 @@ async function fetchOrderDetailsFromMessages(accessToken: string, messages: Arra
         if (extracted.orderNumber) {
           return extracted;
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith("Google API rate limit persisted")) throw error;
         return null;
       }
       return null;
@@ -324,7 +370,7 @@ async function fetchOrderDetailsFromMessages(accessToken: string, messages: Arra
 async function resolveTabTitle(accessToken: string, spreadsheetId: string, targetGid: string): Promise<string> {
   try {
     const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`;
-    const res = await fetch(metaUrl, {
+    const res = await fetchWithRetry(metaUrl, {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
     if (res.ok) {
@@ -351,7 +397,7 @@ async function readSheetYtoAC(accessToken: string, spreadsheetId: string, tabTit
   const range = `'${tabTitle}'!Y1:AC10000`;
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?majorDimension=ROWS`;
 
-  const res = await fetch(url, {
+  const res = await fetchWithRetry(url, {
     headers: { Authorization: `Bearer ${accessToken}` }
   });
 
@@ -492,21 +538,27 @@ async function updateSheetRows(
   accessToken: string,
   spreadsheetId: string,
   tabTitle: string,
-  updates: Array<{ rowNumber: number; trackingNumber: string; deliveryCompany: string }>
+  updates: Array<{
+    rowNumber: number;
+    trackingNumber: string;
+    deliveryCompany: string;
+    oldTracking: string;
+    oldProvider: string;
+  }>
 ): Promise<number> {
   if (updates.length === 0) return 0;
 
   const dataPayload = [];
   for (const up of updates) {
     // Cập nhật Cột Z
-    if (up.trackingNumber) {
+    if (shouldFillBlankSheetCell(up.oldTracking, up.trackingNumber)) {
       dataPayload.push({
         range: `'${tabTitle}'!Z${up.rowNumber}`,
         values: [[up.trackingNumber]]
       });
     }
     // Cập nhật Cột AC
-    if (up.deliveryCompany) {
+    if (shouldFillBlankSheetCell(up.oldProvider, up.deliveryCompany)) {
       dataPayload.push({
         range: `'${tabTitle}'!AC${up.rowNumber}`,
         values: [[up.deliveryCompany]]
@@ -517,7 +569,7 @@ async function updateSheetRows(
   if (dataPayload.length === 0) return 0;
 
   const batchUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`;
-  const res = await fetch(batchUrl, {
+  const res = await fetchWithRetry(batchUrl, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -558,7 +610,7 @@ async function syncOrderStatusesOnSheet(
 
 export async function executeOrderStatusSheetSync(options: { dryRun?: boolean } = {}): Promise<void> {
   const clientConfig = loadClientConfig();
-  const accessToken = await getValidAccessToken(clientConfig, SHEETS_TARGET_ACCOUNT);
+  const accessToken = await getValidAccessToken(clientConfig, SHEETS_TARGET_ACCOUNT, { forceRefresh: true });
   const tabTitle = await resolveTabTitle(accessToken, SPREADSHEET_ID, TARGET_GID);
   console.log(`Đang cập nhật trạng thái Order trong Sheet "${tabTitle}" (cột B -> AI)...`);
   await syncOrderStatusesOnSheet(accessToken, tabTitle, options);
@@ -580,33 +632,75 @@ export async function executeSyncCycle(options: {
   console.log(`📧 Tài khoản ĐỌC GMAIL:  ${GMAIL_SOURCE_ACCOUNT}`);
   console.log(`📊 Tài khoản GHI SHEET:   ${SHEETS_TARGET_ACCOUNT}`);
 
-  const clientConfig = loadClientConfig();
   const state = loadSyncState();
-  const sheetsToken = await getValidAccessToken(clientConfig, SHEETS_TARGET_ACCOUNT);
+  const runWaitMs = getMinimumRunWaitMs(state.lastRunTimestamp);
+  if (runWaitMs > 0) {
+    console.log(`- Giãn cách tối thiểu v1.02: chờ ${Math.ceil(runWaitMs / 1_000)}s trước chu kỳ tiếp theo.`);
+    await new Promise(resolve => setTimeout(resolve, runWaitMs));
+  }
+
+  const wasFirstRunCompleted = state.firstRunCompleted;
+  const hadPendingQueue = state.pendingMessageIds.length > 0;
+  const isInitialFullScan = !wasFirstRunCompleted;
+  const isIncrementalDiscovery = wasFirstRunCompleted && !hadPendingQueue;
+  const isLegacyMigration = state.needsBufferMigration && wasFirstRunCompleted && !hadPendingQueue;
+  state.syncVersion = GMAIL_SYNC_INTERFACE_VERSION;
+  console.log(`- Interface sync: ${GMAIL_SYNC_INTERFACE_VERSION}`);
+
+  const clientConfig = loadClientConfig();
+  const sheetsToken = await getValidAccessToken(clientConfig, SHEETS_TARGET_ACCOUNT, { forceRefresh: true });
   const tabTitle = await resolveTabTitle(sheetsToken, SPREADSHEET_ID, TARGET_GID);
   await syncOrderStatusesOnSheet(sheetsToken, tabTitle, options);
 
-  const bufferSize = options.bufferSize || state.bufferSize || 4;
+  const configuredBufferSize = options.bufferSize ?? (
+    state.firstRunCompleted
+      ? getIncrementalBufferSize(state.lastRunTimestamp)
+      : state.bufferSize || GMAIL_MAX_MESSAGES_PER_RUN
+  );
+  const bufferSize = Math.min(Math.max(1, configuredBufferSize), GMAIL_MAX_MESSAGES_PER_RUN);
   state.bufferSize = bufferSize;
 
   console.log(`- Trạng thái: ${state.firstRunCompleted ? "Chạy định kỳ (Incremental với Bộ đệm)" : "Lần chạy đầu tiên (Full Scan từ 01/09)"}`);
   console.log(`- Kích thước bộ đệm (Buffer Size): ${bufferSize} email (cấu hình qua cờ --buffer=<số>)`);
 
   // 1. Xác định Query Gmail
-  let gmailQuery = 'from:shein (subject:"shipped" OR subject:"order")';
+  let gmailQuery = DEFAULT_GMAIL_ORDER_QUERY;
   if (!state.firstRunCompleted) {
     gmailQuery += " after:2026/08/31";
+  } else if (isLegacyMigration) {
+    gmailQuery = getLegacyMigrationQuery(gmailQuery, state.lastRunTimestamp);
+    console.log(`- Migrate state v1.01 -> ${GMAIL_SYNC_INTERFACE_VERSION}: chỉ rà tối đa ${GMAIL_MAX_MESSAGES_PER_RUN} email gần nhất.`);
   }
 
   // 2. Thu thập email từ tài khoản Gmail luongbui25072008@gmail.com
   console.log(`\n[Bước 1] Đang đọc hộp thư Gmail của: ${GMAIL_SOURCE_ACCOUNT}...`);
-  const gmailAccessToken = await getValidAccessToken(clientConfig, GMAIL_SOURCE_ACCOUNT);
+  const gmailAccessToken = await getValidAccessToken(clientConfig, GMAIL_SOURCE_ACCOUNT, { forceRefresh: true });
 
   let newMessages: Array<{ id: string }> = [];
   let bufferMessages: Array<{ id: string }> = [];
   let messagesToFetch: Array<{ id: string }> = [];
+  let pendingAfterBatch: string[] = [];
 
-  if (state.firstRunCompleted && state.lastProcessedMessageIds.length > 0) {
+  if (state.pendingMessageIds.length > 0) {
+    const pendingBatch = splitMessageBatch(state.pendingMessageIds);
+    pendingAfterBatch = pendingBatch.pending;
+    newMessages = pendingBatch.batch.map(id => ({ id }));
+    messagesToFetch = newMessages;
+    console.log(`- Tiếp tục hàng đợi ${state.firstRunCompleted ? "incremental" : "full scan"}: xử lý ${messagesToFetch.length} email, còn ${pendingBatch.pending.length} email.`);
+
+  } else if (isLegacyMigration) {
+    const migrationMessages = await fetchAllMessagesMatchingQuery(
+      gmailAccessToken,
+      gmailQuery,
+      GMAIL_MAX_MESSAGES_PER_RUN
+    );
+    newMessages = [];
+    bufferMessages = migrationMessages;
+    messagesToFetch = migrationMessages;
+    pendingAfterBatch = [];
+    console.log(`- Migration buffer: kiểm tra ${messagesToFetch.length} email gần lần chạy v1.01, gồm cả Spam/Trash.`);
+
+  } else if (state.firstRunCompleted && state.lastProcessedMessageIds.length > 0) {
     console.log(`- Nạp ${state.lastProcessedMessageIds.length} ID mốc đệm từ lần chạy trước: ${state.lastProcessedMessageIds.join(", ")}`);
     const fetched = await fetchMessagesWithBufferStrategy(
       gmailAccessToken,
@@ -614,27 +708,43 @@ export async function executeSyncCycle(options: {
       state.lastProcessedMessageIds,
       bufferSize
     );
-    newMessages = fetched.newMessages;
-    bufferMessages = fetched.bufferMessages;
-    messagesToFetch = fetched.allMessages;
+    if (!fetched.anchorFound) {
+      throw new Error(`Không tìm thấy mốc đệm trong ${GMAIL_MAX_DISCOVERY_MESSAGES} email đầu; dừng để tránh bỏ sót. Chỉ dùng --reset khi muốn full scan có chủ đích.`);
+    }
+
+    const selected = selectIncrementalBatch(fetched.newMessages, fetched.bufferMessages);
+    const newMessageIds = new Set(fetched.newMessages.map(message => message.id));
+    const bufferMessageIds = new Set(fetched.bufferMessages.map(message => message.id));
+    newMessages = selected.batch.filter(message => newMessageIds.has(message.id));
+    bufferMessages = selected.batch.filter(message => bufferMessageIds.has(message.id));
+    messagesToFetch = selected.batch;
+    pendingAfterBatch = selected.pending.map(message => message.id);
 
     console.log(`\n----------------------------------------------------------------`);
     console.log(`📦 KẾT QUẢ PHÂN TÁCH BỘ ĐỆM:`);
-    console.log(`  * Số email MỚI phát hiện:        ${newMessages.length}`);
+    console.log(`  * Số email MỚI phát hiện:        ${fetched.newMessages.length}`);
+    console.log(`  * Số email MỚI xử lý trong batch: ${newMessages.length}`);
     console.log(`  * Số email ĐỆM cần kiểm tra lại: ${bufferMessages.length}`);
     console.log(`  * Tổng số email cần xử lý:      ${messagesToFetch.length}`);
     console.log(`----------------------------------------------------------------`);
   } else {
     // Lần đầu tiên: Full scan
-    const all = await fetchAllMessagesMatchingQuery(gmailAccessToken, gmailQuery, 250);
-    newMessages = all;
+    const all = await fetchAllMessagesMatchingQuery(gmailAccessToken, gmailQuery);
+    const initialBatch = splitMessageBatch(all);
+    state.pendingMessageIds = all.map(message => message.id);
+    if (state.lastProcessedMessageIds.length === 0) {
+      state.lastProcessedMessageIds = all.slice(0, bufferSize).map(message => message.id);
+    }
+    pendingAfterBatch = initialBatch.pending.map(message => message.id);
+    newMessages = initialBatch.batch;
     bufferMessages = [];
-    messagesToFetch = all;
-    console.log(`- Quét toàn bộ: tìm thấy ${all.length} email SHEIN từ 01/09.`);
+    messagesToFetch = initialBatch.batch;
+    console.log(`- Quét danh sách: tìm thấy ${all.length} email SHEIN từ 01/09; xử lý ${messagesToFetch.length}, còn ${pendingAfterBatch.length}.`);
   }
 
   if (messagesToFetch.length === 0) {
     console.log("Không có email nào cần xử lý. Kết thúc chu kỳ.");
+    if (!options.dryRun) saveSyncState(state);
     return;
   }
 
@@ -770,23 +880,40 @@ export async function executeSyncCycle(options: {
 
   // 8. LƯU BỘ ĐỆM MỚI CHO CHU KỲ TIẾP THEO
   // Lấy N email mới nhất từ danh sách đã xử lý (đã sắp xếp theo thời gian mới nhất trước)
-  const newestProcessedOrders = allOrders.slice(0, bufferSize);
-  const nextBufferMessages: BufferMessageInfo[] = newestProcessedOrders.map(o => ({
-    id: o.messageId || "",
-    orderNumber: o.orderNumber,
-    trackingNumber: o.trackingNumber,
-    deliveryCompany: o.deliveryCompany,
-    providerId: o.providerId,
-    subject: o.subject,
-    date: o.date
-  })).filter(b => b.id.length > 0);
+  state.pendingMessageIds = pendingAfterBatch;
+  const scanComplete = state.pendingMessageIds.length === 0;
+  const ordersByMessageId = new Map(
+    allOrders
+      .filter(order => Boolean(order.messageId))
+      .map(order => [order.messageId as string, order] as const)
+  );
+  const nextBufferMessages: BufferMessageInfo[] = messagesToFetch
+    .slice(0, bufferSize)
+    .map(message => {
+      const order = ordersByMessageId.get(message.id);
+      return {
+        id: message.id,
+        orderNumber: order?.orderNumber,
+        trackingNumber: order?.trackingNumber,
+        deliveryCompany: order?.deliveryCompany,
+        providerId: order?.providerId,
+        subject: order?.subject,
+        date: order?.date
+      };
+    });
 
   if (!options.dryRun) {
-    state.firstRunCompleted = true;
+    state.needsBufferMigration = false;
+    state.firstRunCompleted = isInitialFullScan ? scanComplete : true;
     state.bufferSize = bufferSize;
     state.lastRunTimestamp = new Date().toISOString();
-    state.lastProcessedMessageIds = nextBufferMessages.map(b => b.id);
-    state.lastBufferMessages = nextBufferMessages;
+    if (isIncrementalDiscovery) {
+      state.lastProcessedMessageIds = nextBufferMessages.map(b => b.id);
+      state.lastBufferMessages = nextBufferMessages;
+    } else if (isInitialFullScan && state.lastBufferMessages.length === 0) {
+      state.lastProcessedMessageIds = nextBufferMessages.map(b => b.id);
+      state.lastBufferMessages = nextBufferMessages;
+    }
     state.history.unshift({
       timestamp: new Date().toISOString(),
       bufferSizeUsed: bufferSize,
@@ -799,6 +926,10 @@ export async function executeSyncCycle(options: {
     });
     if (state.history.length > 50) state.history.pop();
     saveSyncState(state);
+  }
+
+  if (!scanComplete) {
+    console.log(`Còn ${state.pendingMessageIds.length} email trong hàng đợi; chạy lại lệnh manual để tiếp tục.`);
   }
 
   console.log(`\n================================================================`);
@@ -837,6 +968,7 @@ async function main() {
   const args = process.argv.slice(2);
   const isSchedule = args.includes("--schedule");
   const isStatusOnly = args.includes("--status-only");
+  const isVersion = args.includes("--version");
   const isDryRun = args.includes("--dry-run");
   const isReset = args.includes("--reset");
 
@@ -862,12 +994,16 @@ async function main() {
     console.log("🔄 Đặt lại trạng thái đồng bộ (Reset state về lần chạy đầu tiên)...");
     const state = loadSyncState();
     state.firstRunCompleted = false;
+    state.pendingMessageIds = [];
     state.lastProcessedMessageIds = [];
     state.lastBufferMessages = [];
+    state.syncVersion = GMAIL_SYNC_INTERFACE_VERSION;
     saveSyncState(state);
   }
 
-  if (isStatusOnly) {
+  if (isVersion) {
+    console.log(GMAIL_SYNC_INTERFACE_VERSION);
+  } else if (isStatusOnly) {
     await executeOrderStatusSheetSync({ dryRun: isDryRun });
   } else if (isSchedule) {
     startSchedule(intervalHours, { dryRun: isDryRun, bufferSize });

@@ -6,6 +6,7 @@ import { URL } from "node:url";
 import { extractEmailOrderDetails, formatOrderDisplayText, type ExtractedEmailOrder } from "./email-order-extractor.mts";
 
 const SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"];
+export const DEFAULT_GMAIL_ORDER_QUERY = 'in:anywhere from:shein (subject:"shipped" OR subject:"order")';
 const REPO_ROOT = process.cwd();
 const OAUTH_DIR = path.join(REPO_ROOT, "OauthGoogle");
 const TOKEN_PATH = path.join(OAUTH_DIR, "gmail-token.json");
@@ -174,13 +175,17 @@ async function refreshAccessToken(client: OAuthClientConfig, token: StoredToken,
 /**
  * Đảm bảo access token hợp lệ cho một tài khoản
  */
-export async function getValidAccessToken(client: OAuthClientConfig, accountEmail?: string): Promise<string> {
+export async function getValidAccessToken(
+  client: OAuthClientConfig,
+  accountEmail?: string,
+  options: { forceRefresh?: boolean } = {}
+): Promise<string> {
   const token = loadStoredToken(accountEmail);
   if (!token) {
     throw new Error(`Chưa có token xác thực cho ${accountEmail ?? "tài khoản này"}.`);
   }
 
-  if (token.expiry_date && token.expiry_date > Date.now() + 60_000) {
+  if (!options.forceRefresh && token.expiry_date && token.expiry_date > Date.now() + 60_000) {
     return token.access_token;
   }
 
@@ -329,7 +334,7 @@ function extractBodyContent(payload: GmailMessageDetail["payload"]): { rawText: 
  */
 async function fetchAndExtractGmailOrders(
   accessToken: string,
-  query = 'from:shein (subject:"shipped" OR subject:"order")',
+  query = DEFAULT_GMAIL_ORDER_QUERY,
   maxResults = 10
 ): Promise<Array<{ id: string; subject: string; date: string; order: ExtractedEmailOrder }>> {
   const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=${maxResults}`;
@@ -389,7 +394,7 @@ async function main() {
   const isListAccounts = args.includes("--list-accounts") || args.includes("--accounts");
   const accountArg = args.find(a => a.startsWith("--account="))?.split("=")[1];
   const emailArg = args.find(a => a.startsWith("--email="))?.split("=")[1];
-  const queryArg = args.find(a => a.startsWith("--query="))?.split("=")[1] || 'from:shein (subject:"shipped" OR subject:"order")';
+  const queryArg = args.find(a => a.startsWith("--query="))?.split("=")[1] || DEFAULT_GMAIL_ORDER_QUERY;
   const maxArg = parseInt(args.find(a => a.startsWith("--max="))?.split("=")[1] || "5", 10);
 
   if (isListAccounts) {

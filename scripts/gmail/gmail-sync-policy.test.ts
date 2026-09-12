@@ -9,6 +9,8 @@ import {
   getLegacyMigrationQuery,
   getMinimumRunWaitMs,
   getRetryDelayMs,
+  needsSyncMigration,
+  selectCheckpointMessageIds,
   selectIncrementalBatch,
   shouldFillBlankSheetCell,
   splitMessageBatch
@@ -23,8 +25,8 @@ describe('Gmail sync safety policy', () => {
     });
   });
 
-  it('identifies the v1.02 incremental sync interface', () => {
-    expect(GMAIL_SYNC_INTERFACE_VERSION).toBe('v1.02');
+  it('identifies the v1.03 incremental sync interface', () => {
+    expect(GMAIL_SYNC_INTERFACE_VERSION).toBe('v1.03');
     expect(GMAIL_DEFAULT_INCREMENTAL_BUFFER_SIZE).toBe(20);
   });
 
@@ -51,11 +53,24 @@ describe('Gmail sync safety policy', () => {
     expect(getMinimumRunWaitMs(new Date(lastRun - 20_000).toISOString(), now)).toBe(0);
   });
 
-  it('limits legacy state migration to the day before the previous run', () => {
+  it('limits legacy state migration to the previous 72 hours', () => {
     expect(getLegacyMigrationQuery(
       'in:anywhere from:shein',
       '2026-09-11T10:14:11.950Z'
-    )).toBe('in:anywhere from:shein after:2026/09/10');
+    )).toBe('in:anywhere from:shein after:2026/09/08');
+  });
+
+  it('migrates an older state even when its old flag is false', () => {
+    expect(needsSyncMigration('v1.02', false)).toBe(true);
+    expect(needsSyncMigration('v1.03', false)).toBe(false);
+  });
+
+  it('checkpoints the newest discovered messages even when older messages remain pending', () => {
+    const discovered = Array.from({ length: 60 }, (_, index) => ({ id: "message-" + (index + 1) }));
+
+    expect(selectCheckpointMessageIds(discovered, 20)).toEqual(
+      discovered.slice(0, 20).map(message => message.id)
+    );
   });
 
   it('keeps the overlap inside the 50-email processing cap and preserves new mail', () => {

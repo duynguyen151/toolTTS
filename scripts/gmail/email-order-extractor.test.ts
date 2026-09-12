@@ -34,6 +34,42 @@ describe("Email Order Extractor & Buffer Details", () => {
     expect(extracted.providerId).toBe("7325327335803406082");
   });
 
+  it("extracts USPS tracking from the HTML link used by SHEIN", () => {
+    const html = ["Order number: GSU1S3581000JP5 Tracking number <a href=\"https://tools.usps.com/go/TrackConfirmAction?tLabels=9261290347969270498397\">9261290347969270498397</a> View Details on USPS Delivery company:", "<a>USPS</a>", "View Details"].join("\n");
+
+    const extracted = extractEmailOrderDetails("", html);
+
+    expect(extracted.orderNumber).toBe("GSU1S3581000JP5");
+    expect(extracted.trackingNumber).toBe("9261290347969270498397");
+    expect(extracted.deliveryCompany).toBe("USPS");
+  });
+
+  it("extracts YunExpress tracking without requiring a colon", () => {
+    const rawText = "Order number: GSU1S417N00M6XA Tracking number YT2625401001269647 View Details on YunExpress Delivery company: YunExpress";
+
+    const extracted = extractEmailOrderDetails(rawText);
+
+    expect(extracted.orderNumber).toBe("GSU1S417N00M6XA");
+    expect(extracted.trackingNumber).toBe("YT2625401001269647");
+    expect(extracted.deliveryCompany).toBe("YunExpress");
+  });
+
+  it("parses HTML when Gmail places it in the raw body field", () => {
+    const htmlBody = [
+      "Order number: GSU1S446N000ACN Tracking number",
+      "<a href=\"https://tools.usps.com/go/TrackConfirmAction?tLabels=9361210739100038934120\">9361210739100038934120</a>",
+      "Delivery company:",
+      "<a>USPS</a>",
+      "View Details"
+    ].join("\n");
+
+    const extracted = extractEmailOrderDetails(htmlBody);
+
+    expect(extracted.orderNumber).toBe("GSU1S446N000ACN");
+    expect(extracted.trackingNumber).toBe("9361210739100038934120");
+    expect(extracted.deliveryCompany).toBe("USPS");
+  });
+
   it("handles order confirmation emails with no tracking yet", () => {
     const rawText = `
       Hi Alice,

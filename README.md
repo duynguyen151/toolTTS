@@ -196,8 +196,15 @@ pnpm shop-health -- cotik-tracking stage `
 
 ### Gmail → Sheet
 
+The Gmail reader uses interface `v1.03` by default. Requests such as “đọc Gmail”,
+“đọc mail”, or “đọc mail điền tracking” use the same incremental command; no
+full historical scan is started unless `--reset` is requested. Spam and Trash
+remain included through the `in:anywhere` Gmail query.
+
 ```powershell
 pnpm sync:shein-sheets
+pnpm read:gmail
+pnpm read:gmail:tracking
 pnpm sync:shein-sheets:schedule
 pnpm sync:shein-sheets --status-only
 pnpm sync:shein-sheets --status-only --dry-run

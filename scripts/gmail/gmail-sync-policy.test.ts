@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   GMAIL_DEFAULT_INCREMENTAL_BUFFER_SIZE,
+  GMAIL_MAX_DISCOVERY_MESSAGES,
   GMAIL_MIN_RUN_INTERVAL_MS,
+  GMAIL_MIN_REQUEST_INTERVAL_MS,
   GMAIL_MAX_MESSAGES_PER_RUN,
   GMAIL_SYNC_INTERFACE_VERSION,
   getIncrementalBufferSize,
@@ -13,6 +15,7 @@ import {
   selectCheckpointMessageIds,
   selectIncrementalBatch,
   shouldFillBlankSheetCell,
+  shouldRunOrderStatusSync,
   splitMessageBatch
 } from './gmail-sync-policy.mts';
 
@@ -25,9 +28,11 @@ describe('Gmail sync safety policy', () => {
     });
   });
 
-  it('identifies the v1.03 incremental sync interface', () => {
-    expect(GMAIL_SYNC_INTERFACE_VERSION).toBe('v1.03');
+  it('identifies the v1.04 incremental sync interface', () => {
+    expect(GMAIL_SYNC_INTERFACE_VERSION).toBe('v1.04');
     expect(GMAIL_DEFAULT_INCREMENTAL_BUFFER_SIZE).toBe(20);
+    expect(GMAIL_MAX_DISCOVERY_MESSAGES).toBeGreaterThanOrEqual(1_223);
+    expect(GMAIL_MIN_REQUEST_INTERVAL_MS).toBe(100);
   });
 
   it('keeps retry delay between 30 and 60 seconds', () => {
@@ -62,7 +67,8 @@ describe('Gmail sync safety policy', () => {
 
   it('migrates an older state even when its old flag is false', () => {
     expect(needsSyncMigration('v1.02', false)).toBe(true);
-    expect(needsSyncMigration('v1.03', false)).toBe(false);
+    expect(needsSyncMigration('v1.03', false)).toBe(true);
+    expect(needsSyncMigration('v1.04', false)).toBe(false);
   });
 
   it('checkpoints the newest discovered messages even when older messages remain pending', () => {
@@ -86,5 +92,10 @@ describe('Gmail sync safety policy', () => {
   it('does not overwrite a non-empty Sheet cell', () => {
     expect(shouldFillBlankSheetCell('Kh hủy được', 'GFUS01072087982467')).toBe(false);
     expect(shouldFillBlankSheetCell('', 'GFUS01072087982467')).toBe(true);
+  });
+
+  it('does not repeat order-status sync while a Gmail queue is pending', () => {
+    expect(shouldRunOrderStatusSync(false)).toBe(true);
+    expect(shouldRunOrderStatusSync(true)).toBe(false);
   });
 });

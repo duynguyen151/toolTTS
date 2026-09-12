@@ -36,7 +36,7 @@ Keep extraction, normalization, persistence, domain decisions, and presentation 
 - Store timestamps in UTC and keep display-time-zone conversion in presentation code.
 - Never persist cookies, tokens, browser storage, buyer names, contact details, or shipping addresses.
 - Never enable/disable Holiday Mode or perform another Seller Center write without explicit user authorization and an approved, auditable implementation.
-- Cotik tracking write operations are allowed ONLY when: (1) kill switch `cotikPostEnabled` is explicitly true; (2) tracking resolves to a MATCHED carrier rule in `cotik_provider_rules`; (3) intents are fingerprinted and confirmed by readback; (4) max 3 attempts per intent; (5) max 50 orders per batch; (6) kill switch resets to OFF upon every new deployment. AI must never decide or trigger writes; automatic enabling of kill switch is prohibited.
+- Cotik tracking write operations are allowed ONLY when: (1) both `cotikSyncEnabled` and `cotikPostEnabled` are explicitly true; (2) the explicit provider exactly matches one active provider in `cotik_provider_catalog` and has a `providerId`; (3) intents are fingerprinted and confirmed by readback; (4) max 3 attempts per intent; (5) max 50 orders per batch; (6) kill switches reset to OFF upon every new deployment. AI must never decide or trigger writes; automatic enabling of kill switches is prohibited.
 - Database schema changes require a Drizzle migration and schema validation.
 - Run the narrowest relevant tests during iteration, then typecheck, full tests, and build before claiming completion.
 

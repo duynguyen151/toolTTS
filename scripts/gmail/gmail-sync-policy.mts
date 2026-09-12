@@ -1,13 +1,13 @@
-export const GMAIL_SYNC_INTERFACE_VERSION = 'v1.03';
+export const GMAIL_SYNC_INTERFACE_VERSION = 'v1.04';
 export const GMAIL_INCREMENTAL_BACKFILL_HOURS = 72;
 export const GMAIL_MAX_MESSAGES_PER_RUN = 50;
-export const GMAIL_MAX_DISCOVERY_MESSAGES = 1_000;
+export const GMAIL_MAX_DISCOVERY_MESSAGES = 5_000;
 export const GMAIL_LIST_PAGE_SIZE = 50;
 export const GMAIL_DEFAULT_INCREMENTAL_BUFFER_SIZE = 20;
 export const GMAIL_EXTENDED_INCREMENTAL_BUFFER_SIZE = 30;
 export const GMAIL_MAX_INCREMENTAL_BUFFER_SIZE = 50;
 export const GMAIL_MIN_RUN_INTERVAL_MS = 15_000;
-export const GMAIL_MIN_REQUEST_INTERVAL_MS = 1_500;
+export const GMAIL_MIN_REQUEST_INTERVAL_MS = 100;
 export const GMAIL_RETRY_MIN_DELAY_MS = 30_000;
 export const GMAIL_RETRY_MAX_DELAY_MS = 60_000;
 export const GMAIL_MAX_RETRIES = 3;
@@ -121,6 +121,10 @@ export function isGoogleRateLimitResponse(status: number, body: string): boolean
 
 export function shouldFillBlankSheetCell(currentValue: string, nextValue: string): boolean {
   return currentValue.trim().length === 0 && nextValue.trim().length > 0;
+}
+
+export function shouldRunOrderStatusSync(hasPendingGmailQueue: boolean): boolean {
+  return !hasPendingGmailQueue;
 }
 
 let requestQueue = Promise.resolve();

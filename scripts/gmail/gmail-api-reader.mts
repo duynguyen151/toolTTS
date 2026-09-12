@@ -6,7 +6,7 @@ import { URL } from "node:url";
 import { extractEmailOrderDetails, formatOrderDisplayText, type ExtractedEmailOrder } from "./email-order-extractor.mts";
 
 const SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"];
-export const DEFAULT_GMAIL_ORDER_QUERY = 'in:anywhere from:shein (subject:"shipped" OR subject:"order")';
+export const DEFAULT_GMAIL_ORDER_QUERY = 'in:anywhere from:shein';
 const REPO_ROOT = process.cwd();
 const OAUTH_DIR = path.join(REPO_ROOT, "OauthGoogle");
 const TOKEN_PATH = path.join(OAUTH_DIR, "gmail-token.json");

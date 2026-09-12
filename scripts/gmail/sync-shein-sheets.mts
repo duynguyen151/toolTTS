@@ -1,8 +1,25 @@
 import fs from "node:fs";
 import path from "node:path";
-import { closeDatabase, createDatabase, listCotikOrderStatusesByIds } from "../../packages/db/src/index.ts";
+import { closeDatabase, createDatabase, listCotikOrderStatusesByIds, listProviderCatalog } from "../../packages/db/src/index.ts";
 import { extractEmailOrderDetails, type ExtractedEmailOrder } from "./email-order-extractor.mts";
 import { DEFAULT_GMAIL_ORDER_QUERY, getSavedAccounts, getValidAccessToken } from "./gmail-api-reader.mts";
+import {
+  beginGmailSyncReport,
+  buildGmailSheetReportBatch,
+  confirmGmailSheetReadback,
+  confirmGmailSheetWrites,
+  completeGmailSyncReport,
+  createGmailSyncReport,
+  GMAIL_SYNC_REPORT_VERSION,
+  mergeGmailSyncReportBatch,
+  type CotikProviderForReport,
+  type GmailSheetReportCandidate,
+  type GmailSheetExpectedWrite,
+  type GmailSheetSkippedCandidate,
+  type GmailSheetUpdateCandidate,
+  type GmailSheetWriteConfirmation,
+  type GmailSyncReport
+} from "./gmail-sync-report.mts";
 import {
   GMAIL_LIST_PAGE_SIZE,
   GMAIL_DEFAULT_INCREMENTAL_BUFFER_SIZE,
@@ -20,6 +37,7 @@ import {
   selectCheckpointMessageIds,
   selectIncrementalBatch,
   shouldFillBlankSheetCell,
+  shouldRunOrderStatusSync,
   splitMessageBatch
 } from "./gmail-sync-policy.mts";
 import {
@@ -33,6 +51,7 @@ const REPO_ROOT = process.cwd();
 const OAUTH_DIR = path.join(REPO_ROOT, "OauthGoogle");
 const STATE_DIR = path.join(OAUTH_DIR, "state");
 const STATE_PATH = path.join(STATE_DIR, "sync-shein-state.json");
+const REPORT_PATH = path.join(STATE_DIR, "gmail-sync-v1.04-report.json");
 
 const SPREADSHEET_ID = "1iK2aYwqRc_V6Yfxtj63bpGwA929oqJ0IrTPZgfaiOu8";
 const TARGET_GID = "1844977739";
@@ -199,6 +218,54 @@ async function loadOrderStatuses(orderIds: readonly string[]): Promise<Map<strin
     return statuses;
   } finally {
     await closeDatabase(context);
+  }
+}
+
+async function loadCotikProviders(): Promise<CotikProviderForReport[]> {
+  try {
+    process.loadEnvFile(path.join(REPO_ROOT, ".env"));
+  } catch {}
+  const databaseUrl = process.env.DATABASE_URL?.trim() || process.env.SUPABASE_DATABASE_URL?.trim();
+  if (!databaseUrl) throw new Error("DATABASE_URL is required to validate Cotik providers");
+  const context = createDatabase(databaseUrl);
+  try {
+    return await listProviderCatalog(context.db, "US");
+  } finally {
+    await closeDatabase(context);
+  }
+}
+
+function loadGmailSyncReport(mode: "FULL" | "INCREMENTAL", startedAt: string): GmailSyncReport {
+  if (fs.existsSync(REPORT_PATH)) {
+    try {
+      const report = JSON.parse(fs.readFileSync(REPORT_PATH, "utf8")) as GmailSyncReport;
+      return beginGmailSyncReport(report, mode, startedAt);
+    } catch {}
+  }
+  return createGmailSyncReport(mode, startedAt);
+}
+
+function saveGmailSyncReport(report: GmailSyncReport): void {
+  fs.mkdirSync(STATE_DIR, { recursive: true });
+  fs.writeFileSync(REPORT_PATH, JSON.stringify(report, null, 2), "utf8");
+}
+
+function printTrackingReport(title: string, entries: readonly GmailSyncReport["trackingWritten"][number][]): void {
+  console.log(`\n${title}: ${entries.length} dòng`);
+  if (entries.length === 0) {
+    console.log("- Không có dòng tracking mới được điền.");
+    return;
+  }
+  for (const entry of entries) {
+    console.log(`- Dòng ${entry.rowNumber} | Order: ${entry.orderNumber} | Track: ${entry.trackingNumber} | Provider: ${entry.provider || "[Trống]"} | Provider ID: ${entry.providerId ?? "N/A"} | Gmail: ${entry.messageId ?? "N/A"} | ${entry.statusLabel}`);
+  }
+}
+
+function printReportGroup(title: string, entries: readonly GmailSyncReport["trackingWritten"][number][]): void {
+  if (entries.length === 0) return;
+  console.log(`\n${title}: ${entries.length} dòng`);
+  for (const entry of entries) {
+    console.log(`- Dòng ${entry.rowNumber} | Order: ${entry.orderNumber} | Track: ${entry.trackingNumber} | Provider: ${entry.provider || "[Trống]"} | Gmail: ${entry.messageId ?? "N/A"} | ${entry.statusLabel}`);
   }
 }
 
@@ -538,35 +605,35 @@ async function updateSheetRows(
   accessToken: string,
   spreadsheetId: string,
   tabTitle: string,
-  updates: Array<{
-    rowNumber: number;
-    trackingNumber: string;
-    deliveryCompany: string;
-    oldTracking: string;
-    oldProvider: string;
-  }>
-): Promise<number> {
-  if (updates.length === 0) return 0;
+  updates: GmailSheetUpdateCandidate[]
+): Promise<GmailSheetWriteConfirmation[]> {
+  if (updates.length === 0) return [];
 
-  const dataPayload = [];
+  const writes: Array<GmailSheetExpectedWrite & { range: string; values: string[][] }> = [];
   for (const up of updates) {
     // Cập nhật Cột Z
     if (shouldFillBlankSheetCell(up.oldTracking, up.trackingNumber)) {
-      dataPayload.push({
+      writes.push({
+        rowNumber: up.rowNumber,
+        column: "Z",
+        value: up.trackingNumber,
         range: `'${tabTitle}'!Z${up.rowNumber}`,
         values: [[up.trackingNumber]]
       });
     }
     // Cập nhật Cột AC
     if (shouldFillBlankSheetCell(up.oldProvider, up.deliveryCompany)) {
-      dataPayload.push({
+      writes.push({
+        rowNumber: up.rowNumber,
+        column: "AC",
+        value: up.deliveryCompany,
         range: `'${tabTitle}'!AC${up.rowNumber}`,
         values: [[up.deliveryCompany]]
       });
     }
   }
 
-  if (dataPayload.length === 0) return 0;
+  if (writes.length === 0) return [];
 
   const batchUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`;
   const res = await fetchWithRetry(batchUrl, {
@@ -577,7 +644,8 @@ async function updateSheetRows(
     },
     body: JSON.stringify({
       valueInputOption: "RAW",
-      data: dataPayload
+      includeValuesInResponse: true,
+      data: writes.map(({ range, values }) => ({ range, values }))
     })
   });
 
@@ -586,7 +654,23 @@ async function updateSheetRows(
     throw new Error(`Google Sheets batchUpdate failed: ${err}`);
   }
 
-  return updates.length;
+  const response = await res.json() as { responses?: Array<{ updatedRange?: unknown; updatedCells?: unknown }> };
+  confirmGmailSheetWrites(
+    writes.map(({ rowNumber, column }) => ({ rowNumber, column })),
+    response.responses
+  );
+
+  const readbackUrl = new URL(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchGet`);
+  for (const write of writes) readbackUrl.searchParams.append("ranges", write.range);
+  const readbackResponse = await fetchWithRetry(readbackUrl.toString(), {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+  if (!readbackResponse.ok) {
+    const err = await readbackResponse.text();
+    throw new Error(`Google Sheets batchGet readback failed: ${err}`);
+  }
+  const readback = await readbackResponse.json() as { valueRanges?: Array<{ range?: unknown; values?: unknown }> };
+  return confirmGmailSheetReadback(writes, readback.valueRanges);
 }
 
 async function syncOrderStatusesOnSheet(
@@ -635,7 +719,7 @@ export async function executeSyncCycle(options: {
   const state = loadSyncState();
   const runWaitMs = getMinimumRunWaitMs(state.lastRunTimestamp);
   if (runWaitMs > 0) {
-    console.log(`- Giãn cách tối thiểu v1.03: chờ ${Math.ceil(runWaitMs / 1_000)}s trước chu kỳ tiếp theo.`);
+    console.log(`- Giãn cách tối thiểu ${GMAIL_SYNC_INTERFACE_VERSION}: chờ ${Math.ceil(runWaitMs / 1_000)}s trước chu kỳ tiếp theo.`);
     await new Promise(resolve => setTimeout(resolve, runWaitMs));
   }
 
@@ -649,7 +733,11 @@ export async function executeSyncCycle(options: {
   const clientConfig = loadClientConfig();
   const sheetsToken = await getValidAccessToken(clientConfig, SHEETS_TARGET_ACCOUNT, { forceRefresh: true });
   const tabTitle = await resolveTabTitle(sheetsToken, SPREADSHEET_ID, TARGET_GID);
-  await syncOrderStatusesOnSheet(sheetsToken, tabTitle, options);
+  if (shouldRunOrderStatusSync(hadPendingQueue)) {
+    await syncOrderStatusesOnSheet(sheetsToken, tabTitle, options);
+  } else {
+    console.log("- Bỏ qua đồng bộ trạng thái Order lặp lại vì hàng đợi Gmail vẫn đang xử lý.");
+  }
 
   const configuredBufferSize = options.bufferSize ?? (
     state.firstRunCompleted
@@ -702,7 +790,7 @@ export async function executeSyncCycle(options: {
     pendingAfterBatch = migrationBatch.pending.map(message => message.id);
     checkpointMessages = migrationMessages;
     shouldRefreshCheckpoint = true;
-    console.log(`- Backfill v1.03: kiểm tra tối đa ${messagesToFetch.length} email trong cửa sổ 72 giờ, còn ${pendingAfterBatch.length} email chờ lượt sau; gồm cả Spam/Trash.`);
+    console.log(`- Backfill ${GMAIL_SYNC_INTERFACE_VERSION}: kiểm tra tối đa ${messagesToFetch.length} email trong cửa sổ 72 giờ, còn ${pendingAfterBatch.length} email chờ lượt sau; gồm cả Spam/Trash.`);
 
   } else if (state.firstRunCompleted && state.lastProcessedMessageIds.length > 0) {
     console.log(`- Nạp ${state.lastProcessedMessageIds.length} ID mốc đệm từ lần chạy trước: ${state.lastProcessedMessageIds.join(", ")}`);
@@ -823,14 +911,9 @@ export async function executeSyncCycle(options: {
   }
 
   // 6. Đối chiếu với Cột Y trên Sheet và chuẩn bị danh sách cập nhật
-  const updatesToApply: Array<{
-    rowNumber: number;
-    orderNumber: string;
-    trackingNumber: string;
-    deliveryCompany: string;
-    oldTracking: string;
-    oldProvider: string;
-  }> = [];
+  const updatesToApply: GmailSheetUpdateCandidate[] = [];
+  const alreadyPresent: GmailSheetReportCandidate[] = [];
+  const skipped: GmailSheetSkippedCandidate[] = [];
 
   let matchedCount = 0;
 
@@ -847,6 +930,28 @@ export async function executeSyncCycle(options: {
       const needTrackingUpdate = Boolean(newTracking && (!row.trackingNumber || row.trackingNumber.trim().length === 0));
       const needProviderUpdate = Boolean(newProvider && (!row.deliveryCompany || row.deliveryCompany.trim().length === 0));
 
+      if (row.trackingNumber && newTracking && row.trackingNumber.toUpperCase() !== newTracking.toUpperCase()) {
+        skipped.push({
+          rowNumber: row.rowNumber,
+          orderNumber: row.orderNumber,
+          trackingNumber: newTracking,
+          provider: row.deliveryCompany || newProvider,
+          messageId: emailOrder.messageId ?? null,
+          reason: "TRACKING_CONFLICT"
+        });
+        continue;
+      }
+
+      if (row.trackingNumber && newTracking) {
+        alreadyPresent.push({
+          rowNumber: row.rowNumber,
+          orderNumber: row.orderNumber,
+          trackingNumber: row.trackingNumber,
+          provider: row.deliveryCompany || newProvider,
+          messageId: emailOrder.messageId ?? null
+        });
+      }
+
       if (needTrackingUpdate || needProviderUpdate) {
         updatesToApply.push({
           rowNumber: row.rowNumber,
@@ -854,7 +959,8 @@ export async function executeSyncCycle(options: {
           trackingNumber: newTracking,
           deliveryCompany: newProvider,
           oldTracking: row.trackingNumber,
-          oldProvider: row.deliveryCompany
+          oldProvider: row.deliveryCompany,
+          messageId: emailOrder.messageId ?? null
         });
       }
     }
@@ -873,10 +979,21 @@ export async function executeSyncCycle(options: {
   }
 
   // 7. Thực hiện ghi vào Google Sheets
+  const reportStartedAt = new Date().toISOString();
+  let report = options.dryRun
+    ? null
+    : loadGmailSyncReport(isInitialFullScan ? "FULL" : "INCREMENTAL", reportStartedAt);
+  const cotikProviders = options.dryRun
+    ? []
+    : report?.providerCatalog?.length
+      ? [...report.providerCatalog]
+      : await loadCotikProviders();
+  if (report && !report.providerCatalog?.length) report = { ...report, providerCatalog: cotikProviders };
+  let confirmedWrites: GmailSheetWriteConfirmation[] = [];
   if (!options.dryRun && updatesToApply.length > 0) {
     console.log(`\nĐang gửi yêu cầu ghi vào Google Sheets...`);
-    const updatedCount = await updateSheetRows(sheetsToken, SPREADSHEET_ID, tabTitle, updatesToApply);
-    console.log(`✅ [THÀNH CÔNG] Đã cập nhật thành công ${updatedCount} dòng vào Sheet "${tabTitle}"!`);
+    confirmedWrites = await updateSheetRows(sheetsToken, SPREADSHEET_ID, tabTitle, updatesToApply);
+    console.log(`✅ [THÀNH CÔNG] Đã xác nhận ${confirmedWrites.length} ô được cập nhật trong Sheet "${tabTitle}"!`);
   } else if (options.dryRun) {
     console.log(`\n[DRY RUN] Chế độ kiểm tra, không ghi vào Google Sheets.`);
   } else {
@@ -887,6 +1004,34 @@ export async function executeSyncCycle(options: {
   // Lấy N email mới nhất từ danh sách đã xử lý (đã sắp xếp theo thời gian mới nhất trước)
   state.pendingMessageIds = pendingAfterBatch;
   const scanComplete = state.pendingMessageIds.length === 0;
+  if (report) {
+    const batchReport = buildGmailSheetReportBatch(updatesToApply, confirmedWrites, alreadyPresent, skipped);
+    report = mergeGmailSyncReportBatch(
+      report,
+      batchReport,
+      cotikProviders,
+      reportStartedAt
+    );
+    if (scanComplete) report = completeGmailSyncReport(report, new Date().toISOString());
+    saveGmailSyncReport(report);
+    const batchKeys = new Set(batchReport.trackingWritten.map((entry) => `${entry.rowNumber}:${entry.trackingNumber}`));
+    printTrackingReport("[BÁO CÁO TRACKING VỪA ĐIỀN]", report.trackingWritten.filter((entry) => batchKeys.has(`${entry.rowNumber}:${entry.trackingNumber}`)));
+    const providerOnlyKeys = new Set(batchReport.providerOnlyWritten.map((entry) => `${entry.rowNumber}:${entry.trackingNumber}`));
+    const alreadyPresentKeys = new Set(batchReport.alreadyPresent.map((entry) => `${entry.rowNumber}:${entry.trackingNumber}`));
+    printReportGroup("[CHỈ ĐIỀN PROVIDER AC]", report.providerOnlyWritten.filter((entry) => providerOnlyKeys.has(`${entry.rowNumber}:${entry.trackingNumber}`)));
+    printReportGroup("[TRACKING Z ĐÃ CÓ TỪ TRƯỚC]", report.alreadyPresent.filter((entry) => alreadyPresentKeys.has(`${entry.rowNumber}:${entry.trackingNumber}`)));
+    if (scanComplete) {
+      printTrackingReport("[TỔNG HỢP TRACKING ĐÃ ĐIỀN - v1.04]", report.trackingWritten);
+      printTrackingReport("[DÒNG SẴN SÀNG ADD TRACK]", report.trackingWritten.filter((entry) => entry.status === "READY_TO_ADD_TRACK"));
+    }
+    if (report.skipped.length > 0) {
+      console.log(`\n[BỎ QUA DO XUNG ĐỘT TRACKING]: ${report.skipped.length} dòng`);
+      for (const entry of report.skipped) {
+        console.log(`- Dòng ${entry.rowNumber} | Order: ${entry.orderNumber} | Email track: ${entry.trackingNumber} | Gmail: ${entry.messageId ?? "N/A"} | ${entry.reason}`);
+      }
+    }
+    console.log(`- Báo cáo JSON: ${REPORT_PATH}`);
+  }
   const ordersByMessageId = new Map(
     allOrders
       .filter(order => Boolean(order.messageId))
@@ -999,11 +1144,13 @@ async function main() {
     console.log("🔄 Đặt lại trạng thái đồng bộ (Reset state về lần chạy đầu tiên)...");
     const state = loadSyncState();
     state.firstRunCompleted = false;
+    state.needsBufferMigration = false;
     state.pendingMessageIds = [];
     state.lastProcessedMessageIds = [];
     state.lastBufferMessages = [];
     state.syncVersion = GMAIL_SYNC_INTERFACE_VERSION;
     saveSyncState(state);
+    fs.rmSync(REPORT_PATH, { force: true });
   }
 
   if (isVersion) {

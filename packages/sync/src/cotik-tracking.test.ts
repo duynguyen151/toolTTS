@@ -46,6 +46,18 @@ describe("tracking staging boundary", () => {
     expect(mocks.createOrGetPostIntent).toHaveBeenCalledWith(tx, { ...input, accountId: "latest", providerId: "dhl" });
     expect(mocks.createTrackingCandidate).toHaveBeenCalledWith(tx, { ...input, accountId: "latest", providerId: "dhl" });
   });
+  it("accepts an unusual tracking value when the explicit provider matches the active catalog", async () => {
+    expect(await resolveCotikTrackingInput(db, { ...input, tracking: "876458058248" })).toMatchObject({
+      status: "RESOLVED",
+      input: { tracking: "876458058248", providerId: "dhl" }
+    });
+  });
+  it("normalizes case, whitespace, and punctuation before exact catalog matching", async () => {
+    expect(await resolveCotikTrackingInput(db, { ...input, provider: " d-h_l " })).toMatchObject({
+      status: "RESOLVED",
+      input: { providerId: "dhl" }
+    });
+  });
   it.each([null, { id: "shop", maShopNoiBo: "SHOP_1", region: "UK" }, { id: "shop", maShopNoiBo: "123", region: "US" }])("pauses absent/invalid/mismatched shop", async (shop) => {
     mocks.findCotikLogicalShopById.mockResolvedValue(shop);
     expect((await stageCotikTracking(db, input)).status).toBe("PAUSED");
@@ -76,6 +88,14 @@ describe("tracking staging boundary", () => {
   });
   it("refuses an explicit provider that is not in the active catalog", async () => {
     mocks.listProviderCatalog.mockResolvedValue([]);
+    expect((await stageCotikTracking(db, input)).status).toBe("PAUSED");
+    expect(mocks.createTrackingCandidate).not.toHaveBeenCalled();
+  });
+  it("refuses an ambiguous provider catalog match", async () => {
+    mocks.listProviderCatalog.mockResolvedValue([
+      { region: "UK", providerId: "dhl-1", carrierName: "DHL", isActive: true },
+      { region: "UK", providerId: "dhl-2", carrierName: "D-H-L", isActive: true }
+    ]);
     expect((await stageCotikTracking(db, input)).status).toBe("PAUSED");
     expect(mocks.createTrackingCandidate).not.toHaveBeenCalled();
   });

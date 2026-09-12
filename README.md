@@ -61,8 +61,9 @@ The following rules are part of the product boundary, not optional guidance:
   triggers a COTIK write.
 - Seller Center actions remain `DRY_RUN`; the project does not automate price,
   stock, promotion, listing, or Holiday Mode mutations.
-- A COTIK tracking POST requires explicit human enablement of
-  `cotikPostEnabled`, a valid sync/workflow state, a matched provider rule,
+- A COTIK tracking POST requires explicit human enablement of both
+  `cotikSyncEnabled` and `cotikPostEnabled`, a valid sync/workflow state, an
+  exact match to one active provider catalog entry with a `providerId`,
   fingerprinted intent, readback confirmation, at most three attempts per
   intent, and at most 50 orders per batch.
 - Kill switches default to OFF and reset to OFF on deployment changes.
@@ -196,10 +197,16 @@ pnpm shop-health -- cotik-tracking stage `
 
 ### Gmail → Sheet
 
-The Gmail reader uses interface `v1.03` by default. Requests such as “đọc Gmail”,
+The Gmail reader uses interface `v1.04` by default. Requests such as “đọc Gmail”,
 “đọc mail”, or “đọc mail điền tracking” use the same incremental command; no
 full historical scan is started unless `--reset` is requested. Spam and Trash
-remain included through the `in:anywhere` Gmail query.
+remain included through the `in:anywhere` Gmail query, and SHEIN messages are
+not filtered by subject.
+
+V1.04 reads explicitly labeled `Tracking number`, `Tracking ID`, and `Parcel ID`
+values without carrier-specific length inference. Provider names come from the
+email or tracking URL, then fall back to the existing Sheet AC value. Confirmed
+new Z writes are reported in `OauthGoogle/state/gmail-sync-v1.04-report.json`.
 
 ```powershell
 pnpm sync:shein-sheets

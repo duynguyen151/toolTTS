@@ -6,11 +6,11 @@ import {
   AUTO_TRACKING_CAPABILITY,
   AUTO_TRACKING_SCHEMA_VERSION,
   createAutoTrackingCapability
-} from "../apps/cli/src/cotik-tracking-workflow.js";
-import { parseAutoTrackingRequest, type AutoTrackingRequest } from "../apps/cli/src/cotik-tracking-contract.js";
-import { loadConfig, loadWorkspaceEnvironment } from "../apps/cli/src/config.js";
-import { toCliErrorPayload } from "../apps/cli/src/errors.js";
-import { createCliRuntime } from "../apps/cli/src/runtime.js";
+} from "../../apps/cli/src/cotik-tracking-workflow.js";
+import { parseAutoTrackingRequest, type AutoTrackingRequest } from "../../apps/cli/src/cotik-tracking-contract.js";
+import { loadConfig, loadWorkspaceEnvironment } from "../../apps/cli/src/config.js";
+import { toCliErrorPayload } from "../../apps/cli/src/errors.js";
+import { createCliRuntime } from "../../apps/cli/src/runtime.js";
 
 async function readRequest(): Promise<AutoTrackingRequest> {
   const chunks: string[] = [];
